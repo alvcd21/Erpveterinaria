@@ -13,6 +13,8 @@ import CashRegister from './pages/CashRegister';
 import Costs from './pages/Costs';
 import Login from './pages/Login';
 import AdminUsers from './pages/AdminUsers';
+import Packages from './pages/Packages';
+import AdminCashDashboard from './pages/AdminCashDashboard';
 
 const Placeholder = ({ title }: { title: string }) => (
   <div className="flex flex-col items-center justify-center h-96 text-slate-400">
@@ -37,6 +39,7 @@ const App: React.FC = () => {
                   {/* Rutas Protegidas por Permisos Específicos */}
                   <Route path="/pos" element={<ProtectedRoute requiredPermission="VER_POS"><POS /></ProtectedRoute>} />
                   <Route path="/clients" element={<ProtectedRoute requiredPermission="VER_CLIENTES"><Clients /></ProtectedRoute>} />
+                  <Route path="/packages" element={<ProtectedRoute requiredPermission="GESTIONAR_INVENTARIO"><Packages /></ProtectedRoute>} />
                   
                   <Route path="/providers" element={<ProtectedRoute requiredPermission="VER_PROVEEDORES"><Providers /></ProtectedRoute>} />
                   <Route path="/inventory" element={<ProtectedRoute requiredPermission="VER_INVENTARIO"><Inventory /></ProtectedRoute>} />
@@ -47,6 +50,7 @@ const App: React.FC = () => {
                   <Route path="/reports" element={<ProtectedRoute requiredPermission="VER_REPORTES"><Placeholder title="Reportes" /></ProtectedRoute>} />
                   
                   {/* Rutas de Administración */}
+                  <Route path="/admin/cash-dashboard" element={<ProtectedRoute requiredPermission="VER_ADMIN"><AdminCashDashboard /></ProtectedRoute>} />
                   <Route path="/admin/users" element={<ProtectedRoute requiredPermission="GESTIONAR_USUARIOS"><AdminUsers initialView="USERS" /></ProtectedRoute>} />
                   <Route path="/admin/employees" element={<ProtectedRoute requiredPermission="GESTIONAR_USUARIOS"><AdminUsers initialView="EMPLOYEES" /></ProtectedRoute>} />
                   <Route path="/admin/roles" element={<ProtectedRoute requiredPermission="GESTIONAR_ROLES"><AdminUsers initialView="ROLES" /></ProtectedRoute>} />

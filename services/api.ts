@@ -18,7 +18,8 @@ import {
   Proveedor,
   Costo,
   Saldo,
-  Permiso
+  Permiso,
+  Paquete
 } from '../types';
 
 const API_URL = '/api';
@@ -57,6 +58,13 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
   }
 }
 
+export const PackagesService = {
+  getAll: () => request<Paquete[]>('/paquetes').then(res => Array.isArray(res) ? res : []),
+  create: (data: Partial<Paquete>) => request('/paquetes', { method: 'POST', body: JSON.stringify(data) }),
+  update: (id: string, data: Partial<Paquete>) => request(`/paquetes/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  delete: (id: string) => request(`/paquetes/${id}`, { method: 'DELETE' }),
+};
+
 export const CostsService = {
   getAll: () => request<Costo[]>('/costos').then(res => Array.isArray(res) ? res : []),
   create: (data: Partial<Costo>) => request('/costos', { method: 'POST', body: JSON.stringify(data) }),
@@ -68,7 +76,7 @@ export const CashService = {
   getActiveArqueo: () => request<Arqueo | null>(`/arqueo/active`),
   getSaldosToday: () => request<Saldo[]>('/saldos/today').then(res => Array.isArray(res) ? res : []),
   openCaja: (data: { montoInicial: number, saldoTigoInicial: number, saldoClaroInicial: number }) => request('/arqueo/open', { method: 'POST', body: JSON.stringify(data) }),
-  closeCaja: (idArqueo: string) => request('/arqueo/close', { method: 'POST', body: JSON.stringify({ idArqueo }) }),
+  closeCaja: (idArqueo: string) => request<{ message: string, resumen: any }>('/arqueo/close', { method: 'POST', body: JSON.stringify({ idArqueo }) }),
   
   getIngresos: (idCaja: string) => request<Ingreso[]>(`/ingresos?idCaja=${idCaja}`).then(res => Array.isArray(res) ? res : []),
   getEgresos: (idCaja: string) => request<Egreso[]>(`/egresos?idCaja=${idCaja}`).then(res => Array.isArray(res) ? res : []),
@@ -77,6 +85,11 @@ export const CashService = {
   createEgreso: (data: Partial<Egreso>) => request<Egreso>('/egresos', { method: 'POST', body: JSON.stringify(data) }),
   
   createRecarga: (data: any) => request('/recargas', { method: 'POST', body: JSON.stringify(data) }),
+  buySaldo: (data: { red: string, montoPagado: number, montoRecibido: number }) => request('/saldos/buy', { method: 'POST', body: JSON.stringify(data) }),
+
+  // Admin Functions
+  getAdminBoxesStatus: () => request<any[]>('/admin/cajas-status').then(res => Array.isArray(res) ? res : []),
+  reopenBox: (idArqueo: string) => request('/admin/reopen-box', { method: 'POST', body: JSON.stringify({ idArqueo }) }),
 };
 
 export const InventoryService = {

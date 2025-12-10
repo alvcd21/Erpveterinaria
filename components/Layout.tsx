@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { 
-  LayoutDashboard, ShoppingCart, Users, DollarSign, FileText, LogOut, Menu, X, Bell, CloudLightning, ShieldCheck, Truck, ChevronDown, ChevronRight, Package, Briefcase, Box, UserCog, Calculator
+  LayoutDashboard, ShoppingCart, Users, DollarSign, FileText, LogOut, Menu, X, Bell, CloudLightning, ShieldCheck, Truck, ChevronDown, ChevronRight, Package, Briefcase, Box, UserCog, Calculator, Smartphone, Activity
 } from 'lucide-react';
 
 interface LayoutProps {
@@ -51,6 +51,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       subItems: [
         { name: 'Punto de Venta', path: '/pos', icon: <ShoppingCart size={18} />, permission: 'VER_POS' },
         { name: 'Clientes', path: '/clients', icon: <Users size={18} />, permission: 'VER_CLIENTES' },
+        { name: 'Paquetes Recarga', path: '/packages', icon: <Smartphone size={18} />, permission: 'GESTIONAR_INVENTARIO' },
       ]
     },
     {
@@ -76,6 +77,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       icon: <ShieldCheck size={20} />,
       permission: 'VER_ADMIN',
       subItems: [
+        { name: 'Panel Cajas', path: '/admin/cash-dashboard', icon: <Activity size={18} />, permission: 'VER_ADMIN' },
         { name: 'Usuarios', path: '/admin/users', icon: <UserCog size={18} />, permission: 'GESTIONAR_USUARIOS' },
         { name: 'Empleados', path: '/admin/employees', icon: <Briefcase size={18} />, permission: 'GESTIONAR_USUARIOS' },
         { name: 'Roles', path: '/admin/roles', icon: <ShieldCheck size={18} />, permission: 'GESTIONAR_ROLES' },

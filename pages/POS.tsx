@@ -6,7 +6,7 @@ import { Search, ShoppingCart, Trash2, CreditCard, Smartphone, Headphones, Zap, 
 import Swal from 'sweetalert2';
 import { jsPDF } from 'jspdf';
 import { useAuth } from '../context/AuthContext';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 
 const POS: React.FC = () => {
   const [products, setProducts] = useState<ProductoUnified[]>([]);
@@ -25,11 +25,31 @@ const POS: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const { user } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
 
   useEffect(() => {
     checkRegisterStatus();
     loadInitialData();
   }, []);
+
+  // Handle Custom Item passed from Cash Register
+  useEffect(() => {
+      if (location.state && location.state.customItem) {
+          const { descripcion, precio } = location.state.customItem;
+          // Add as custom item to cart
+          const newItem: DetalleVenta = {
+              codDetalleVenta: `MANUAL-${Date.now()}`,
+              cantidad: 1,
+              precioVenta: Number(precio),
+              descripcionProducto: descripcion,
+              tipoProducto: 'SERVICIO' // Or generic
+          };
+          setCart(prev => [...prev, newItem]);
+          
+          // Clear state so it doesn't add again on refresh (though location state persists, useEffect runs once on mount/location change)
+          window.history.replaceState({}, document.title);
+      }
+  }, [location]);
 
   const checkRegisterStatus = async () => {
      try {

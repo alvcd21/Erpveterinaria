@@ -159,6 +159,9 @@ export interface Arqueo {
   totalCostos?: number;
   ganancia?: number;
   estado: string;
+  // UI Helpers
+  usuarioNombre?: string;
+  cajaNombre?: string;
 }
 
 // Tabla: ingresos
@@ -213,15 +216,26 @@ export interface DetalleVenta {
   tipoProducto?: 'TELEFONO' | 'ACCESORIO' | 'SERVICIO';
 }
 
-// Tabla: recargas
-export interface Recarga {
+// Tabla: recargas (Log de transacciones)
+export interface RecargaLog {
   idRecargas: string;
   red: string;
   tipo: string;
   descripcion: string;
   precioCobrado: number;
-  precioPagado: number;
+  precioPagado: number; // Costo
   estado: string;
+  fecha?: string;
+}
+
+// Tabla: paquetes (Catálogo)
+export interface Paquete {
+  idPaquete: string;
+  red: 'TIGO' | 'CLARO';
+  nombre: string;
+  precio: number; // Precio Venta
+  costo: number;  // Precio Costo
+  estado: EstadoGeneral;
 }
 
 // Tabla: saldos
