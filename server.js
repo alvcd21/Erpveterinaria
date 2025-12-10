@@ -29,7 +29,6 @@ pool.connect((err, client, release) => {
 // --- HELPER: GENERADOR DE IDs ---
 async function generateNextId(table, column, prefix) {
   try {
-    // Busca el último ID que coincida con el prefijo
     const query = `
       SELECT ${column} as id 
       FROM ${table} 
@@ -55,6 +54,18 @@ async function generateNextId(table, column, prefix) {
   }
 }
 
+// --- HELPER: MANEJO DE ERRORES DB ---
+const handleDbError = (res, err) => {
+  console.error(err);
+  if (err.code === '23503') { // Foreign Key Violation
+    return res.status(409).json({ error: 'No se puede eliminar/modificar: El registro está siendo usado por otra entidad.' });
+  }
+  if (err.code === '23505') { // Unique Violation
+    return res.status(409).json({ error: 'El registro ya existe (duplicado).' });
+  }
+  res.status(500).json({ error: err.message || 'Error interno del servidor' });
+};
+
 // --- MIDDLEWARE DE SEGURIDAD ---
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
@@ -75,7 +86,6 @@ app.post('/api/auth/login', async (req, res) => {
   console.log(`🔹 Intento de login para usuario: ${usuario}`);
 
   try {
-    // PostgreSQL column alias to handle case sensitivity
     const query = `
       SELECT 
         u.codUsuario, u.usuario, u.password, u.estado,
@@ -88,7 +98,6 @@ app.post('/api/auth/login', async (req, res) => {
     `;
     
     const result = await pool.query(query, [usuario]);
-    // Postgres returns lowercase keys if aliases aren't quoted, but here we used aliases like rol_nombre
     const userRaw = result.rows[0];
 
     if (!userRaw) return res.status(401).json({ error: 'Usuario no encontrado' });
@@ -138,7 +147,6 @@ app.get('/api/users', authenticateToken, async (req, res) => {
     `;
     const result = await pool.query(query);
     
-    // MAPEO IMPORTANTE: Postgres devuelve minúsculas (codusuario, idcaja), React espera CamelCase
     const mappedUsers = result.rows.map(row => ({
         codUsuario: row.codusuario,
         usuario: row.usuario,
@@ -153,8 +161,7 @@ app.get('/api/users', authenticateToken, async (req, res) => {
 
     res.json(mappedUsers);
   } catch (err) {
-    console.error('Error fetching users:', err);
-    res.status(500).json({ error: err.message });
+    handleDbError(res, err);
   }
 });
 
@@ -162,13 +169,11 @@ app.post('/api/users', authenticateToken, async (req, res) => {
   try {
     const { usuario, password, identidad, idCaja, idrol } = req.body;
     
-    // Validar datos básicos
     if (!idCaja || !idrol || !identidad) {
-       return res.status(400).json({ error: "Faltan datos obligatorios (Caja, Rol o Empleado)" });
+       return res.status(400).json({ error: "Faltan datos obligatorios" });
     }
 
     const codUsuario = await generateNextId('usuarios', 'codUsuario', 'USER');
-
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
     const fecha = new Date();
@@ -181,9 +186,31 @@ app.post('/api/users', authenticateToken, async (req, res) => {
     await pool.query(query, [codUsuario, usuario, hashedPassword, identidad, idCaja, idrol, fecha]);
     res.status(201).json({ message: 'Usuario creado', id: codUsuario });
   } catch (err) {
-    console.error('Error creating user:', err);
-    // Devuelve el mensaje real del error SQL (ej: null value in column "idCaja")
-    res.status(500).json({ error: err.message });
+    handleDbError(res, err);
+  }
+});
+
+app.put('/api/users/:id', authenticateToken, async (req, res) => {
+  try {
+    const { usuario, password, identidad, idCaja, idrol, estado } = req.body;
+    const codUsuario = req.params.id;
+
+    if (password) {
+      const salt = await bcrypt.genSalt(10);
+      const hashedPassword = await bcrypt.hash(password, salt);
+      await pool.query(
+        `UPDATE usuarios SET usuario=$1, password=$2, identidad=$3, idCaja=$4, idrol=$5, estado=$6 WHERE codUsuario=$7`,
+        [usuario, hashedPassword, identidad, idCaja, idrol, estado, codUsuario]
+      );
+    } else {
+       await pool.query(
+        `UPDATE usuarios SET usuario=$1, identidad=$2, idCaja=$3, idrol=$4, estado=$5 WHERE codUsuario=$6`,
+        [usuario, identidad, idCaja, idrol, estado, codUsuario]
+      );
+    }
+    res.json({ message: 'Usuario actualizado' });
+  } catch (err) {
+    handleDbError(res, err);
   }
 });
 
@@ -193,7 +220,16 @@ app.put('/api/users/:id/status', authenticateToken, async (req, res) => {
     await pool.query('UPDATE usuarios SET estado = $1 WHERE codUsuario = $2', [status, req.params.id]);
     res.json({ message: 'Estado actualizado' });
   } catch(err) {
-    res.status(500).json({ error: err.message });
+    handleDbError(res, err);
+  }
+});
+
+app.delete('/api/users/:id', authenticateToken, async (req, res) => {
+  try {
+    await pool.query('DELETE FROM usuarios WHERE codUsuario = $1', [req.params.id]);
+    res.json({ message: 'Usuario eliminado' });
+  } catch (err) {
+    handleDbError(res, err);
   }
 });
 
@@ -202,7 +238,6 @@ app.put('/api/users/:id/status', authenticateToken, async (req, res) => {
 app.get('/api/empleados', authenticateToken, async (req, res) => {
   try {
     const result = await pool.query("SELECT * FROM empleado ORDER BY nombre ASC");
-    // Mapeo manual para evitar problemas de minúsculas
     const empleados = result.rows.map(row => ({
       identidad: row.identidad,
       nombre: row.nombre,
@@ -214,7 +249,7 @@ app.get('/api/empleados', authenticateToken, async (req, res) => {
     }));
     res.json(empleados);
   } catch (err) {
-    res.status(500).json({ error: 'Error obteniendo empleados' });
+    handleDbError(res, err);
   }
 });
 
@@ -228,8 +263,30 @@ app.post('/api/empleados', authenticateToken, async (req, res) => {
     await pool.query(query, [identidad, nombre, apellido, direccion, telefono]);
     res.status(201).json({ message: 'Empleado creado' });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: err.message });
+    handleDbError(res, err);
+  }
+});
+
+app.put('/api/empleados/:id', authenticateToken, async (req, res) => {
+  try {
+    const { nombre, apellido, direccion, telefono, estado } = req.body;
+    const query = `
+      UPDATE empleado SET nombre=$1, apellido=$2, direccion=$3, telefono=$4, estado=$5
+      WHERE identidad=$6
+    `;
+    await pool.query(query, [nombre, apellido, direccion, telefono, estado, req.params.id]);
+    res.json({ message: 'Empleado actualizado' });
+  } catch (err) {
+    handleDbError(res, err);
+  }
+});
+
+app.delete('/api/empleados/:id', authenticateToken, async (req, res) => {
+  try {
+    await pool.query('DELETE FROM empleado WHERE identidad = $1', [req.params.id]);
+    res.json({ message: 'Empleado eliminado' });
+  } catch (err) {
+    handleDbError(res, err);
   }
 });
 
@@ -238,15 +295,14 @@ app.post('/api/empleados', authenticateToken, async (req, res) => {
 app.get('/api/cajas', authenticateToken, async (req, res) => {
   try {
     const result = await pool.query("SELECT * FROM caja ORDER BY idCaja ASC");
-    // Mapeo manual crítico para los selects del frontend
     const cajas = result.rows.map(row => ({
-      idCaja: row.idcaja, // Postgres devuelve idcaja (minúsculas)
+      idCaja: row.idcaja,
       nombre: row.nombre,
       estado: row.estado
     }));
     res.json(cajas);
   } catch (err) {
-    res.status(500).json({ error: 'Error obteniendo cajas' });
+    handleDbError(res, err);
   }
 });
 
@@ -254,11 +310,10 @@ app.post('/api/cajas', authenticateToken, async (req, res) => {
   try {
     const { nombre } = req.body;
     const idCaja = await generateNextId('caja', 'idCaja', 'CAJA');
-    
     await pool.query("INSERT INTO caja (idCaja, nombre, estado) VALUES ($1, $2, 'Activa')", [idCaja, nombre]);
     res.status(201).json({ message: 'Caja creada', id: idCaja });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    handleDbError(res, err);
   }
 });
 
@@ -268,7 +323,16 @@ app.put('/api/cajas/:id', authenticateToken, async (req, res) => {
     await pool.query("UPDATE caja SET nombre=$1, estado=$2 WHERE idCaja=$3", [nombre, estado, req.params.id]);
     res.json({ message: 'Caja actualizada' });
   } catch(err) {
-    res.status(500).json({ error: err.message });
+    handleDbError(res, err);
+  }
+});
+
+app.delete('/api/cajas/:id', authenticateToken, async (req, res) => {
+  try {
+    await pool.query('DELETE FROM caja WHERE idCaja = $1', [req.params.id]);
+    res.json({ message: 'Caja eliminada' });
+  } catch (err) {
+    handleDbError(res, err);
   }
 });
 
@@ -278,13 +342,13 @@ app.get('/api/roles', authenticateToken, async (req, res) => {
   try {
     const result = await pool.query("SELECT * FROM roles ORDER BY idrol ASC");
     const roles = result.rows.map(row => ({
-      idrol: row.idrol, // Postgres devuelve idrol
+      idrol: row.idrol,
       nombre: row.nombre,
       estado: row.estado
     }));
     res.json(roles);
   } catch (err) {
-    res.status(500).json({ error: 'Error obteniendo roles' });
+    handleDbError(res, err);
   }
 });
 
@@ -292,69 +356,39 @@ app.post('/api/roles', authenticateToken, async (req, res) => {
   try {
     const { nombre } = req.body;
     const idrol = await generateNextId('roles', 'idrol', 'ROL');
-    
     await pool.query("INSERT INTO roles (idrol, nombre, estado) VALUES ($1, $2, 'Activo')", [idrol, nombre]);
     res.status(201).json({ message: 'Rol creado', id: idrol });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    handleDbError(res, err);
   }
 });
 
+app.put('/api/roles/:id', authenticateToken, async (req, res) => {
+  try {
+    const { nombre, estado } = req.body;
+    await pool.query("UPDATE roles SET nombre=$1, estado=$2 WHERE idrol=$3", [nombre, estado, req.params.id]);
+    res.json({ message: 'Rol actualizado' });
+  } catch (err) {
+    handleDbError(res, err);
+  }
+});
+
+app.delete('/api/roles/:id', authenticateToken, async (req, res) => {
+  try {
+    await pool.query('DELETE FROM roles WHERE idrol = $1', [req.params.id]);
+    res.json({ message: 'Rol eliminado' });
+  } catch (err) {
+    handleDbError(res, err);
+  }
+});
 
 // --- SETUP & INSTALL UTILS ---
 app.get('/api/setup/install', async (req, res) => {
   try {
-    // 1. Crear Tabla Roles
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS roles (
-        idrol varchar(100) PRIMARY KEY,
-        nombre varchar(50) NOT NULL,
-        estado varchar(20) NOT NULL DEFAULT 'Activo'
-      );
-    `);
-
-    // 2. Crear Tabla Caja
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS caja (
-        idCaja varchar(100) PRIMARY KEY,
-        nombre varchar(50) NOT NULL,
-        estado varchar(50) NOT NULL DEFAULT 'Activa'
-      );
-    `);
-
-    // 3. Crear Tabla Empleado
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS empleado (
-          identidad varchar(20) PRIMARY KEY,
-          nombre varchar(30) NOT NULL,
-          apellido varchar(30) NOT NULL,
-          direccion varchar(100) NOT NULL,
-          telefono varchar(20) NOT NULL,
-          estado varchar(20) NOT NULL DEFAULT 'Activo',
-          fechaCreacion timestamp NOT NULL DEFAULT NOW(),
-          fechaModificacion timestamp
-      );
-    `);
-
-    // 4. Crear Tabla Usuarios
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS usuarios (
-          codUsuario varchar(100) PRIMARY KEY,
-          usuario varchar(100) NOT NULL,
-          password varchar(100) NOT NULL,
-          identidad varchar(20) NOT NULL,
-          idCaja varchar(100) NOT NULL,
-          idrol varchar(100) NOT NULL,
-          foto bytea,
-          fechaCreacion timestamp NOT NULL DEFAULT NOW(),
-          fechaModificacion timestamp,
-          estado varchar(20) NOT NULL DEFAULT 'Activo',
-          CONSTRAINT fk_empleado FOREIGN KEY (identidad) REFERENCES empleado(identidad),
-          CONSTRAINT fk_caja FOREIGN KEY (idCaja) REFERENCES caja(idCaja),
-          CONSTRAINT fk_rol FOREIGN KEY (idrol) REFERENCES roles(idrol)
-      );
-    `);
-
+    await pool.query(`CREATE TABLE IF NOT EXISTS roles (idrol varchar(100) PRIMARY KEY, nombre varchar(50) NOT NULL, estado varchar(20) NOT NULL DEFAULT 'Activo');`);
+    await pool.query(`CREATE TABLE IF NOT EXISTS caja (idCaja varchar(100) PRIMARY KEY, nombre varchar(50) NOT NULL, estado varchar(50) NOT NULL DEFAULT 'Activa');`);
+    await pool.query(`CREATE TABLE IF NOT EXISTS empleado (identidad varchar(20) PRIMARY KEY, nombre varchar(30) NOT NULL, apellido varchar(30) NOT NULL, direccion varchar(100) NOT NULL, telefono varchar(20) NOT NULL, estado varchar(20) NOT NULL DEFAULT 'Activo', fechaCreacion timestamp NOT NULL DEFAULT NOW(), fechaModificacion timestamp);`);
+    await pool.query(`CREATE TABLE IF NOT EXISTS usuarios (codUsuario varchar(100) PRIMARY KEY, usuario varchar(100) NOT NULL, password varchar(100) NOT NULL, identidad varchar(20) NOT NULL, idCaja varchar(100) NOT NULL, idrol varchar(100) NOT NULL, foto bytea, fechaCreacion timestamp NOT NULL DEFAULT NOW(), fechaModificacion timestamp, estado varchar(20) NOT NULL DEFAULT 'Activo', CONSTRAINT fk_empleado FOREIGN KEY (identidad) REFERENCES empleado(identidad), CONSTRAINT fk_caja FOREIGN KEY (idCaja) REFERENCES caja(idCaja), CONSTRAINT fk_rol FOREIGN KEY (idrol) REFERENCES roles(idrol));`);
     res.send('✅ Tablas Maestras Creadas (Roles, Caja, Empleado, Usuarios)');
   } catch (err) {
     console.error(err);
@@ -364,33 +398,15 @@ app.get('/api/setup/install', async (req, res) => {
 
 app.get('/api/setup/seed', async (req, res) => {
   try {
-    // Verificar si existen datos
     const check = await pool.query('SELECT * FROM usuarios');
     if (check.rows.length > 0) return res.send('⚠️ Ya existen usuarios, seed omitido.');
-
-    // 1. Roles
     await pool.query("INSERT INTO roles (idrol, nombre) VALUES ('ROL-ADMIN', 'Administrador') ON CONFLICT DO NOTHING");
     await pool.query("INSERT INTO roles (idrol, nombre) VALUES ('ROL-VEND', 'Vendedor') ON CONFLICT DO NOTHING");
-
-    // 2. Caja
     await pool.query("INSERT INTO caja (idCaja, nombre) VALUES ('CAJA-001', 'Caja Principal') ON CONFLICT DO NOTHING");
-
-    // 3. Empleado Admin
-    await pool.query(`
-      INSERT INTO empleado (identidad, nombre, apellido, direccion, telefono) 
-      VALUES ('0606200201168', 'Super', 'Admin', 'Oficina', '99999999') 
-      ON CONFLICT DO NOTHING
-    `);
-
-    // 4. Usuario Admin (Pass: cadenas21)
+    await pool.query(`INSERT INTO empleado (identidad, nombre, apellido, direccion, telefono) VALUES ('0606200201168', 'Super', 'Admin', 'Oficina', '99999999') ON CONFLICT DO NOTHING`);
     const salt = await bcrypt.genSalt(10);
     const hash = await bcrypt.hash('cadenas21', salt);
-    
-    await pool.query(`
-      INSERT INTO usuarios (codUsuario, usuario, password, identidad, idCaja, idrol)
-      VALUES ('USER-001', 'alvcd21', $1, '0606200201168', 'CAJA-001', 'ROL-ADMIN')
-    `, [hash]);
-
+    await pool.query(`INSERT INTO usuarios (codUsuario, usuario, password, identidad, idCaja, idrol) VALUES ('USER-001', 'alvcd21', $1, '0606200201168', 'CAJA-001', 'ROL-ADMIN')`, [hash]);
     res.send('✅ Datos Semilla Insertados Correctamente');
   } catch (err) {
     console.error(err);

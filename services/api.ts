@@ -38,7 +38,13 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     }
 
     if (!response.ok) {
-        throw new Error(`API Error: ${response.status} ${response.statusText}`);
+        // Try to get JSON error message
+        try {
+            const errData = await response.json();
+            throw new Error(errData.error || `Error ${response.status}`);
+        } catch (e) {
+             throw new Error(`API Error: ${response.status} ${response.statusText}`);
+        }
     }
     
     const contentType = response.headers.get("content-type");
@@ -58,21 +64,27 @@ export const AdminService = {
   // Usuarios
   getUsers: () => request<Usuario[]>('/users'),
   createUser: (data: any) => request('/users', { method: 'POST', body: JSON.stringify(data) }),
+  updateUser: (id: string, data: any) => request(`/users/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteUser: (id: string) => request(`/users/${id}`, { method: 'DELETE' }),
   toggleUserStatus: (id: string, status: string) => request(`/users/${id}/status`, { method: 'PUT', body: JSON.stringify({ status }) }),
   
   // Empleados
   getEmpleados: () => request<Empleado[]>('/empleados'),
   createEmpleado: (data: Empleado) => request('/empleados', { method: 'POST', body: JSON.stringify(data) }),
   updateEmpleado: (id: string, data: Partial<Empleado>) => request(`/empleados/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteEmpleado: (id: string) => request(`/empleados/${id}`, { method: 'DELETE' }),
   
   // Roles
   getRoles: () => request<Rol[]>('/roles'),
   createRol: (nombre: string) => request('/roles', { method: 'POST', body: JSON.stringify({ nombre }) }),
+  updateRol: (id: string, data: Partial<Rol>) => request(`/roles/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteRol: (id: string) => request(`/roles/${id}`, { method: 'DELETE' }),
   
   // Cajas
   getCajas: () => request<Caja[]>('/cajas'),
   createCaja: (nombre: string) => request('/cajas', { method: 'POST', body: JSON.stringify({ nombre }) }),
   updateCaja: (id: string, data: Partial<Caja>) => request(`/cajas/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteCaja: (id: string) => request(`/cajas/${id}`, { method: 'DELETE' }),
 };
 
 export const InventoryService = {

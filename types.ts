@@ -58,6 +58,7 @@ export interface Usuario {
   // UI Helpers
   nombreEmpleado?: string;
   nombreRol?: string;
+  nombreCaja?: string;
 }
 
 export interface Rol {
