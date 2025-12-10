@@ -113,8 +113,13 @@ app.post('/api/auth/login', async (req, res) => {
 // 1. TELEFONOS
 app.get('/api/inventory/telefonos', authenticateToken, async (req, res) => {
   try {
+    // IMPORTANT: Postgres returns lowercase columns. We use Aliases to match React types.
     const result = await pool.query(`
-      SELECT t.*, u.nombre as nombreUbicacion, u.estante, u.nivel
+      SELECT 
+        t.codigo, t.imei1, t.imei2, t.marca, t.modelo, 
+        t.preciocompra as "precioCompra", t.precioventa as "precioVenta", 
+        t.codproveedor as "codProveedor", t.fecha, t.idubicacion, t.estado,
+        u.nombre as "nombreUbicacion", u.estante, u.nivel
       FROM telefonos t
       LEFT JOIN ubicacion u ON t.idubicacion = u.idUbicacion
       ORDER BY t.codigo DESC
@@ -138,10 +143,31 @@ app.post('/api/inventory/telefonos', authenticateToken, async (req, res) => {
   } catch(err) { handleDbError(res, err); }
 });
 
+app.put('/api/inventory/telefonos/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { imei1, imei2, marca, modelo, precioCompra, precioVenta, codProveedor, idubicacion } = req.body;
+    await pool.query(
+      `UPDATE telefonos SET imei1=$1, imei2=$2, marca=$3, modelo=$4, precioCompra=$5, precioVenta=$6, codProveedor=$7, idubicacion=$8 
+       WHERE codigo=$9`,
+      [imei1, imei2, marca, modelo, precioCompra, precioVenta, codProveedor, idubicacion, id]
+    );
+    res.json({ message: 'Teléfono actualizado' });
+  } catch (err) { handleDbError(res, err); }
+});
+
+app.delete('/api/inventory/telefonos/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    await pool.query('DELETE FROM telefonos WHERE codigo=$1', [id]);
+    res.json({ message: 'Teléfono eliminado' });
+  } catch (err) { handleDbError(res, err); }
+});
+
 // 2. CATEGORIAS
 app.get('/api/inventory/categorias', authenticateToken, async (req, res) => {
   try {
-    const result = await pool.query("SELECT * FROM categoria ORDER BY codCategoria ASC");
+    const result = await pool.query('SELECT codcategoria as "codCategoria", tipo FROM categoria ORDER BY codCategoria ASC');
     res.json(result.rows);
   } catch(err) { handleDbError(res, err); }
 });
@@ -155,11 +181,30 @@ app.post('/api/inventory/categorias', authenticateToken, async (req, res) => {
   } catch(err) { handleDbError(res, err); }
 });
 
-// 3. ACCESORIOS (MASTER) - CORREGIDO
+app.put('/api/inventory/categorias/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { tipo } = req.body;
+    await pool.query('UPDATE categoria SET tipo=$1 WHERE codCategoria=$2', [tipo, id]);
+    res.json({ message: 'Categoría actualizada' });
+  } catch (err) { handleDbError(res, err); }
+});
+
+app.delete('/api/inventory/categorias/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    await pool.query('DELETE FROM categoria WHERE codCategoria=$1', [id]);
+    res.json({ message: 'Categoría eliminada' });
+  } catch (err) { handleDbError(res, err); }
+});
+
+// 3. ACCESORIOS (MASTER)
 app.get('/api/inventory/accesorios-master', authenticateToken, async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT a.*, c.tipo as nombreCategoria
+      SELECT 
+        a.codaccesorio as "codAccesorio", a.codcategoria as "codCategoria", a.descripcion,
+        c.tipo as "nombreCategoria"
       FROM accesorios a
       JOIN categoria c ON a.codCategoria = c.codCategoria
       ORDER BY a.codAccesorio ASC
@@ -172,19 +217,15 @@ app.post('/api/inventory/accesorios-master', authenticateToken, async (req, res)
   try {
     const { codCategoria, descripcion } = req.body;
     
-    // 1. Obtener el nombre de la categoría para generar el prefijo
+    // Obtener nombre categoria para prefijo
     const catResult = await pool.query("SELECT tipo FROM categoria WHERE codCategoria = $1", [codCategoria]);
-    
-    if (catResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Categoría no encontrada' });
-    }
+    if (catResult.rows.length === 0) return res.status(404).json({ error: 'Categoría no encontrada' });
 
     const nombreCategoria = catResult.rows[0].tipo;
-    // Generar prefijo: Primeras 4 letras de la categoría en mayúsculas (ej: AUDIFONOS -> AUDI)
+    // Prefijo: Primeras 4 letras
     let prefix = nombreCategoria.substring(0, 4).toUpperCase().replace(/[^A-Z]/g, 'X');
     if (prefix.length < 3) prefix = 'ITEM';
 
-    // 2. Generar ID único basado en ese prefijo
     const id = await generateNextId('accesorios', 'codAccesorio', prefix);
     
     await pool.query("INSERT INTO accesorios (codAccesorio, codCategoria, descripcion) VALUES ($1, $2, $3)", [id, codCategoria, descripcion]);
@@ -192,11 +233,33 @@ app.post('/api/inventory/accesorios-master', authenticateToken, async (req, res)
   } catch(err) { handleDbError(res, err); }
 });
 
-// 4. INVENTARIO (STOCK ACCESORIOS)
+app.put('/api/inventory/accesorios-master/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { codCategoria, descripcion } = req.body;
+    await pool.query('UPDATE accesorios SET codCategoria=$1, descripcion=$2 WHERE codAccesorio=$3', [codCategoria, descripcion, id]);
+    res.json({ message: 'Accesorio actualizado' });
+  } catch (err) { handleDbError(res, err); }
+});
+
+app.delete('/api/inventory/accesorios-master/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    await pool.query('DELETE FROM accesorios WHERE codAccesorio=$1', [id]);
+    res.json({ message: 'Accesorio eliminado' });
+  } catch (err) { handleDbError(res, err); }
+});
+
+// 4. INVENTARIO (STOCK)
 app.get('/api/inventory/stock', authenticateToken, async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT i.*, a.descripcion, c.tipo as categoria, u.nombre as nombreUbicacion, u.estante, u.nivel
+      SELECT 
+        i.codinventario as "codInventario", i.codaccesorio as "codAccesorio", i.cantidad, 
+        i.preciocompra as "precioCompra", i.precioventa as "precioVenta", 
+        i.codproveedor as "codProveedor", i.fecha, i.idubicacion, i.estado,
+        a.descripcion, c.tipo as categoria, 
+        u.nombre as "nombreUbicacion", u.estante, u.nivel
       FROM inventario i
       JOIN accesorios a ON i.codAccesorio = a.codAccesorio
       JOIN categoria c ON a.codCategoria = c.codCategoria
@@ -222,10 +285,31 @@ app.post('/api/inventory/stock', authenticateToken, async (req, res) => {
   } catch(err) { handleDbError(res, err); }
 });
 
+app.put('/api/inventory/stock/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { cantidad, precioCompra, precioVenta, codProveedor, idubicacion } = req.body;
+    await pool.query(
+      `UPDATE inventario SET cantidad=$1, precioCompra=$2, precioVenta=$3, codProveedor=$4, idubicacion=$5 
+       WHERE codInventario=$6`,
+      [cantidad, precioCompra, precioVenta, codProveedor, idubicacion, id]
+    );
+    res.json({ message: 'Stock actualizado' });
+  } catch (err) { handleDbError(res, err); }
+});
+
+app.delete('/api/inventory/stock/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    await pool.query('DELETE FROM inventario WHERE codInventario=$1', [id]);
+    res.json({ message: 'Registro de stock eliminado' });
+  } catch (err) { handleDbError(res, err); }
+});
+
 // 5. UBICACIONES
 app.get('/api/inventory/ubicaciones', authenticateToken, async (req, res) => {
   try {
-    const result = await pool.query("SELECT * FROM ubicacion ORDER BY idUbicacion ASC");
+    const result = await pool.query('SELECT idubicacion as "idUbicacion", nombre, descripcion, estante, nivel, estado FROM ubicacion ORDER BY idUbicacion ASC');
     res.json(result.rows);
   } catch(err) { handleDbError(res, err); }
 });
@@ -242,15 +326,34 @@ app.post('/api/inventory/ubicaciones', authenticateToken, async (req, res) => {
   } catch(err) { handleDbError(res, err); }
 });
 
-// 6. UNIFIED PRODUCTS (For POS)
+app.put('/api/inventory/ubicaciones/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { nombre, descripcion, estante, nivel } = req.body;
+    await pool.query(
+      'UPDATE ubicacion SET nombre=$1, descripcion=$2, estante=$3, nivel=$4 WHERE idUbicacion=$5',
+      [nombre, descripcion, estante, nivel, id]
+    );
+    res.json({ message: 'Ubicación actualizada' });
+  } catch (err) { handleDbError(res, err); }
+});
+
+app.delete('/api/inventory/ubicaciones/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    await pool.query('DELETE FROM ubicacion WHERE idUbicacion=$1', [id]);
+    res.json({ message: 'Ubicación eliminada' });
+  } catch (err) { handleDbError(res, err); }
+});
+
+// 6. UNIFIED PRODUCTS
 app.get('/api/productos/unificados', authenticateToken, async (req, res) => {
   try {
-    // Union of Phones (Available) and Stock (Available & > 0)
     const query = `
-      SELECT codigo as id, 'TELEFONO' as tipo, (marca || ' ' || modelo) as nombre, codigo, precioVenta, 1 as stock, imei1 as imei, idubicacion as ubicacion
+      SELECT codigo as id, 'TELEFONO' as tipo, (marca || ' ' || modelo) as nombre, codigo, precioventa as "precioVenta", 1 as stock, imei1 as imei, idubicacion as ubicacion
       FROM telefonos WHERE estado = 'Disponible'
       UNION ALL
-      SELECT i.codInventario as id, 'ACCESORIO' as tipo, a.descripcion as nombre, i.codInventario as codigo, i.precioVenta, i.cantidad as stock, NULL as imei, i.idubicacion as ubicacion
+      SELECT i.codinventario as id, 'ACCESORIO' as tipo, a.descripcion as nombre, i.codinventario as codigo, i.precioventa as "precioVenta", i.cantidad as stock, NULL as imei, i.idubicacion as ubicacion
       FROM inventario i
       JOIN accesorios a ON i.codAccesorio = a.codAccesorio
       WHERE i.estado = 'Disponible' AND i.cantidad > 0
@@ -260,26 +363,23 @@ app.get('/api/productos/unificados', authenticateToken, async (req, res) => {
   } catch(err) { handleDbError(res, err); }
 });
 
-// --- BASIC ENTITY ROUTES ---
 app.get('/api/proveedores', authenticateToken, async (req, res) => {
   try {
-     const result = await pool.query("SELECT * FROM proveedores"); 
+     const result = await pool.query('SELECT codproveedor as "codProveedor", nombre FROM proveedores'); 
      res.json(result.rows);
   } catch (e) {
      res.json([{codProveedor: 'PROV-001', nombre: 'Proveedor General'}]);
   }
 });
 
-// --- SETUP ENDPOINTS ---
+// --- SETUP ---
 app.get('/api/setup/install', async (req, res) => {
   try {
-    // Original Tables
     await pool.query(`CREATE TABLE IF NOT EXISTS roles (idrol varchar(100) PRIMARY KEY, nombre varchar(50) NOT NULL, estado varchar(20) NOT NULL DEFAULT 'Activo');`);
     await pool.query(`CREATE TABLE IF NOT EXISTS caja (idCaja varchar(100) PRIMARY KEY, nombre varchar(50) NOT NULL, estado varchar(50) NOT NULL DEFAULT 'Activa');`);
     await pool.query(`CREATE TABLE IF NOT EXISTS empleado (identidad varchar(20) PRIMARY KEY, nombre varchar(30) NOT NULL, apellido varchar(30) NOT NULL, direccion varchar(100) NOT NULL, telefono varchar(20) NOT NULL, estado varchar(20) NOT NULL DEFAULT 'Activo', fechaCreacion timestamp NOT NULL DEFAULT NOW(), fechaModificacion timestamp);`);
     await pool.query(`CREATE TABLE IF NOT EXISTS usuarios (codUsuario varchar(100) PRIMARY KEY, usuario varchar(100) NOT NULL, password varchar(100) NOT NULL, identidad varchar(20) NOT NULL, idCaja varchar(100) NOT NULL, idrol varchar(100) NOT NULL, foto bytea, fechaCreacion timestamp NOT NULL DEFAULT NOW(), fechaModificacion timestamp, estado varchar(20) NOT NULL DEFAULT 'Activo');`);
     
-    // NEW INVENTORY TABLES
     await pool.query(`CREATE TABLE IF NOT EXISTS ubicacion (idUbicacion varchar(100) PRIMARY KEY, nombre varchar(50) NOT NULL, descripcion varchar(100) NOT NULL, estante varchar(50) NOT NULL, nivel varchar(50) NOT NULL, estado varchar(20) NOT NULL);`);
     await pool.query(`CREATE TABLE IF NOT EXISTS categoria (codCategoria varchar(50) PRIMARY KEY, tipo varchar(30) NOT NULL);`);
     await pool.query(`CREATE TABLE IF NOT EXISTS accesorios (codAccesorio varchar(100) PRIMARY KEY, codCategoria varchar(50) NOT NULL, descripcion varchar(100) NOT NULL);`);
@@ -287,7 +387,6 @@ app.get('/api/setup/install', async (req, res) => {
     await pool.query(`CREATE TABLE IF NOT EXISTS inventario (codInventario varchar(100) PRIMARY KEY, codAccesorio varchar(100), cantidad integer NOT NULL, precioCompra numeric(10,2) NOT NULL, precioVenta numeric(10,2) NOT NULL, codProveedor varchar(50) NOT NULL, fecha date NOT NULL, idubicacion varchar(100) NOT NULL, estado varchar(100) NOT NULL);`);
     await pool.query(`CREATE TABLE IF NOT EXISTS proveedores (codProveedor varchar(50) PRIMARY KEY, nombre varchar(100) NOT NULL);`);
     
-    // SEED BASIC DATA
     await pool.query("INSERT INTO proveedores (codProveedor, nombre) VALUES ('PROV-GEN', 'General') ON CONFLICT DO NOTHING");
     await pool.query("INSERT INTO ubicacion (idUbicacion, nombre, descripcion, estante, nivel, estado) VALUES ('UBIC-0001', 'Vitrina Principal', 'Entrada', '1', '1', 'Activo') ON CONFLICT DO NOTHING");
     
@@ -298,7 +397,6 @@ app.get('/api/setup/install', async (req, res) => {
   }
 });
 
-// --- SERVE FRONTEND ---
 app.use(express.static(path.join(__dirname, 'build')));
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'build', 'index.html'));

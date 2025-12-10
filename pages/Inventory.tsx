@@ -10,7 +10,7 @@ import {
 } from '../types';
 import { 
   Search, Plus, Smartphone, Headphones, Box, MapPin, 
-  Tag, List, PlusCircle, X, RefreshCw, Printer
+  Tag, List, PlusCircle, X, RefreshCw, Printer, Edit2, Trash2
 } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { jsPDF } from 'jspdf';
@@ -22,7 +22,11 @@ const Inventory: React.FC = () => {
   const [activeTab, setActiveTab] = useState<InventoryTab>('TELEPHONES');
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  
+  // Modal & Edit State
   const [showModal, setShowModal] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [currentId, setCurrentId] = useState<string | null>(null);
 
   // Data Stores
   const [phones, setPhones] = useState<Telefono[]>([]);
@@ -41,7 +45,6 @@ const Inventory: React.FC = () => {
 
   useEffect(() => {
     loadData();
-    // Load auxiliaries once
     InventoryService.getCategorias().then(setCategories);
     InventoryService.getUbicaciones().then(setLocations);
     InventoryService.getProveedores().then(setProviders);
@@ -73,29 +76,9 @@ const Inventory: React.FC = () => {
     }
   };
 
-  const handleCreate = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      if (activeTab === 'TELEPHONES') {
-        await InventoryService.createTelefono(phoneForm);
-      } else if (activeTab === 'STOCK') {
-        await InventoryService.createStock(stockForm);
-      } else if (activeTab === 'MASTER') {
-        await InventoryService.createAccesorioMaster(masterForm);
-      } else if (activeTab === 'CATEGORIES') {
-        await InventoryService.createCategoria(catForm);
-      } else if (activeTab === 'LOCATIONS') {
-        await InventoryService.createUbicacion(locForm);
-      }
-      setShowModal(false);
-      Swal.fire('Guardado', 'Registro creado exitosamente', 'success');
-      loadData();
-    } catch (error: any) {
-      Swal.fire('Error', error.message, 'error');
-    }
-  };
-
   const openNewModal = () => {
+    setIsEditing(false);
+    setCurrentId(null);
     setPhoneForm({});
     setStockForm({});
     setMasterForm({});
@@ -104,17 +87,91 @@ const Inventory: React.FC = () => {
     setShowModal(true);
   };
 
+  const openEditModal = (item: any) => {
+    setIsEditing(true);
+    setCurrentId(item.codigo || item.codInventario || item.codAccesorio || item.codCategoria || item.idUbicacion);
+    
+    // Populate form based on active tab
+    if (activeTab === 'TELEPHONES') setPhoneForm({ ...item });
+    else if (activeTab === 'STOCK') setStockForm({ ...item });
+    else if (activeTab === 'MASTER') setMasterForm({ ...item });
+    else if (activeTab === 'CATEGORIES') setCatForm({ ...item });
+    else if (activeTab === 'LOCATIONS') setLocForm({ ...item });
+    
+    setShowModal(true);
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      if (activeTab === 'TELEPHONES') {
+        if(isEditing) await InventoryService.updateTelefono(currentId!, phoneForm);
+        else await InventoryService.createTelefono(phoneForm);
+      } else if (activeTab === 'STOCK') {
+        if(isEditing) await InventoryService.updateStock(currentId!, stockForm);
+        else await InventoryService.createStock(stockForm);
+      } else if (activeTab === 'MASTER') {
+        if(isEditing) await InventoryService.updateAccesorioMaster(currentId!, masterForm);
+        else await InventoryService.createAccesorioMaster(masterForm);
+      } else if (activeTab === 'CATEGORIES') {
+        if(isEditing) await InventoryService.updateCategoria(currentId!, catForm);
+        else await InventoryService.createCategoria(catForm);
+      } else if (activeTab === 'LOCATIONS') {
+        if(isEditing) await InventoryService.updateUbicacion(currentId!, locForm);
+        else await InventoryService.createUbicacion(locForm);
+      }
+      
+      setShowModal(false);
+      Swal.fire({
+        title: 'Éxito',
+        text: isEditing ? 'Registro actualizado' : 'Registro creado',
+        icon: 'success',
+        timer: 1500,
+        showConfirmButton: false
+      });
+      loadData();
+    } catch (error: any) {
+      Swal.fire('Error', error.message, 'error');
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    const result = await Swal.fire({
+      title: '¿Estás seguro?',
+      text: "No podrás revertir esto.",
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonColor: '#d33',
+      cancelButtonColor: '#3085d6',
+      confirmButtonText: 'Sí, eliminar',
+      cancelButtonText: 'Cancelar'
+    });
+
+    if (result.isConfirmed) {
+      try {
+        if (activeTab === 'TELEPHONES') await InventoryService.deleteTelefono(id);
+        else if (activeTab === 'STOCK') await InventoryService.deleteStock(id);
+        else if (activeTab === 'MASTER') await InventoryService.deleteAccesorioMaster(id);
+        else if (activeTab === 'CATEGORIES') await InventoryService.deleteCategoria(id);
+        else if (activeTab === 'LOCATIONS') await InventoryService.deleteUbicacion(id);
+        
+        Swal.fire('Eliminado', 'El registro ha sido eliminado.', 'success');
+        loadData();
+      } catch (error: any) {
+        Swal.fire('Error', error.message, 'error');
+      }
+    }
+  };
+
   // --- BARCODE GENERATION LOGIC ---
   const handlePrintBarcode = (code: string, description: string) => {
     try {
-      // 1. Setup PDF (25mm x 40mm)
       const doc = new jsPDF({
         orientation: 'p',
         unit: 'mm',
-        format: [25, 40] // Width 25mm, Height 40mm (Tall & Narrow)
+        format: [25, 40] 
       });
 
-      // 2. Create Barcode Image using Canvas
       const canvas = document.createElement('canvas');
       JsBarcode(canvas, code, {
         format: "CODE128",
@@ -127,20 +184,14 @@ const Inventory: React.FC = () => {
       });
       const barcodeImg = canvas.toDataURL("image/png");
 
-      // 3. Add Content to PDF
-      // Standard vertical layout: Text Top, Barcode Bottom.
-      // Text
       doc.setFont("helvetica", "bold");
       doc.setFontSize(7);
       
-      // Split text to fit width (approx 20mm usable)
       const splitTitle = doc.splitTextToSize(description.substring(0, 30), 22);
       doc.text(splitTitle, 12.5, 5, { align: "center" });
 
-      // Barcode Image
-      doc.addImage(barcodeImg, 'PNG', 1, 10, 23, 25); // x, y, w, h
+      doc.addImage(barcodeImg, 'PNG', 1, 10, 23, 25); 
 
-      // 4. Save
       doc.save(`barcode_${code}.pdf`);
 
     } catch (err) {
@@ -163,7 +214,7 @@ const Inventory: React.FC = () => {
              className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-lg flex items-center gap-2 font-bold shadow-lg shadow-indigo-600/20 transition-all"
           >
             <PlusCircle size={20} />
-            <span>Nuevo {activeTab === 'TELEPHONES' ? 'Teléfono' : activeTab === 'STOCK' ? 'Accesorio' : 'Registro'}</span>
+            <span>Nuevo Registro</span>
           </button>
         </div>
 
@@ -229,7 +280,7 @@ const Inventory: React.FC = () => {
                     <th className="p-4 text-xs font-bold text-slate-500 uppercase text-right">Precio V.</th>
                     <th className="p-4 text-xs font-bold text-slate-500 uppercase">Ubicación</th>
                     <th className="p-4 text-xs font-bold text-slate-500 uppercase">Fecha</th>
-                    <th className="p-4 text-xs font-bold text-slate-500 uppercase text-center">Imprimir</th>
+                    <th className="p-4 text-xs font-bold text-slate-500 uppercase text-center">Acciones</th>
                   </>
                 )}
                 {activeTab === 'STOCK' && (
@@ -241,7 +292,7 @@ const Inventory: React.FC = () => {
                     <th className="p-4 text-xs font-bold text-slate-500 uppercase text-right">Precio C.</th>
                     <th className="p-4 text-xs font-bold text-slate-500 uppercase text-right">Precio V.</th>
                     <th className="p-4 text-xs font-bold text-slate-500 uppercase">Ubicación</th>
-                    <th className="p-4 text-xs font-bold text-slate-500 uppercase text-center">Imprimir</th>
+                    <th className="p-4 text-xs font-bold text-slate-500 uppercase text-center">Acciones</th>
                   </>
                 )}
                 {activeTab === 'MASTER' && (
@@ -249,12 +300,14 @@ const Inventory: React.FC = () => {
                     <th className="p-4 text-xs font-bold text-slate-500 uppercase">Cod Accesorio</th>
                     <th className="p-4 text-xs font-bold text-slate-500 uppercase">Categoría</th>
                     <th className="p-4 text-xs font-bold text-slate-500 uppercase">Descripción</th>
+                    <th className="p-4 text-xs font-bold text-slate-500 uppercase text-center">Acciones</th>
                   </>
                 )}
                 {activeTab === 'CATEGORIES' && (
                   <>
                     <th className="p-4 text-xs font-bold text-slate-500 uppercase">Cod Categoría</th>
                     <th className="p-4 text-xs font-bold text-slate-500 uppercase">Tipo</th>
+                    <th className="p-4 text-xs font-bold text-slate-500 uppercase text-center">Acciones</th>
                   </>
                 )}
                 {activeTab === 'LOCATIONS' && (
@@ -264,6 +317,7 @@ const Inventory: React.FC = () => {
                     <th className="p-4 text-xs font-bold text-slate-500 uppercase">Descripción</th>
                     <th className="p-4 text-xs font-bold text-slate-500 uppercase">Estante</th>
                     <th className="p-4 text-xs font-bold text-slate-500 uppercase">Nivel</th>
+                    <th className="p-4 text-xs font-bold text-slate-500 uppercase text-center">Acciones</th>
                   </>
                 )}
               </tr>
@@ -281,20 +335,15 @@ const Inventory: React.FC = () => {
                     {p.nombreUbicacion ? (
                       <div className="flex flex-col">
                         <span className="font-bold">{p.nombreUbicacion}</span>
-                        {/* If backend returns estante/nivel for phones join query */}
                         <span className="text-[10px] text-slate-400">Est: {(p as any).estante} - Nvl: {(p as any).nivel}</span>
                       </div>
                     ) : (p.idubicacion)}
                   </td>
                   <td className="p-4 text-xs text-slate-400">{new Date(p.fecha).toLocaleDateString()}</td>
-                  <td className="p-4 text-center">
-                    <button 
-                      onClick={() => handlePrintBarcode(p.codigo, `${p.marca} ${p.modelo}`)}
-                      className="text-slate-500 hover:text-indigo-600 transition-colors"
-                      title="Imprimir Código de Barras"
-                    >
-                      <Printer size={18} />
-                    </button>
+                  <td className="p-4 text-center flex items-center justify-center gap-2">
+                    <button onClick={() => handlePrintBarcode(p.codigo, `${p.marca} ${p.modelo}`)} className="text-slate-500 hover:text-indigo-600" title="Imprimir"><Printer size={16} /></button>
+                    <button onClick={() => openEditModal(p)} className="text-blue-500 hover:bg-blue-50 p-1.5 rounded" title="Editar"><Edit2 size={16}/></button>
+                    <button onClick={() => handleDelete(p.codigo)} className="text-red-500 hover:bg-red-50 p-1.5 rounded" title="Eliminar"><Trash2 size={16}/></button>
                   </td>
                 </tr>
               ))}
@@ -320,14 +369,10 @@ const Inventory: React.FC = () => {
                       </div>
                     ) : (s.idubicacion)}
                   </td>
-                  <td className="p-4 text-center">
-                    <button 
-                      onClick={() => handlePrintBarcode(s.codInventario, s.descripcion || 'Accesorio')}
-                      className="text-slate-500 hover:text-indigo-600 transition-colors"
-                      title="Imprimir Código de Barras"
-                    >
-                      <Printer size={18} />
-                    </button>
+                  <td className="p-4 text-center flex items-center justify-center gap-2">
+                    <button onClick={() => handlePrintBarcode(s.codInventario, s.descripcion || 'Accesorio')} className="text-slate-500 hover:text-indigo-600" title="Imprimir"><Printer size={16} /></button>
+                    <button onClick={() => openEditModal(s)} className="text-blue-500 hover:bg-blue-50 p-1.5 rounded" title="Editar"><Edit2 size={16}/></button>
+                    <button onClick={() => handleDelete(s.codInventario)} className="text-red-500 hover:bg-red-50 p-1.5 rounded" title="Eliminar"><Trash2 size={16}/></button>
                   </td>
                 </tr>
               ))}
@@ -338,6 +383,10 @@ const Inventory: React.FC = () => {
                   <td className="p-4 text-xs font-mono text-slate-500">{m.codAccesorio}</td>
                   <td className="p-4 text-xs text-slate-500">{m.nombreCategoria}</td>
                   <td className="p-4 text-sm font-medium text-slate-800">{m.descripcion}</td>
+                  <td className="p-4 text-center flex items-center justify-center gap-2">
+                    <button onClick={() => openEditModal(m)} className="text-blue-500 hover:bg-blue-50 p-1.5 rounded" title="Editar"><Edit2 size={16}/></button>
+                    <button onClick={() => handleDelete(m.codAccesorio)} className="text-red-500 hover:bg-red-50 p-1.5 rounded" title="Eliminar"><Trash2 size={16}/></button>
+                  </td>
                 </tr>
               ))}
 
@@ -346,6 +395,10 @@ const Inventory: React.FC = () => {
                 <tr key={c.codCategoria} className="hover:bg-slate-50">
                   <td className="p-4 text-xs font-mono text-slate-500">{c.codCategoria}</td>
                   <td className="p-4 text-sm font-bold text-slate-700">{c.tipo}</td>
+                  <td className="p-4 text-center flex items-center justify-center gap-2">
+                    <button onClick={() => openEditModal(c)} className="text-blue-500 hover:bg-blue-50 p-1.5 rounded" title="Editar"><Edit2 size={16}/></button>
+                    <button onClick={() => handleDelete(c.codCategoria)} className="text-red-500 hover:bg-red-50 p-1.5 rounded" title="Eliminar"><Trash2 size={16}/></button>
+                  </td>
                 </tr>
               ))}
 
@@ -357,6 +410,10 @@ const Inventory: React.FC = () => {
                   <td className="p-4 text-sm text-slate-600">{l.descripcion}</td>
                   <td className="p-4 text-xs text-slate-500">{l.estante}</td>
                   <td className="p-4 text-xs text-slate-500">{l.nivel}</td>
+                  <td className="p-4 text-center flex items-center justify-center gap-2">
+                    <button onClick={() => openEditModal(l)} className="text-blue-500 hover:bg-blue-50 p-1.5 rounded" title="Editar"><Edit2 size={16}/></button>
+                    <button onClick={() => handleDelete(l.idUbicacion)} className="text-red-500 hover:bg-red-50 p-1.5 rounded" title="Eliminar"><Trash2 size={16}/></button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -370,12 +427,12 @@ const Inventory: React.FC = () => {
           <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl p-6 animate-fade-in max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center mb-6 border-b border-slate-100 pb-4">
               <h3 className="text-xl font-bold text-slate-800">
-                Nuevo Registro: {activeTab}
+                {isEditing ? 'Editar Registro' : 'Nuevo Registro'}: {activeTab}
               </h3>
               <button onClick={() => setShowModal(false)} className="text-slate-400 hover:text-red-500"><X size={24}/></button>
             </div>
 
-            <form onSubmit={handleCreate} className="space-y-4">
+            <form onSubmit={handleSubmit} className="space-y-4">
               
               {/* FORM: TELEPHONES */}
               {activeTab === 'TELEPHONES' && (
@@ -383,43 +440,43 @@ const Inventory: React.FC = () => {
                   <div className="grid grid-cols-2 gap-4">
                      <div>
                        <label className="text-xs font-bold text-slate-500">IMEI 1</label>
-                       <input required className="w-full p-2 bg-slate-50 border rounded-lg mt-1" onChange={e => setPhoneForm({...phoneForm, imei1: e.target.value})} />
+                       <input required className="w-full p-2 bg-slate-50 border rounded-lg mt-1" value={phoneForm.imei1 || ''} onChange={e => setPhoneForm({...phoneForm, imei1: e.target.value})} />
                      </div>
                      <div>
                        <label className="text-xs font-bold text-slate-500">IMEI 2</label>
-                       <input required className="w-full p-2 bg-slate-50 border rounded-lg mt-1" onChange={e => setPhoneForm({...phoneForm, imei2: e.target.value})} />
+                       <input required className="w-full p-2 bg-slate-50 border rounded-lg mt-1" value={phoneForm.imei2 || ''} onChange={e => setPhoneForm({...phoneForm, imei2: e.target.value})} />
                      </div>
                   </div>
                   <div className="grid grid-cols-2 gap-4">
                      <div>
                        <label className="text-xs font-bold text-slate-500">Marca</label>
-                       <input required className="w-full p-2 bg-slate-50 border rounded-lg mt-1" onChange={e => setPhoneForm({...phoneForm, marca: e.target.value})} />
+                       <input required className="w-full p-2 bg-slate-50 border rounded-lg mt-1" value={phoneForm.marca || ''} onChange={e => setPhoneForm({...phoneForm, marca: e.target.value})} />
                      </div>
                      <div>
                        <label className="text-xs font-bold text-slate-500">Modelo</label>
-                       <input required className="w-full p-2 bg-slate-50 border rounded-lg mt-1" onChange={e => setPhoneForm({...phoneForm, modelo: e.target.value})} />
+                       <input required className="w-full p-2 bg-slate-50 border rounded-lg mt-1" value={phoneForm.modelo || ''} onChange={e => setPhoneForm({...phoneForm, modelo: e.target.value})} />
                      </div>
                   </div>
                   <div className="grid grid-cols-2 gap-4">
                      <div>
                        <label className="text-xs font-bold text-slate-500">Precio Compra</label>
-                       <input type="number" required className="w-full p-2 bg-slate-50 border rounded-lg mt-1" onChange={e => setPhoneForm({...phoneForm, precioCompra: Number(e.target.value)})} />
+                       <input type="number" required className="w-full p-2 bg-slate-50 border rounded-lg mt-1" value={phoneForm.precioCompra || ''} onChange={e => setPhoneForm({...phoneForm, precioCompra: Number(e.target.value)})} />
                      </div>
                      <div>
                        <label className="text-xs font-bold text-slate-500">Precio Venta</label>
-                       <input type="number" required className="w-full p-2 bg-slate-50 border rounded-lg mt-1" onChange={e => setPhoneForm({...phoneForm, precioVenta: Number(e.target.value)})} />
+                       <input type="number" required className="w-full p-2 bg-slate-50 border rounded-lg mt-1" value={phoneForm.precioVenta || ''} onChange={e => setPhoneForm({...phoneForm, precioVenta: Number(e.target.value)})} />
                      </div>
                   </div>
                   <div>
                     <label className="text-xs font-bold text-slate-500">Proveedor</label>
-                    <select required className="w-full p-2 bg-slate-50 border rounded-lg mt-1" onChange={e => setPhoneForm({...phoneForm, codProveedor: e.target.value})}>
+                    <select required className="w-full p-2 bg-slate-50 border rounded-lg mt-1" value={phoneForm.codProveedor || ''} onChange={e => setPhoneForm({...phoneForm, codProveedor: e.target.value})}>
                       <option value="">Seleccione...</option>
                       {providers.map(p => <option key={p.codProveedor} value={p.codProveedor}>{p.nombre}</option>)}
                     </select>
                   </div>
                   <div>
                     <label className="text-xs font-bold text-slate-500">Ubicación Exacta</label>
-                    <select required className="w-full p-2 bg-slate-50 border rounded-lg mt-1" onChange={e => setPhoneForm({...phoneForm, idubicacion: e.target.value})}>
+                    <select required className="w-full p-2 bg-slate-50 border rounded-lg mt-1" value={phoneForm.idubicacion || ''} onChange={e => setPhoneForm({...phoneForm, idubicacion: e.target.value})}>
                       <option value="">Seleccione...</option>
                       {locations.map(l => (
                         <option key={l.idUbicacion} value={l.idUbicacion}>
@@ -436,7 +493,7 @@ const Inventory: React.FC = () => {
                 <>
                   <div>
                     <label className="text-xs font-bold text-slate-500">Producto (Master)</label>
-                    <select required className="w-full p-2 bg-slate-50 border rounded-lg mt-1" onChange={e => setStockForm({...stockForm, codAccesorio: e.target.value})}>
+                    <select disabled={isEditing} required className="w-full p-2 bg-slate-50 border rounded-lg mt-1 disabled:bg-slate-200" value={stockForm.codAccesorio || ''} onChange={e => setStockForm({...stockForm, codAccesorio: e.target.value})}>
                       <option value="">Seleccione...</option>
                       {master.map(m => <option key={m.codAccesorio} value={m.codAccesorio}>{m.descripcion}</option>)}
                     </select>
@@ -444,27 +501,27 @@ const Inventory: React.FC = () => {
                   <div className="grid grid-cols-3 gap-4">
                      <div>
                        <label className="text-xs font-bold text-slate-500">Cantidad</label>
-                       <input type="number" required className="w-full p-2 bg-slate-50 border rounded-lg mt-1" onChange={e => setStockForm({...stockForm, cantidad: Number(e.target.value)})} />
+                       <input type="number" required className="w-full p-2 bg-slate-50 border rounded-lg mt-1" value={stockForm.cantidad !== undefined ? stockForm.cantidad : ''} onChange={e => setStockForm({...stockForm, cantidad: Number(e.target.value)})} />
                      </div>
                      <div>
                        <label className="text-xs font-bold text-slate-500">Precio C.</label>
-                       <input type="number" required className="w-full p-2 bg-slate-50 border rounded-lg mt-1" onChange={e => setStockForm({...stockForm, precioCompra: Number(e.target.value)})} />
+                       <input type="number" required className="w-full p-2 bg-slate-50 border rounded-lg mt-1" value={stockForm.precioCompra || ''} onChange={e => setStockForm({...stockForm, precioCompra: Number(e.target.value)})} />
                      </div>
                      <div>
                        <label className="text-xs font-bold text-slate-500">Precio V.</label>
-                       <input type="number" required className="w-full p-2 bg-slate-50 border rounded-lg mt-1" onChange={e => setStockForm({...stockForm, precioVenta: Number(e.target.value)})} />
+                       <input type="number" required className="w-full p-2 bg-slate-50 border rounded-lg mt-1" value={stockForm.precioVenta || ''} onChange={e => setStockForm({...stockForm, precioVenta: Number(e.target.value)})} />
                      </div>
                   </div>
                   <div>
                     <label className="text-xs font-bold text-slate-500">Proveedor</label>
-                    <select required className="w-full p-2 bg-slate-50 border rounded-lg mt-1" onChange={e => setStockForm({...stockForm, codProveedor: e.target.value})}>
+                    <select required className="w-full p-2 bg-slate-50 border rounded-lg mt-1" value={stockForm.codProveedor || ''} onChange={e => setStockForm({...stockForm, codProveedor: e.target.value})}>
                       <option value="">Seleccione...</option>
                       {providers.map(p => <option key={p.codProveedor} value={p.codProveedor}>{p.nombre}</option>)}
                     </select>
                   </div>
                   <div>
                     <label className="text-xs font-bold text-slate-500">Ubicación Exacta</label>
-                    <select required className="w-full p-2 bg-slate-50 border rounded-lg mt-1" onChange={e => setStockForm({...stockForm, idubicacion: e.target.value})}>
+                    <select required className="w-full p-2 bg-slate-50 border rounded-lg mt-1" value={stockForm.idubicacion || ''} onChange={e => setStockForm({...stockForm, idubicacion: e.target.value})}>
                       <option value="">Seleccione...</option>
                       {locations.map(l => (
                         <option key={l.idUbicacion} value={l.idUbicacion}>
@@ -481,14 +538,14 @@ const Inventory: React.FC = () => {
                 <>
                   <div>
                     <label className="text-xs font-bold text-slate-500">Categoría</label>
-                    <select required className="w-full p-2 bg-slate-50 border rounded-lg mt-1" onChange={e => setMasterForm({...masterForm, codCategoria: e.target.value})}>
+                    <select required className="w-full p-2 bg-slate-50 border rounded-lg mt-1" value={masterForm.codCategoria || ''} onChange={e => setMasterForm({...masterForm, codCategoria: e.target.value})}>
                       <option value="">Seleccione...</option>
                       {categories.map(c => <option key={c.codCategoria} value={c.codCategoria}>{c.tipo}</option>)}
                     </select>
                   </div>
                   <div>
                     <label className="text-xs font-bold text-slate-500">Descripción / Nombre</label>
-                    <input required className="w-full p-2 bg-slate-50 border rounded-lg mt-1" onChange={e => setMasterForm({...masterForm, descripcion: e.target.value})} />
+                    <input required className="w-full p-2 bg-slate-50 border rounded-lg mt-1" value={masterForm.descripcion || ''} onChange={e => setMasterForm({...masterForm, descripcion: e.target.value})} />
                   </div>
                 </>
               )}
@@ -497,7 +554,7 @@ const Inventory: React.FC = () => {
               {activeTab === 'CATEGORIES' && (
                 <div>
                    <label className="text-xs font-bold text-slate-500">Nombre Categoría</label>
-                   <input required className="w-full p-2 bg-slate-50 border rounded-lg mt-1" onChange={e => setCatForm({...catForm, tipo: e.target.value})} />
+                   <input required className="w-full p-2 bg-slate-50 border rounded-lg mt-1" value={catForm.tipo || ''} onChange={e => setCatForm({...catForm, tipo: e.target.value})} />
                 </div>
               )}
 
@@ -506,20 +563,20 @@ const Inventory: React.FC = () => {
                 <>
                   <div>
                      <label className="text-xs font-bold text-slate-500">Nombre</label>
-                     <input required className="w-full p-2 bg-slate-50 border rounded-lg mt-1" onChange={e => setLocForm({...locForm, nombre: e.target.value})} />
+                     <input required className="w-full p-2 bg-slate-50 border rounded-lg mt-1" value={locForm.nombre || ''} onChange={e => setLocForm({...locForm, nombre: e.target.value})} />
                   </div>
                   <div>
                      <label className="text-xs font-bold text-slate-500">Descripción</label>
-                     <input required className="w-full p-2 bg-slate-50 border rounded-lg mt-1" onChange={e => setLocForm({...locForm, descripcion: e.target.value})} />
+                     <input required className="w-full p-2 bg-slate-50 border rounded-lg mt-1" value={locForm.descripcion || ''} onChange={e => setLocForm({...locForm, descripcion: e.target.value})} />
                   </div>
                   <div className="grid grid-cols-2 gap-4">
                      <div>
                        <label className="text-xs font-bold text-slate-500">Estante</label>
-                       <input required className="w-full p-2 bg-slate-50 border rounded-lg mt-1" onChange={e => setLocForm({...locForm, estante: e.target.value})} />
+                       <input required className="w-full p-2 bg-slate-50 border rounded-lg mt-1" value={locForm.estante || ''} onChange={e => setLocForm({...locForm, estante: e.target.value})} />
                      </div>
                      <div>
                        <label className="text-xs font-bold text-slate-500">Nivel</label>
-                       <input required className="w-full p-2 bg-slate-50 border rounded-lg mt-1" onChange={e => setLocForm({...locForm, nivel: e.target.value})} />
+                       <input required className="w-full p-2 bg-slate-50 border rounded-lg mt-1" value={locForm.nivel || ''} onChange={e => setLocForm({...locForm, nivel: e.target.value})} />
                      </div>
                   </div>
                 </>
@@ -527,7 +584,7 @@ const Inventory: React.FC = () => {
 
               <div className="pt-4 flex gap-3">
                 <button type="button" onClick={() => setShowModal(false)} className="flex-1 px-4 py-3 bg-slate-100 text-slate-600 font-bold rounded-xl hover:bg-slate-200">Cancelar</button>
-                <button type="submit" className="flex-1 px-4 py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 shadow-lg shadow-indigo-600/20">Guardar</button>
+                <button type="submit" className="flex-1 px-4 py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 shadow-lg shadow-indigo-600/20">{isEditing ? 'Actualizar' : 'Guardar'}</button>
               </div>
             </form>
           </div>

@@ -87,19 +87,29 @@ export const InventoryService = {
   // Specific Endpoints
   getTelefonos: () => request<Telefono[]>('/inventory/telefonos'),
   createTelefono: (data: Partial<Telefono>) => request('/inventory/telefonos', { method: 'POST', body: JSON.stringify(data) }),
-  
+  updateTelefono: (id: string, data: Partial<Telefono>) => request(`/inventory/telefonos/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteTelefono: (id: string) => request(`/inventory/telefonos/${id}`, { method: 'DELETE' }),
+
   getStockAccesorios: () => request<InventarioAccesorio[]>('/inventory/stock'),
   createStock: (data: Partial<InventarioAccesorio>) => request('/inventory/stock', { method: 'POST', body: JSON.stringify(data) }),
-  
+  updateStock: (id: string, data: Partial<InventarioAccesorio>) => request(`/inventory/stock/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteStock: (id: string) => request(`/inventory/stock/${id}`, { method: 'DELETE' }),
+
   getAccesoriosMaster: () => request<AccesorioMaster[]>('/inventory/accesorios-master'),
   createAccesorioMaster: (data: Partial<AccesorioMaster>) => request('/inventory/accesorios-master', { method: 'POST', body: JSON.stringify(data) }),
-  
+  updateAccesorioMaster: (id: string, data: Partial<AccesorioMaster>) => request(`/inventory/accesorios-master/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteAccesorioMaster: (id: string) => request(`/inventory/accesorios-master/${id}`, { method: 'DELETE' }),
+
   getCategorias: () => request<Categoria[]>('/inventory/categorias'),
   createCategoria: (data: Partial<Categoria>) => request('/inventory/categorias', { method: 'POST', body: JSON.stringify(data) }),
-  
+  updateCategoria: (id: string, data: Partial<Categoria>) => request(`/inventory/categorias/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteCategoria: (id: string) => request(`/inventory/categorias/${id}`, { method: 'DELETE' }),
+
   getUbicaciones: () => request<Ubicacion[]>('/inventory/ubicaciones'),
   createUbicacion: (data: Partial<Ubicacion>) => request('/inventory/ubicaciones', { method: 'POST', body: JSON.stringify(data) }),
-  
+  updateUbicacion: (id: string, data: Partial<Ubicacion>) => request(`/inventory/ubicaciones/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteUbicacion: (id: string) => request(`/inventory/ubicaciones/${id}`, { method: 'DELETE' }),
+
   getProveedores: () => request<Proveedor[]>('/proveedores'),
 };
 
