@@ -53,19 +53,11 @@ async function initDB() {
     
     // Ensure all columns exist
     await pool.query(`ALTER TABLE ventas ADD COLUMN IF NOT EXISTS codUsuario varchar(100)`);
+    await pool.query(`ALTER TABLE ventas ADD COLUMN IF NOT EXISTS codvendedor varchar(100)`); // Asegurar que existe codvendedor
     await pool.query(`ALTER TABLE ventas ADD COLUMN IF NOT EXISTS identidadCliente varchar(20)`);
     await pool.query(`ALTER TABLE ventas ADD COLUMN IF NOT EXISTS tipoCompra varchar(20)`);
     await pool.query(`ALTER TABLE ventas ADD COLUMN IF NOT EXISTS isv numeric(10,2) DEFAULT 0`);
     await pool.query(`ALTER TABLE ventas ADD COLUMN IF NOT EXISTS descuento numeric(10,2) DEFAULT 0`);
-
-    // --- FIX LEGACY SCHEMA ISSUES (codvendedor error) ---
-    try {
-        // Intenta quitar el NOT NULL de codvendedor si existe para evitar el error de inserción
-        await pool.query(`ALTER TABLE ventas ALTER COLUMN codvendedor DROP NOT NULL`);
-        console.log('⚠️ Constraint codvendedor NOT NULL eliminada para compatibilidad');
-    } catch (e) {
-        // Ignoramos el error si la columna no existe (DB nueva)
-    }
 
     await pool.query(`CREATE TABLE IF NOT EXISTS detalle_venta (codDetalleVenta varchar(100) PRIMARY KEY, idVenta varchar(100) NOT NULL, idTelefono varchar(100), idInventario varchar(100), cantidad integer NOT NULL, precioVenta numeric(10,2) NOT NULL);`);
     
@@ -302,9 +294,10 @@ app.post('/api/ventas', authenticateToken, async (req, res) => {
     const safeIsv = Number(isv) || 0;
     const safeDescuento = Number(descuento) || 0;
 
+    // CORRECCIÓN: Se agrega codvendedor y se mapea con codUsuario ($3)
     await client.query(
-      `INSERT INTO ventas (codVenta, fecha, codUsuario, identidadCliente, tipoCompra, total, isv, descuento, estado)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'Completada')`,
+      `INSERT INTO ventas (codVenta, fecha, codUsuario, codvendedor, identidadCliente, tipoCompra, total, isv, descuento, estado)
+       VALUES ($1, $2, $3, $3, $4, $5, $6, $7, $8, 'Completada')`,
       [codVenta, fecha, codUsuario, identidadCliente, tipoCompra, safeTotal, safeIsv, safeDescuento]
     );
 
