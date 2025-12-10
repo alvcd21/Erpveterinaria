@@ -1,9 +1,10 @@
-
 import React, { useState, useEffect } from 'react';
 import { InventoryService, ClientService, SalesService } from '../services/api';
 import { ProductoUnified, DetalleVenta, Cliente } from '../types';
-import { Search, ShoppingCart, Trash2, UserPlus, CreditCard, Smartphone, Headphones, Zap, RefreshCw } from 'lucide-react';
+import { Search, ShoppingCart, Trash2, UserPlus, CreditCard, Smartphone, Headphones, Zap, RefreshCw, Printer } from 'lucide-react';
 import Swal from 'sweetalert2';
+import { jsPDF } from 'jspdf';
+import { useAuth } from '../context/AuthContext';
 
 const POS: React.FC = () => {
   const [products, setProducts] = useState<ProductoUnified[]>([]);
@@ -11,14 +12,13 @@ const POS: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
   
-  // Client State
   const [clients, setClients] = useState<Cliente[]>([]);
   const [selectedClientId, setSelectedClientId] = useState<string>('');
   
-  // Sale Config
   const [paymentType, setPaymentType] = useState<'Contado' | 'Credito'>('Contado');
   const [discount, setDiscount] = useState<number>(0);
   const [isLoading, setIsLoading] = useState(false);
+  const { user } = useAuth();
 
   useEffect(() => {
     loadInitialData();
@@ -42,7 +42,6 @@ const POS: React.FC = () => {
 
   const addToCart = (product: ProductoUnified) => {
     setCart(prev => {
-      // Check if product is already in cart
       const existing = prev.find(item => 
         (item.idTelefono === product.id) || (item.idInventario === product.id)
       );
@@ -62,14 +61,13 @@ const POS: React.FC = () => {
         });
       }
 
-      // New Item
       const newItem: DetalleVenta = {
-        codDetalleVenta: `TEMP-${Date.now()}`, // Frontend Temp ID
+        codDetalleVenta: `TEMP-${Date.now()}`,
         idTelefono: product.tipo === 'TELEFONO' ? product.id : undefined,
         idInventario: product.tipo === 'ACCESORIO' ? product.id : undefined,
         cantidad: 1,
         precioVenta: Number(product.precioVenta),
-        descripcionProducto: product.nombre, // Helper for UI
+        descripcionProducto: product.nombre,
         tipoProducto: product.tipo
       };
       return [...prev, newItem];
@@ -80,14 +78,138 @@ const POS: React.FC = () => {
     setCart(prev => prev.filter(item => item.codDetalleVenta !== tempId));
   };
 
+  // --- UPDATED CALCULATION LOGIC ---
+  // Matches Legacy: Impuesto = total * 0.15; Subtotal = total - Impuesto;
   const calculateTotal = () => {
-    const subtotal = cart.reduce((acc, item) => acc + (item.cantidad * item.precioVenta), 0);
-    const tax = subtotal * 0.15; // 15% ISV
-    const total = subtotal + tax - discount;
-    return { subtotal, tax, total: total > 0 ? total : 0 };
+    const grossTotal = cart.reduce((acc, item) => acc + (item.cantidad * item.precioVenta), 0);
+    const totalBeforeDiscount = grossTotal;
+    const finalTotal = totalBeforeDiscount - discount;
+    
+    // ISV Calculation based on final total (Inclusive)
+    const isv = finalTotal * 0.15;
+    const subtotal = finalTotal - isv;
+
+    return { 
+      subtotal: subtotal > 0 ? subtotal : 0, 
+      tax: isv > 0 ? isv : 0, 
+      total: finalTotal > 0 ? finalTotal : 0 
+    };
   };
 
   const { subtotal, tax, total } = calculateTotal();
+
+  // --- PDF GENERATION ---
+  const generateInvoicePDF = (codVenta: string, date: Date) => {
+    try {
+      const doc = new jsPDF();
+      const client = getClientDetails();
+
+      // Config
+      const pageWidth = doc.internal.pageSize.getWidth();
+      doc.setFont("helvetica", "normal");
+      
+      // Header Box
+      doc.setDrawColor(0);
+      doc.rect(10, 10, 90, 30); // Left Box (Company)
+      doc.rect(110, 10, 90, 30); // Right Box (Invoice Info)
+
+      // Company Info
+      doc.setFontSize(14);
+      doc.setFont("helvetica", "bold");
+      doc.text("SMARTCLOUD", 55, 18, { align: "center" });
+      doc.setFontSize(8);
+      doc.setFont("helvetica", "normal");
+      doc.text("Mercado Nuevo-Avenida Valle", 55, 23, { align: "center" });
+      doc.text("Frente a Tiendas Me lo Llevo", 55, 27, { align: "center" });
+      doc.setFont("helvetica", "bold");
+      doc.text("Venta de Telefonos y Accesorios", 55, 32, { align: "center" });
+      doc.text("Telefono:+504-96676374", 55, 36, { align: "center" });
+
+      // Invoice Info (Right)
+      doc.setFontSize(12);
+      doc.text("FACTURA", 155, 18, { align: "center" });
+      doc.setFontSize(10);
+      doc.text(codVenta, 155, 23, { align: "center" });
+      
+      doc.setFontSize(8);
+      doc.text(`FECHA: ${date.toLocaleDateString()}`, 115, 30);
+      doc.text(`R.T.N:`, 115, 35);
+      
+      // Client Info Row
+      doc.rect(10, 45, 190, 20);
+      doc.line(10, 55, 200, 55); // Horizontal divider
+      doc.line(110, 45, 110, 65); // Vertical divider
+
+      doc.setFont("helvetica", "bold");
+      doc.text("FECHA EMISION:", 12, 50);
+      doc.setFont("helvetica", "normal");
+      doc.text(date.toLocaleDateString(), 40, 50);
+
+      doc.setFont("helvetica", "bold");
+      doc.text("CONDICIONES:", 112, 50);
+      doc.setFont("helvetica", "normal");
+      doc.text(paymentType.toUpperCase(), 140, 50);
+
+      doc.setFont("helvetica", "bold");
+      doc.text("CLIENTE:", 12, 60);
+      doc.setFont("helvetica", "normal");
+      doc.text(client ? `${client.nombre} ${client.apellido}`.toUpperCase() : "CONSUMIDOR FINAL", 40, 60);
+
+      doc.setFont("helvetica", "bold");
+      doc.text("VENDEDOR:", 112, 60);
+      doc.setFont("helvetica", "normal");
+      doc.text(user?.nombreEmpleado || "ADMIN", 140, 60);
+
+      // Table Header
+      let y = 70;
+      doc.setFillColor(240, 240, 240);
+      doc.rect(10, y, 190, 8, 'F');
+      doc.rect(10, y, 190, 8, 'S'); // Stroke
+      
+      doc.setFont("helvetica", "bold");
+      doc.text("DESCRIPCION", 15, y+5);
+      doc.text("CANT", 130, y+5, { align: "center" });
+      doc.text("PREC.", 160, y+5, { align: "center" });
+      doc.text("TOTAL", 190, y+5, { align: "center" });
+
+      // Table Content
+      y += 8;
+      doc.setFont("helvetica", "normal");
+      cart.forEach(item => {
+        const itemTotal = item.cantidad * item.precioVenta;
+        doc.text(item.descripcionProducto?.substring(0, 40) || "", 15, y+5);
+        doc.text(item.cantidad.toString(), 130, y+5, { align: "center" });
+        doc.text(item.precioVenta.toFixed(2), 160, y+5, { align: "center" });
+        doc.text(itemTotal.toFixed(2), 190, y+5, { align: "center" });
+        y += 6;
+      });
+
+      // Totals Box
+      const totalY = 160; // Fixed position for totals at bottom
+      doc.rect(120, totalY, 80, 30);
+      
+      doc.text("Sub-Total", 125, totalY + 6);
+      doc.text(subtotal.toFixed(2), 195, totalY + 6, { align: "right" });
+      
+      doc.text("Descuento", 125, totalY + 12);
+      doc.text(discount.toFixed(2), 195, totalY + 12, { align: "right" });
+      
+      doc.text("ISV (15%)", 125, totalY + 18);
+      doc.text(tax.toFixed(2), 195, totalY + 18, { align: "right" });
+      
+      doc.setFont("helvetica", "bold");
+      doc.text("TOTAL", 125, totalY + 26);
+      doc.text(total.toFixed(2), 195, totalY + 26, { align: "right" });
+
+      doc.setFontSize(7);
+      doc.text("LA FACTURA ES BENEFICIO DE TODOS, EXIJALA", 105, 280, { align: "center" });
+
+      doc.save(`Factura_${codVenta}.pdf`);
+    } catch (err) {
+      console.error(err);
+      Swal.fire("Error PDF", "No se pudo generar el PDF", "error");
+    }
+  };
 
   const handleProcessSale = async () => {
     if (cart.length === 0) return Swal.fire('Carrito Vacío', 'Agrega productos para facturar.', 'warning');
@@ -104,7 +226,7 @@ const POS: React.FC = () => {
 
     if (result.isConfirmed) {
       try {
-        await SalesService.createVenta({
+        const response = await SalesService.createVenta({
           identidadCliente: selectedClientId,
           tipoCompra: paymentType,
           total: total,
@@ -113,7 +235,19 @@ const POS: React.FC = () => {
           detalles: cart
         });
         
-        Swal.fire('Éxito', 'Venta registrada correctamente', 'success');
+        Swal.fire({
+          title: 'Éxito',
+          text: 'Venta registrada correctamente',
+          icon: 'success',
+          showCancelButton: true,
+          confirmButtonText: 'Imprimir Factura',
+          cancelButtonText: 'Cerrar'
+        }).then((res) => {
+          if (res.isConfirmed) {
+            generateInvoicePDF(response.codVenta || 'NEW', new Date());
+          }
+        });
+
         setCart([]);
         setDiscount(0);
         setPaymentType('Contado');

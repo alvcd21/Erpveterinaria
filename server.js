@@ -1,4 +1,3 @@
-
 const express = require('express');
 const path = require('path');
 const { Pool } = require('pg');
@@ -35,7 +34,9 @@ async function initDB() {
     await pool.query(`CREATE TABLE IF NOT EXISTS accesorios (codAccesorio varchar(100) PRIMARY KEY, codCategoria varchar(50) NOT NULL, descripcion varchar(100) NOT NULL);`);
     await pool.query(`CREATE TABLE IF NOT EXISTS telefonos (codigo varchar(100) PRIMARY KEY, imei1 varchar(50) NOT NULL, imei2 varchar(50) NOT NULL, marca varchar(50) NOT NULL, modelo varchar(50) NOT NULL, precioCompra numeric(10,2) NOT NULL, precioVenta numeric(10,2) NOT NULL, codProveedor varchar(50) NOT NULL, fecha date NOT NULL, idubicacion varchar(100) NOT NULL, estado varchar(20) NOT NULL);`);
     await pool.query(`CREATE TABLE IF NOT EXISTS inventario (codInventario varchar(100) PRIMARY KEY, codAccesorio varchar(100), cantidad integer NOT NULL, precioCompra numeric(10,2) NOT NULL, precioVenta numeric(10,2) NOT NULL, codProveedor varchar(50) NOT NULL, fecha date NOT NULL, idubicacion varchar(100) NOT NULL, estado varchar(100) NOT NULL);`);
-    await pool.query(`CREATE TABLE IF NOT EXISTS proveedores (codProveedor varchar(50) PRIMARY KEY, nombre varchar(100) NOT NULL, telefono varchar(50), direccion varchar(150));`);
+    
+    // UPDATED: Added fechaCreacion to providers to match typical error requirements if DB has it
+    await pool.query(`CREATE TABLE IF NOT EXISTS proveedores (codProveedor varchar(50) PRIMARY KEY, nombre varchar(100) NOT NULL, telefono varchar(50), direccion varchar(150), fechaCreacion timestamp DEFAULT NOW());`);
     
     // 3. Clientes
     await pool.query(`CREATE TABLE IF NOT EXISTS clientes (identidad varchar(20) PRIMARY KEY, nombre varchar(50) NOT NULL, apellido varchar(50) NOT NULL, direccion varchar(150) NOT NULL, telefono varchar(20), correo varchar(100), fechaCreacion timestamp DEFAULT NOW());`);
@@ -44,11 +45,10 @@ async function initDB() {
     await pool.query(`CREATE TABLE IF NOT EXISTS ventas (codVenta varchar(100) PRIMARY KEY, fecha timestamp NOT NULL, codUsuario varchar(100) NOT NULL, identidadCliente varchar(20) NOT NULL, tipoCompra varchar(20) NOT NULL, total numeric(10,2) NOT NULL, isv numeric(10,2) NOT NULL, descuento numeric(10,2) NOT NULL, estado varchar(20) NOT NULL);`);
     await pool.query(`CREATE TABLE IF NOT EXISTS detalle_venta (codDetalleVenta varchar(100) PRIMARY KEY, idVenta varchar(100) NOT NULL, idTelefono varchar(100), idInventario varchar(100), cantidad integer NOT NULL, precioVenta numeric(10,2) NOT NULL);`);
     
-    // 5. Data Inicial (Seeds)
-    await pool.query("INSERT INTO proveedores (codProveedor, nombre, telefono, direccion) VALUES ('PROV-GEN', 'General', '0000', 'Ciudad') ON CONFLICT DO NOTHING");
+    // 5. Data Inicial (Seeds) - FIXED Insert to include NOW() for fechaCreacion
+    await pool.query("INSERT INTO proveedores (codProveedor, nombre, telefono, direccion, fechaCreacion) VALUES ('PROV-GEN', 'General', '0000', 'Ciudad', NOW()) ON CONFLICT DO NOTHING");
     await pool.query("INSERT INTO ubicacion (idUbicacion, nombre, descripcion, estante, nivel, estado) VALUES ('UBIC-0001', 'Vitrina Principal', 'Entrada', '1', '1', 'Activo') ON CONFLICT DO NOTHING");
     
-    // Default Admin User logic could go here if needed
     console.log('✅ Base de datos inicializada correctamente');
   } catch (err) {
     console.error('❌ Error inicializando BD:', err);
@@ -58,7 +58,6 @@ async function initDB() {
 // --- HELPER: GENERADOR DE IDs (ROBUST) ---
 async function generateNextId(table, column, prefix) {
   try {
-    // Get all IDs that start with the prefix
     const query = `SELECT ${column} as id FROM ${table} WHERE ${column} LIKE '${prefix}-%'`;
     const result = await pool.query(query);
     
@@ -66,10 +65,8 @@ async function generateNextId(table, column, prefix) {
     
     for (const row of result.rows) {
       if (!row.id) continue;
-      // Split by prefix
       const parts = row.id.split(`${prefix}-`);
       if (parts.length === 2) {
-        // We have a suffix. Check if it is purely numeric.
         const suffix = parts[1];
         if (/^\d+$/.test(suffix)) {
           const num = parseInt(suffix, 10);
@@ -198,7 +195,7 @@ app.post('/api/proveedores', authenticateToken, async (req, res) => {
     const { nombre, telefono, direccion } = req.body;
     const codProveedor = await generateNextId('proveedores', 'codProveedor', 'PROV');
     await pool.query(
-      "INSERT INTO proveedores (codProveedor, nombre, telefono, direccion) VALUES ($1, $2, $3, $4)",
+      "INSERT INTO proveedores (codProveedor, nombre, telefono, direccion, fechaCreacion) VALUES ($1, $2, $3, $4, NOW())",
       [codProveedor, nombre, telefono, direccion]
     );
     res.status(201).json({ message: 'Proveedor creado', id: codProveedor });
@@ -274,7 +271,7 @@ app.post('/api/ventas', authenticateToken, async (req, res) => {
     }
 
     await client.query('COMMIT');
-    res.status(201).json({ message: 'Venta registrada con éxito', codVenta });
+    res.status(201).json({ message: 'Venta registrada con éxito', codVenta, fecha });
 
   } catch (err) {
     await client.query('ROLLBACK');

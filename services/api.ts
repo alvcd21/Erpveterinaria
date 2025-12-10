@@ -1,4 +1,3 @@
-
 import { 
   Telefono, 
   InventarioAccesorio, 
@@ -125,7 +124,7 @@ export const ClientService = {
 };
 
 export const SalesService = {
-  createVenta: (venta: VentaPayload) => request('/ventas', { method: 'POST', body: JSON.stringify(venta) }),
+  createVenta: (venta: VentaPayload) => request<{ message: string; codVenta: string; fecha: string }>('/ventas', { method: 'POST', body: JSON.stringify(venta) }),
 };
 
 export const CashService = {
