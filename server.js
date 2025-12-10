@@ -58,6 +58,15 @@ async function initDB() {
     await pool.query(`ALTER TABLE ventas ADD COLUMN IF NOT EXISTS isv numeric(10,2) DEFAULT 0`);
     await pool.query(`ALTER TABLE ventas ADD COLUMN IF NOT EXISTS descuento numeric(10,2) DEFAULT 0`);
 
+    // --- FIX LEGACY SCHEMA ISSUES (codvendedor error) ---
+    try {
+        // Intenta quitar el NOT NULL de codvendedor si existe para evitar el error de inserción
+        await pool.query(`ALTER TABLE ventas ALTER COLUMN codvendedor DROP NOT NULL`);
+        console.log('⚠️ Constraint codvendedor NOT NULL eliminada para compatibilidad');
+    } catch (e) {
+        // Ignoramos el error si la columna no existe (DB nueva)
+    }
+
     await pool.query(`CREATE TABLE IF NOT EXISTS detalle_venta (codDetalleVenta varchar(100) PRIMARY KEY, idVenta varchar(100) NOT NULL, idTelefono varchar(100), idInventario varchar(100), cantidad integer NOT NULL, precioVenta numeric(10,2) NOT NULL);`);
     
     await pool.query(`ALTER TABLE detalle_venta ADD COLUMN IF NOT EXISTS idTelefono varchar(100)`);
