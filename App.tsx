@@ -1,5 +1,5 @@
 import React from 'react';
-import { HashRouter, Switch, Route, Redirect } from 'react-router-dom';
+import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import Layout from './components/Layout';
@@ -22,59 +22,77 @@ const App: React.FC = () => {
   return (
     <AuthProvider>
       <HashRouter>
-        <Switch>
-          <Route path="/login" component={Login} />
+        <Routes>
+          <Route path="/login" element={<Login />} />
 
           {/* Wrapper Route for all protected pages */}
-          <Route path="/">
+          <Route path="/*" element={
             <ProtectedRoute>
               <Layout>
-                <Switch>
-                  <Route exact path="/" component={Dashboard} />
+                <Routes>
+                  <Route path="/" element={<Dashboard />} />
                   
-                  <ProtectedRoute 
+                  <Route 
                     path="/pos" 
-                    component={POS} 
-                    allowedRoles={['Administrador', 'Vendedor']} 
+                    element={
+                      <ProtectedRoute allowedRoles={['Administrador', 'Vendedor']}>
+                        <POS />
+                      </ProtectedRoute>
+                    } 
                   />
                   
-                  <ProtectedRoute 
+                  <Route 
                     path="/clients" 
-                    render={() => <Placeholder title="Gestión de Clientes" />} 
-                    allowedRoles={['Administrador', 'Vendedor']} 
+                    element={
+                      <ProtectedRoute allowedRoles={['Administrador', 'Vendedor']}>
+                        <Placeholder title="Gestión de Clientes" />
+                      </ProtectedRoute>
+                    } 
                   />
 
-                  <ProtectedRoute 
+                  <Route 
                     path="/inventory" 
-                    component={Inventory} 
-                    allowedRoles={['Administrador', 'Inventario']} 
+                    element={
+                      <ProtectedRoute allowedRoles={['Administrador', 'Inventario']}>
+                        <Inventory />
+                      </ProtectedRoute>
+                    } 
                   />
 
-                  <ProtectedRoute 
+                  <Route 
                     path="/cash" 
-                    component={CashRegister} 
-                    allowedRoles={['Administrador', 'Cajero']} 
+                    element={
+                      <ProtectedRoute allowedRoles={['Administrador', 'Cajero']}>
+                        <CashRegister />
+                      </ProtectedRoute>
+                    } 
                   />
 
-                  <ProtectedRoute 
+                  <Route 
                     path="/reports" 
-                    render={() => <Placeholder title="Reportes" />} 
-                    allowedRoles={['Administrador']} 
+                    element={
+                      <ProtectedRoute allowedRoles={['Administrador']}>
+                        <Placeholder title="Reportes" />
+                      </ProtectedRoute>
+                    } 
                   />
                   
-                  <ProtectedRoute 
+                  <Route 
                     path="/admin/users" 
-                    component={AdminUsers} 
-                    allowedRoles={['Administrador']} 
+                    element={
+                      <ProtectedRoute allowedRoles={['Administrador']}>
+                        <AdminUsers />
+                      </ProtectedRoute>
+                    } 
                   />
 
-                  <Redirect to="/" />
-                </Switch>
+                  <Route path="*" element={<Navigate to="/" replace />} />
+                </Routes>
               </Layout>
             </ProtectedRoute>
-          </Route>
+          } />
 
-        </Switch>
+        </Routes>
       </HashRouter>
     </AuthProvider>
   );

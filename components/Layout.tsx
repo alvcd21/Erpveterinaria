@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Link, withRouter, RouteComponentProps } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { 
   LayoutDashboard, 
@@ -17,17 +17,19 @@ import {
   ShieldCheck
 } from 'lucide-react';
 
-interface LayoutProps extends RouteComponentProps {
+interface LayoutProps {
   children?: React.ReactNode;
 }
 
-const Layout: React.FC<LayoutProps> = ({ history, location, children }) => {
+const Layout: React.FC<LayoutProps> = ({ children }) => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const { user, logout, hasPermission } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
 
   const handleLogout = () => {
     logout();
-    history.push('/login');
+    navigate('/login');
   };
 
   // Definir menú y qué roles pueden ver cada ítem
@@ -195,4 +197,4 @@ const Layout: React.FC<LayoutProps> = ({ history, location, children }) => {
   );
 };
 
-export default withRouter(Layout);
+export default Layout;

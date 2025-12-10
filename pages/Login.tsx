@@ -1,14 +1,15 @@
 import React, { useState } from 'react';
-import { withRouter, RouteComponentProps } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { CloudLightning, Lock, User, ArrowRight, AlertCircle } from 'lucide-react';
 
-const Login: React.FC<RouteComponentProps> = ({ history }) => {
+const Login: React.FC = () => {
   const [usuario, setUsuario] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const { login } = useAuth();
+  const navigate = useNavigate();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -17,7 +18,7 @@ const Login: React.FC<RouteComponentProps> = ({ history }) => {
 
     try {
       await login({ usuario, password });
-      history.push('/');
+      navigate('/');
     } catch (err: any) {
       setError(err.message || 'Error al iniciar sesión');
     } finally {
@@ -91,4 +92,4 @@ const Login: React.FC<RouteComponentProps> = ({ history }) => {
   );
 };
 
-export default withRouter(Login);
+export default Login;

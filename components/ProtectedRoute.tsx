@@ -1,38 +1,27 @@
 import React from 'react';
-import { Route, Redirect, RouteProps } from 'react-router-dom';
+import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
-interface ProtectedRouteProps extends RouteProps {
+interface ProtectedRouteProps {
+  children: React.ReactNode;
   allowedRoles?: string[];
 }
 
-const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ allowedRoles, component: Component, render, children, ...rest }) => {
+const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, allowedRoles }) => {
   const { isAuthenticated, hasPermission } = useAuth();
+  const location = useLocation();
 
-  return (
-    <Route
-      {...rest}
-      render={(props) => {
-        if (!isAuthenticated) {
-          return <Redirect to={{ pathname: '/login', state: { from: props.location } }} />;
-        }
+  if (!isAuthenticated) {
+    // Redirect to login while saving the attempted location
+    return <Navigate to="/login" state={{ from: location }} replace />;
+  }
 
-        if (allowedRoles && !hasPermission(allowedRoles)) {
-          return <Redirect to="/" />;
-        }
+  if (allowedRoles && !hasPermission(allowedRoles)) {
+    // User is logged in but doesn't have permission
+    return <Navigate to="/" replace />;
+  }
 
-        if (Component) {
-          return <Component {...props} />;
-        }
-
-        if (render) {
-          return render(props);
-        }
-
-        return children;
-      }}
-    />
-  );
+  return <>{children}</>;
 };
 
 export default ProtectedRoute;
