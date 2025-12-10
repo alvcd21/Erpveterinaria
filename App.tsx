@@ -34,21 +34,23 @@ const App: React.FC = () => {
                 <Routes>
                   <Route path="/" element={<Dashboard />} />
                   
-                  <Route path="/pos" element={<ProtectedRoute allowedRoles={['Administrador', 'Vendedor']}><POS /></ProtectedRoute>} />
-                  <Route path="/clients" element={<ProtectedRoute allowedRoles={['Administrador', 'Vendedor']}><Clients /></ProtectedRoute>} />
-                  <Route path="/providers" element={<ProtectedRoute allowedRoles={['Administrador', 'Inventario']}><Providers /></ProtectedRoute>} />
-                  <Route path="/inventory" element={<ProtectedRoute allowedRoles={['Administrador', 'Inventario']}><Inventory /></ProtectedRoute>} />
-                  <Route path="/cash" element={<ProtectedRoute allowedRoles={['Administrador', 'Cajero']}><CashRegister /></ProtectedRoute>} />
+                  {/* Rutas Protegidas por Permisos Específicos */}
+                  <Route path="/pos" element={<ProtectedRoute requiredPermission="VER_POS"><POS /></ProtectedRoute>} />
+                  <Route path="/clients" element={<ProtectedRoute requiredPermission="VER_CLIENTES"><Clients /></ProtectedRoute>} />
                   
-                  {/* Costos Route */}
-                  <Route path="/costs" element={<ProtectedRoute allowedRoles={['Administrador']}><Costs /></ProtectedRoute>} />
+                  <Route path="/providers" element={<ProtectedRoute requiredPermission="VER_PROVEEDORES"><Providers /></ProtectedRoute>} />
+                  <Route path="/inventory" element={<ProtectedRoute requiredPermission="VER_INVENTARIO"><Inventory /></ProtectedRoute>} />
+                  
+                  <Route path="/cash" element={<ProtectedRoute requiredPermission="VER_CAJA"><CashRegister /></ProtectedRoute>} />
+                  <Route path="/costs" element={<ProtectedRoute requiredPermission="VER_COSTOS"><Costs /></ProtectedRoute>} />
 
-                  <Route path="/reports" element={<ProtectedRoute allowedRoles={['Administrador']}><Placeholder title="Reportes" /></ProtectedRoute>} />
+                  <Route path="/reports" element={<ProtectedRoute requiredPermission="VER_REPORTES"><Placeholder title="Reportes" /></ProtectedRoute>} />
                   
-                  <Route path="/admin/users" element={<ProtectedRoute allowedRoles={['Administrador']}><AdminUsers initialView="USERS" /></ProtectedRoute>} />
-                  <Route path="/admin/employees" element={<ProtectedRoute allowedRoles={['Administrador']}><AdminUsers initialView="EMPLOYEES" /></ProtectedRoute>} />
-                  <Route path="/admin/roles" element={<ProtectedRoute allowedRoles={['Administrador']}><AdminUsers initialView="ROLES" /></ProtectedRoute>} />
-                  <Route path="/admin/boxes" element={<ProtectedRoute allowedRoles={['Administrador']}><AdminUsers initialView="CAJAS" /></ProtectedRoute>} />
+                  {/* Rutas de Administración */}
+                  <Route path="/admin/users" element={<ProtectedRoute requiredPermission="GESTIONAR_USUARIOS"><AdminUsers initialView="USERS" /></ProtectedRoute>} />
+                  <Route path="/admin/employees" element={<ProtectedRoute requiredPermission="GESTIONAR_USUARIOS"><AdminUsers initialView="EMPLOYEES" /></ProtectedRoute>} />
+                  <Route path="/admin/roles" element={<ProtectedRoute requiredPermission="GESTIONAR_ROLES"><AdminUsers initialView="ROLES" /></ProtectedRoute>} />
+                  <Route path="/admin/boxes" element={<ProtectedRoute requiredPermission="GESTIONAR_ROLES"><AdminUsers initialView="CAJAS" /></ProtectedRoute>} />
 
                   <Route path="*" element={<Navigate to="/" replace />} />
                 </Routes>

@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { 
-  LayoutDashboard, ShoppingCart, Users, DollarSign, FileText, LogOut, Menu, X, Search, Bell, CloudLightning, ShieldCheck, Truck, ChevronDown, ChevronRight, Package, Briefcase, Box, UserCog, Calculator
+  LayoutDashboard, ShoppingCart, Users, DollarSign, FileText, LogOut, Menu, X, Bell, CloudLightning, ShieldCheck, Truck, ChevronDown, ChevronRight, Package, Briefcase, Box, UserCog, Calculator
 } from 'lucide-react';
 
 interface LayoutProps {
@@ -14,7 +14,7 @@ interface NavItem {
   name: string;
   path?: string;
   icon: React.ReactNode;
-  roles: string[];
+  permission?: string; // ID del permiso en BD (ej: 'VER_POS')
   subItems?: NavItem[];
 }
 
@@ -36,50 +36,51 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
     );
   };
 
+  // Estructura basada en los permisos insertados en la Base de Datos
   const navigationStructure: NavItem[] = [
     { 
       name: 'Dashboard', 
       path: '/', 
-      icon: <LayoutDashboard size={20} />, 
-      roles: ['ALL'] 
+      icon: <LayoutDashboard size={20} />
+      // Sin permiso = visible para todos los logueados
     },
     {
       name: 'Comercial',
       icon: <ShoppingCart size={20} />,
-      roles: ['Administrador', 'Vendedor'],
+      permission: 'VER_POS', // Permiso padre o genérico
       subItems: [
-        { name: 'Punto de Venta', path: '/pos', icon: <ShoppingCart size={18} />, roles: ['Administrador', 'Vendedor'] },
-        { name: 'Clientes', path: '/clients', icon: <Users size={18} />, roles: ['Administrador', 'Vendedor'] },
+        { name: 'Punto de Venta', path: '/pos', icon: <ShoppingCart size={18} />, permission: 'VER_POS' },
+        { name: 'Clientes', path: '/clients', icon: <Users size={18} />, permission: 'VER_CLIENTES' },
       ]
     },
     {
       name: 'Logística',
       icon: <Package size={20} />,
-      roles: ['Administrador', 'Inventario'],
+      permission: 'VER_INVENTARIO', // Se muestra si tiene acceso al menos al inventario
       subItems: [
-        { name: 'Inventario General', path: '/inventory', icon: <Package size={18} />, roles: ['Administrador', 'Inventario'] },
-        { name: 'Proveedores', path: '/providers', icon: <Truck size={18} />, roles: ['Administrador', 'Inventario'] },
+        { name: 'Inventario General', path: '/inventory', icon: <Package size={18} />, permission: 'VER_INVENTARIO' },
+        { name: 'Proveedores', path: '/providers', icon: <Truck size={18} />, permission: 'VER_PROVEEDORES' },
       ]
     },
     {
       name: 'Finanzas',
       icon: <DollarSign size={20} />,
-      roles: ['Administrador', 'Cajero'],
+      permission: 'VER_CAJA', // Visible si puede ver caja o costos (validación abajo)
       subItems: [
-        { name: 'Caja y Movimientos', path: '/cash', icon: <DollarSign size={18} />, roles: ['Administrador', 'Cajero'] },
-        { name: 'Costos y Gastos', path: '/costs', icon: <Calculator size={18} />, roles: ['Administrador'] },
+        { name: 'Caja y Movimientos', path: '/cash', icon: <DollarSign size={18} />, permission: 'VER_CAJA' },
+        { name: 'Costos y Gastos', path: '/costs', icon: <Calculator size={18} />, permission: 'VER_COSTOS' },
       ]
     },
     {
       name: 'Administración',
       icon: <ShieldCheck size={20} />,
-      roles: ['Administrador'],
+      permission: 'VER_ADMIN',
       subItems: [
-        { name: 'Usuarios', path: '/admin/users', icon: <UserCog size={18} />, roles: ['Administrador'] },
-        { name: 'Empleados', path: '/admin/employees', icon: <Briefcase size={18} />, roles: ['Administrador'] },
-        { name: 'Roles', path: '/admin/roles', icon: <ShieldCheck size={18} />, roles: ['Administrador'] },
-        { name: 'Cajas', path: '/admin/boxes', icon: <Box size={18} />, roles: ['Administrador'] },
-        { name: 'Reportes', path: '/reports', icon: <FileText size={18} />, roles: ['Administrador'] },
+        { name: 'Usuarios', path: '/admin/users', icon: <UserCog size={18} />, permission: 'GESTIONAR_USUARIOS' },
+        { name: 'Empleados', path: '/admin/employees', icon: <Briefcase size={18} />, permission: 'GESTIONAR_USUARIOS' },
+        { name: 'Roles', path: '/admin/roles', icon: <ShieldCheck size={18} />, permission: 'GESTIONAR_ROLES' },
+        { name: 'Cajas', path: '/admin/boxes', icon: <Box size={18} />, permission: 'GESTIONAR_ROLES' },
+        { name: 'Reportes', path: '/reports', icon: <FileText size={18} />, permission: 'VER_REPORTES' },
       ]
     }
   ];
@@ -92,11 +93,17 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
 
   const renderNavItems = (items: NavItem[], isMobile = false) => {
     return items.map((item) => {
-      if (!hasPermission(item.roles)) return null;
-
+      
+      // Lógica para submenús
       if (item.subItems) {
+        // Filtrar subitems visibles según permisos
+        const visibleSubItems = item.subItems.filter(sub => hasPermission(sub.permission));
+        
+        // Si no hay subitems visibles, no renderizar el padre
+        if (visibleSubItems.length === 0) return null;
+
         const isExpanded = expandedMenus.includes(item.name);
-        const hasActiveChild = item.subItems.some(sub => sub.path === location.pathname);
+        const hasActiveChild = visibleSubItems.some(sub => sub.path === location.pathname);
         
         return (
           <div key={item.name} className="mb-2">
@@ -115,7 +122,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
             
             <div className={`overflow-hidden transition-all duration-300 ease-in-out ${isExpanded ? 'max-h-96 opacity-100 mt-1' : 'max-h-0 opacity-0'}`}>
               <ul className="pl-4 space-y-1 border-l-2 border-slate-800 ml-6 my-1">
-                {item.subItems.map(subItem => {
+                {visibleSubItems.map(subItem => {
                    const isActive = location.pathname === subItem.path;
                    return (
                      <li key={subItem.path}>
@@ -139,6 +146,9 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
           </div>
         );
       }
+
+      // Lógica para ítems individuales
+      if (item.permission && !hasPermission(item.permission)) return null;
 
       const isActive = location.pathname === item.path;
       return (
