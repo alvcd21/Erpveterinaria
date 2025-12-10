@@ -1,6 +1,6 @@
 import { 
   Telefono, 
-  Accesorio, 
+  AccesorioMaster, 
   InventarioAccesorio, 
   Cliente, 
   Venta, 
@@ -41,7 +41,7 @@ export const MOCK_TELEFONOS: Telefono[] = [
   }
 ];
 
-export const MOCK_ACCESORIOS: Accesorio[] = [
+export const MOCK_ACCESORIOS: AccesorioMaster[] = [
   { codAccesorio: 'ACC-001', codCategoria: 'CAT-01', descripcion: 'Funda Silicona S23' },
   { codAccesorio: 'ACC-002', codCategoria: 'CAT-02', descripcion: 'Cargador 25W Samsung' }
 ];

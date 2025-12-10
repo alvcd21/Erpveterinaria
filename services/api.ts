@@ -1,7 +1,7 @@
 import { 
   Telefono, 
   InventarioAccesorio, 
-  Accesorio, 
+  AccesorioMaster, 
   Cliente, 
   Venta, 
   Arqueo, 
@@ -10,7 +10,10 @@ import {
   Usuario,
   Empleado,
   Rol,
-  Caja
+  Caja,
+  Categoria,
+  Ubicacion,
+  Proveedor
 } from '../types';
 
 const API_URL = '/api';
@@ -38,12 +41,11 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     }
 
     if (!response.ok) {
-        // Try to get JSON error message
         try {
             const errData = await response.json();
             throw new Error(errData.error || `Error ${response.status}`);
         } catch (e) {
-             throw new Error(`API Error: ${response.status} ${response.statusText}`);
+             throw new Error(`API Error: ${response.status}`);
         }
     }
     
@@ -61,26 +63,18 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
 }
 
 export const AdminService = {
-  // Usuarios
   getUsers: () => request<Usuario[]>('/users'),
   createUser: (data: any) => request('/users', { method: 'POST', body: JSON.stringify(data) }),
   updateUser: (id: string, data: any) => request(`/users/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteUser: (id: string) => request(`/users/${id}`, { method: 'DELETE' }),
-  toggleUserStatus: (id: string, status: string) => request(`/users/${id}/status`, { method: 'PUT', body: JSON.stringify({ status }) }),
-  
-  // Empleados
   getEmpleados: () => request<Empleado[]>('/empleados'),
   createEmpleado: (data: Empleado) => request('/empleados', { method: 'POST', body: JSON.stringify(data) }),
   updateEmpleado: (id: string, data: Partial<Empleado>) => request(`/empleados/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteEmpleado: (id: string) => request(`/empleados/${id}`, { method: 'DELETE' }),
-  
-  // Roles
   getRoles: () => request<Rol[]>('/roles'),
   createRol: (nombre: string) => request('/roles', { method: 'POST', body: JSON.stringify({ nombre }) }),
   updateRol: (id: string, data: Partial<Rol>) => request(`/roles/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteRol: (id: string) => request(`/roles/${id}`, { method: 'DELETE' }),
-  
-  // Cajas
   getCajas: () => request<Caja[]>('/cajas'),
   createCaja: (nombre: string) => request('/cajas', { method: 'POST', body: JSON.stringify({ nombre }) }),
   updateCaja: (id: string, data: Partial<Caja>) => request(`/cajas/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
@@ -89,10 +83,24 @@ export const AdminService = {
 
 export const InventoryService = {
   getUnifiedProducts: () => request<any[]>('/productos/unificados'), 
-  getTelefonos: () => request<Telefono[]>('/telefonos'),
-  getAccesorios: () => request<Accesorio[]>('/accesorios'),
-  createTelefono: (data: Telefono) => request<Telefono>('/telefonos', { method: 'POST', body: JSON.stringify(data) }),
-  createAccesorio: (data: Accesorio) => request<Accesorio>('/accesorios', { method: 'POST', body: JSON.stringify(data) }),
+  
+  // Specific Endpoints
+  getTelefonos: () => request<Telefono[]>('/inventory/telefonos'),
+  createTelefono: (data: Partial<Telefono>) => request('/inventory/telefonos', { method: 'POST', body: JSON.stringify(data) }),
+  
+  getStockAccesorios: () => request<InventarioAccesorio[]>('/inventory/stock'),
+  createStock: (data: Partial<InventarioAccesorio>) => request('/inventory/stock', { method: 'POST', body: JSON.stringify(data) }),
+  
+  getAccesoriosMaster: () => request<AccesorioMaster[]>('/inventory/accesorios-master'),
+  createAccesorioMaster: (data: Partial<AccesorioMaster>) => request('/inventory/accesorios-master', { method: 'POST', body: JSON.stringify(data) }),
+  
+  getCategorias: () => request<Categoria[]>('/inventory/categorias'),
+  createCategoria: (data: Partial<Categoria>) => request('/inventory/categorias', { method: 'POST', body: JSON.stringify(data) }),
+  
+  getUbicaciones: () => request<Ubicacion[]>('/inventory/ubicaciones'),
+  createUbicacion: (data: Partial<Ubicacion>) => request('/inventory/ubicaciones', { method: 'POST', body: JSON.stringify(data) }),
+  
+  getProveedores: () => request<Proveedor[]>('/proveedores'),
 };
 
 export const ClientService = {

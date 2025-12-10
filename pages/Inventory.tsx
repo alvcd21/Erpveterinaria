@@ -1,150 +1,448 @@
 import React, { useState, useEffect } from 'react';
 import { InventoryService } from '../services/api';
-import { ProductoUnified, TipoProducto } from '../types';
-import { Search, Plus, MoreVertical, Smartphone, Headphones, Box, Filter } from 'lucide-react';
+import { 
+  Telefono, 
+  InventarioAccesorio, 
+  AccesorioMaster, 
+  Categoria, 
+  Ubicacion,
+  Proveedor 
+} from '../types';
+import { 
+  Search, Plus, Smartphone, Headphones, Box, MapPin, 
+  Tag, List, PlusCircle, X, RefreshCw 
+} from 'lucide-react';
+import Swal from 'sweetalert2';
+
+type InventoryTab = 'TELEPHONES' | 'STOCK' | 'MASTER' | 'CATEGORIES' | 'LOCATIONS';
 
 const Inventory: React.FC = () => {
-  const [products, setProducts] = useState<ProductoUnified[]>([]);
-  const [filterType, setFilterType] = useState<string>('ALL');
+  const [activeTab, setActiveTab] = useState<InventoryTab>('TELEPHONES');
+  const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
-  const [loading, setLoading] = useState(true);
+  const [showModal, setShowModal] = useState(false);
+
+  // Data Stores
+  const [phones, setPhones] = useState<Telefono[]>([]);
+  const [stock, setStock] = useState<InventarioAccesorio[]>([]);
+  const [master, setMaster] = useState<AccesorioMaster[]>([]);
+  const [categories, setCategories] = useState<Categoria[]>([]);
+  const [locations, setLocations] = useState<Ubicacion[]>([]);
+  const [providers, setProviders] = useState<Proveedor[]>([]);
+
+  // Forms
+  const [phoneForm, setPhoneForm] = useState<Partial<Telefono>>({});
+  const [stockForm, setStockForm] = useState<Partial<InventarioAccesorio>>({});
+  const [masterForm, setMasterForm] = useState<Partial<AccesorioMaster>>({});
+  const [catForm, setCatForm] = useState<Partial<Categoria>>({});
+  const [locForm, setLocForm] = useState<Partial<Ubicacion>>({});
 
   useEffect(() => {
-    loadInventory();
-  }, []);
+    loadData();
+    // Load auxiliaries once
+    InventoryService.getCategorias().then(setCategories);
+    InventoryService.getUbicaciones().then(setLocations);
+    InventoryService.getProveedores().then(setProviders);
+  }, [activeTab]);
 
-  const loadInventory = async () => {
+  const loadData = async () => {
     setLoading(true);
-    const data = await InventoryService.getUnifiedProducts();
-    setProducts(data);
-    setLoading(false);
+    try {
+      if (activeTab === 'TELEPHONES') {
+        const data = await InventoryService.getTelefonos();
+        setPhones(data);
+      } else if (activeTab === 'STOCK') {
+        const data = await InventoryService.getStockAccesorios();
+        setStock(data);
+      } else if (activeTab === 'MASTER') {
+        const data = await InventoryService.getAccesoriosMaster();
+        setMaster(data);
+      } else if (activeTab === 'CATEGORIES') {
+        const data = await InventoryService.getCategorias();
+        setCategories(data);
+      } else if (activeTab === 'LOCATIONS') {
+        const data = await InventoryService.getUbicaciones();
+        setLocations(data);
+      }
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const filteredProducts = products.filter(p => {
-    const matchesSearch = p.nombre.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                          p.codigo.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                          (p.imei && p.imei.includes(searchTerm));
-    const matchesType = filterType === 'ALL' || p.tipo === filterType;
-    return matchesSearch && matchesType;
-  });
+  const handleCreate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      if (activeTab === 'TELEPHONES') {
+        await InventoryService.createTelefono(phoneForm);
+      } else if (activeTab === 'STOCK') {
+        await InventoryService.createStock(stockForm);
+      } else if (activeTab === 'MASTER') {
+        await InventoryService.createAccesorioMaster(masterForm);
+      } else if (activeTab === 'CATEGORIES') {
+        await InventoryService.createCategoria(catForm);
+      } else if (activeTab === 'LOCATIONS') {
+        await InventoryService.createUbicacion(locForm);
+      }
+      setShowModal(false);
+      Swal.fire('Guardado', 'Registro creado exitosamente', 'success');
+      loadData();
+    } catch (error: any) {
+      Swal.fire('Error', error.message, 'error');
+    }
+  };
+
+  const openNewModal = () => {
+    setPhoneForm({});
+    setStockForm({});
+    setMasterForm({});
+    setCatForm({});
+    setLocForm({});
+    setShowModal(true);
+  };
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <div>
-          <h2 className="text-2xl font-bold text-slate-800">Inventario</h2>
-          <p className="text-slate-500 mt-1">Base de Datos: telefonos & accesorios</p>
+    <div className="space-y-6 h-full flex flex-col">
+      {/* HEADER & TABS */}
+      <div>
+        <div className="flex flex-col md:flex-row justify-between items-end mb-6">
+          <div>
+            <h2 className="text-2xl font-bold text-slate-800">Gestión de Inventario</h2>
+            <p className="text-slate-500 text-sm">Administra teléfonos, accesorios y configuraciones</p>
+          </div>
+          <button 
+             onClick={openNewModal}
+             className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-lg flex items-center gap-2 font-bold shadow-lg shadow-indigo-600/20 transition-all"
+          >
+            <PlusCircle size={20} />
+            <span>Nuevo {activeTab === 'TELEPHONES' ? 'Teléfono' : activeTab === 'STOCK' ? 'Accesorio' : 'Registro'}</span>
+          </button>
         </div>
-        <button className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-lg flex items-center gap-2 font-medium transition-all shadow-lg shadow-indigo-600/20 active:transform active:scale-95">
-          <Plus size={20} />
-          <span>Nuevo Item</span>
-        </button>
+
+        <div className="bg-white rounded-t-2xl border-b border-slate-200 px-2 pt-2 flex overflow-x-auto">
+          {[
+            { id: 'TELEPHONES', label: 'Inventario Teléfonos', icon: <Smartphone size={18}/> },
+            { id: 'STOCK', label: 'Inventario Accesorios', icon: <Box size={18}/> },
+            { id: 'MASTER', label: 'Registrar Accesorio', icon: <Headphones size={18}/> },
+            { id: 'CATEGORIES', label: 'Categorías', icon: <Tag size={18}/> },
+            { id: 'LOCATIONS', label: 'Ubicaciones', icon: <MapPin size={18}/> },
+          ].map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id as InventoryTab)}
+              className={`flex items-center gap-2 px-6 py-4 border-b-2 font-medium text-sm whitespace-nowrap transition-colors ${
+                activeTab === tab.id 
+                  ? 'border-indigo-600 text-indigo-600 bg-indigo-50/50' 
+                  : 'border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50'
+              }`}
+            >
+              {tab.icon} {tab.label}
+            </button>
+          ))}
+        </div>
+        
+        {/* SEARCH BAR */}
+        <div className="bg-white border-x border-slate-200 p-3 flex gap-3">
+          <div className="relative flex-1 max-w-md">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+            <input 
+              type="text" 
+              placeholder="Buscar..." 
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-10 pr-4 py-2 bg-slate-100 border-none rounded-lg text-sm focus:ring-2 focus:ring-indigo-500/20"
+            />
+          </div>
+          <button onClick={loadData} className="p-2 text-slate-500 hover:bg-slate-100 rounded-lg">
+            <RefreshCw size={20} />
+          </button>
+        </div>
       </div>
 
-      <div className="bg-white p-2 rounded-2xl shadow-sm border border-slate-200/60 flex flex-col md:flex-row gap-4 items-center justify-between">
-        <div className="flex p-1 bg-slate-100 rounded-xl w-full md:w-auto">
-          <button 
-            onClick={() => setFilterType('ALL')}
-            className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${filterType === 'ALL' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-          >
-            Todos
-          </button>
-          <button 
-             onClick={() => setFilterType('TELEFONO')}
-             className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-2 ${filterType === 'TELEFONO' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-          >
-            <Smartphone size={16} /> Teléfonos
-          </button>
-          <button 
-             onClick={() => setFilterType('ACCESORIO')}
-             className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-2 ${filterType === 'ACCESORIO' ? 'bg-purple-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-          >
-            <Headphones size={16} /> Accesorios
-          </button>
-        </div>
-
-        <div className="relative w-full md:w-80 mr-2">
-          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-          <input 
-            type="text" 
-            placeholder="Buscar por código, IMEI o nombre..." 
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border-none rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:bg-white transition-all text-sm font-medium text-slate-700 placeholder:text-slate-400"
-          />
-        </div>
-      </div>
-
-      <div className="bg-white rounded-2xl shadow-[0_2px_10px_-3px_rgba(6,81,237,0.1)] border border-slate-100 overflow-hidden">
-        <div className="overflow-x-auto">
+      {/* CONTENT TABLE */}
+      <div className="flex-1 bg-white rounded-b-2xl shadow-sm border border-slate-200 overflow-hidden relative">
+        {loading && (
+          <div className="absolute inset-0 bg-white/80 z-10 flex items-center justify-center">
+            <div className="text-indigo-600 font-bold animate-pulse">Cargando datos...</div>
+          </div>
+        )}
+        
+        <div className="overflow-x-auto h-full">
           <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="bg-slate-50/50 border-b border-slate-100">
-                <th className="p-5 font-bold text-slate-600 text-xs uppercase tracking-wider">Producto / Código</th>
-                <th className="p-5 font-bold text-slate-600 text-xs uppercase tracking-wider hidden md:table-cell">Tipo</th>
-                <th className="p-5 font-bold text-slate-600 text-xs uppercase tracking-wider hidden lg:table-cell">Detalles (IMEI / Cat)</th>
-                <th className="p-5 font-bold text-slate-600 text-xs uppercase tracking-wider text-right">Stock</th>
-                <th className="p-5 font-bold text-slate-600 text-xs uppercase tracking-wider text-right">Precio Venta</th>
-                <th className="p-5 font-bold text-slate-600 text-xs uppercase tracking-wider">Ubicación</th>
-                <th className="p-5"></th>
+            <thead className="bg-slate-50 border-b border-slate-200 sticky top-0 z-0">
+              <tr>
+                {/* DYNAMIC HEADERS */}
+                {activeTab === 'TELEPHONES' && (
+                  <>
+                    <th className="p-4 text-xs font-bold text-slate-500 uppercase">COD</th>
+                    <th className="p-4 text-xs font-bold text-slate-500 uppercase">IMEI</th>
+                    <th className="p-4 text-xs font-bold text-slate-500 uppercase">Marca/Modelo</th>
+                    <th className="p-4 text-xs font-bold text-slate-500 uppercase text-right">Precio C.</th>
+                    <th className="p-4 text-xs font-bold text-slate-500 uppercase text-right">Precio V.</th>
+                    <th className="p-4 text-xs font-bold text-slate-500 uppercase">Ubicación</th>
+                    <th className="p-4 text-xs font-bold text-slate-500 uppercase">Fecha</th>
+                  </>
+                )}
+                {activeTab === 'STOCK' && (
+                  <>
+                    <th className="p-4 text-xs font-bold text-slate-500 uppercase">COD</th>
+                    <th className="p-4 text-xs font-bold text-slate-500 uppercase">Descripción</th>
+                    <th className="p-4 text-xs font-bold text-slate-500 uppercase">Categoría</th>
+                    <th className="p-4 text-xs font-bold text-slate-500 uppercase text-center">Cant.</th>
+                    <th className="p-4 text-xs font-bold text-slate-500 uppercase text-right">Precio C.</th>
+                    <th className="p-4 text-xs font-bold text-slate-500 uppercase text-right">Precio V.</th>
+                    <th className="p-4 text-xs font-bold text-slate-500 uppercase">Ubicación</th>
+                  </>
+                )}
+                {activeTab === 'MASTER' && (
+                  <>
+                    <th className="p-4 text-xs font-bold text-slate-500 uppercase">Cod Accesorio</th>
+                    <th className="p-4 text-xs font-bold text-slate-500 uppercase">Categoría</th>
+                    <th className="p-4 text-xs font-bold text-slate-500 uppercase">Descripción</th>
+                  </>
+                )}
+                {activeTab === 'CATEGORIES' && (
+                  <>
+                    <th className="p-4 text-xs font-bold text-slate-500 uppercase">Cod Categoría</th>
+                    <th className="p-4 text-xs font-bold text-slate-500 uppercase">Tipo</th>
+                  </>
+                )}
+                {activeTab === 'LOCATIONS' && (
+                  <>
+                    <th className="p-4 text-xs font-bold text-slate-500 uppercase">Cod</th>
+                    <th className="p-4 text-xs font-bold text-slate-500 uppercase">Nombre</th>
+                    <th className="p-4 text-xs font-bold text-slate-500 uppercase">Descripción</th>
+                    <th className="p-4 text-xs font-bold text-slate-500 uppercase">Estante</th>
+                    <th className="p-4 text-xs font-bold text-slate-500 uppercase">Nivel</th>
+                  </>
+                )}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {loading ? (
-                 <tr><td colSpan={7} className="p-10 text-center text-slate-500">Cargando datos de SmartCloud...</td></tr>
-              ) : filteredProducts.map((product) => (
-                <tr key={product.id} className="hover:bg-slate-50/80 transition-colors group">
-                  <td className="p-5">
-                    <div className="flex items-center gap-4">
-                      <div className="w-10 h-10 rounded-lg bg-slate-100 flex items-center justify-center text-slate-400 font-bold text-xs">
-                        {product.tipo === 'TELEFONO' ? 'TEL' : 'ACC'}
-                      </div>
-                      <div>
-                        <div className="font-bold text-slate-800 text-sm">{product.nombre}</div>
-                        <div className="text-xs text-slate-400 font-mono mt-0.5">{product.codigo}</div>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="p-5 hidden md:table-cell">
-                    <span className={`inline-flex items-center px-2.5 py-1 rounded-md text-xs font-bold
-                      ${product.tipo === 'TELEFONO' ? 'bg-indigo-50 text-indigo-700 border border-indigo-100' : 'bg-purple-50 text-purple-700 border border-purple-100'}`}>
-                      {product.tipo}
+              {/* PHONES ROW */}
+              {activeTab === 'TELEPHONES' && phones.filter(p => JSON.stringify(p).toLowerCase().includes(searchTerm.toLowerCase())).map(p => (
+                <tr key={p.codigo} className="hover:bg-slate-50">
+                  <td className="p-4 text-xs font-mono text-slate-500">{p.codigo}</td>
+                  <td className="p-4 text-xs font-mono text-slate-600 font-bold">{p.imei1}</td>
+                  <td className="p-4 text-sm font-medium text-slate-800">{p.marca} {p.modelo}</td>
+                  <td className="p-4 text-sm text-right text-slate-500">L. {p.precioCompra}</td>
+                  <td className="p-4 text-sm text-right font-bold text-emerald-600">L. {p.precioVenta}</td>
+                  <td className="p-4 text-xs text-slate-500">{p.nombreUbicacion || p.idubicacion}</td>
+                  <td className="p-4 text-xs text-slate-400">{new Date(p.fecha).toLocaleDateString()}</td>
+                </tr>
+              ))}
+
+              {/* STOCK ROW */}
+              {activeTab === 'STOCK' && stock.filter(s => JSON.stringify(s).toLowerCase().includes(searchTerm.toLowerCase())).map(s => (
+                <tr key={s.codInventario} className="hover:bg-slate-50">
+                  <td className="p-4 text-xs font-mono text-slate-500">{s.codInventario}</td>
+                  <td className="p-4 text-sm font-medium text-slate-800">{s.descripcion}</td>
+                  <td className="p-4 text-xs text-slate-500">{s.categoria}</td>
+                  <td className="p-4 text-center">
+                    <span className={`px-2 py-1 rounded text-xs font-bold ${s.cantidad === 0 ? 'bg-red-100 text-red-600' : s.cantidad < 3 ? 'bg-amber-100 text-amber-600' : 'bg-green-100 text-green-600'}`}>
+                      {s.cantidad}
                     </span>
                   </td>
-                  <td className="p-5 text-sm text-slate-500 hidden lg:table-cell font-mono">
-                     {product.imei ? (
-                       <span className="flex items-center gap-1 text-slate-600"><Smartphone size={12}/> {product.imei}</span>
-                     ) : (
-                       <span className="text-slate-400">---</span>
-                     )}
-                  </td>
-                  <td className="p-5 text-right">
-                    <div className="flex flex-col items-end">
-                      <span className={`font-bold text-sm ${product.stock <= 2 ? 'text-red-600' : 'text-slate-700'}`}>
-                        {product.stock} un.
-                      </span>
-                    </div>
-                  </td>
-                  <td className="p-5 text-right font-bold text-slate-800">
-                    L. {product.precioVenta.toLocaleString('es-HN', {minimumFractionDigits: 2})}
-                  </td>
-                  <td className="p-5 text-sm text-slate-500">
-                     <div className="flex items-center gap-2">
-                      <Box size={14} className="text-slate-300" />
-                      {product.ubicacion || 'N/A'}
-                    </div>
-                  </td>
-                  <td className="p-5 text-right">
-                    <button className="text-slate-400 hover:text-indigo-600 p-2 rounded-lg hover:bg-indigo-50 transition-all opacity-0 group-hover:opacity-100">
-                      <MoreVertical size={18} />
-                    </button>
-                  </td>
+                  <td className="p-4 text-sm text-right text-slate-500">L. {s.precioCompra}</td>
+                  <td className="p-4 text-sm text-right font-bold text-emerald-600">L. {s.precioVenta}</td>
+                  <td className="p-4 text-xs text-slate-500">{s.nombreUbicacion || s.idubicacion}</td>
+                </tr>
+              ))}
+
+              {/* MASTER ROW */}
+              {activeTab === 'MASTER' && master.filter(m => JSON.stringify(m).toLowerCase().includes(searchTerm.toLowerCase())).map(m => (
+                <tr key={m.codAccesorio} className="hover:bg-slate-50">
+                  <td className="p-4 text-xs font-mono text-slate-500">{m.codAccesorio}</td>
+                  <td className="p-4 text-xs text-slate-500">{m.nombreCategoria}</td>
+                  <td className="p-4 text-sm font-medium text-slate-800">{m.descripcion}</td>
+                </tr>
+              ))}
+
+              {/* CATEGORIES ROW */}
+              {activeTab === 'CATEGORIES' && categories.filter(c => c.tipo.toLowerCase().includes(searchTerm.toLowerCase())).map(c => (
+                <tr key={c.codCategoria} className="hover:bg-slate-50">
+                  <td className="p-4 text-xs font-mono text-slate-500">{c.codCategoria}</td>
+                  <td className="p-4 text-sm font-bold text-slate-700">{c.tipo}</td>
+                </tr>
+              ))}
+
+              {/* LOCATIONS ROW */}
+              {activeTab === 'LOCATIONS' && locations.filter(l => l.nombre.toLowerCase().includes(searchTerm.toLowerCase())).map(l => (
+                <tr key={l.idUbicacion} className="hover:bg-slate-50">
+                  <td className="p-4 text-xs font-mono text-slate-500">{l.idUbicacion}</td>
+                  <td className="p-4 text-sm font-bold text-slate-700">{l.nombre}</td>
+                  <td className="p-4 text-sm text-slate-600">{l.descripcion}</td>
+                  <td className="p-4 text-xs text-slate-500">{l.estante}</td>
+                  <td className="p-4 text-xs text-slate-500">{l.nivel}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       </div>
+
+      {/* MODAL CREATION */}
+      {showModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl p-6 animate-fade-in max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-6 border-b border-slate-100 pb-4">
+              <h3 className="text-xl font-bold text-slate-800">
+                Nuevo Registro: {activeTab}
+              </h3>
+              <button onClick={() => setShowModal(false)} className="text-slate-400 hover:text-red-500"><X size={24}/></button>
+            </div>
+
+            <form onSubmit={handleCreate} className="space-y-4">
+              
+              {/* FORM: TELEPHONES */}
+              {activeTab === 'TELEPHONES' && (
+                <>
+                  <div className="grid grid-cols-2 gap-4">
+                     <div>
+                       <label className="text-xs font-bold text-slate-500">IMEI 1</label>
+                       <input required className="w-full p-2 bg-slate-50 border rounded-lg mt-1" onChange={e => setPhoneForm({...phoneForm, imei1: e.target.value})} />
+                     </div>
+                     <div>
+                       <label className="text-xs font-bold text-slate-500">IMEI 2</label>
+                       <input required className="w-full p-2 bg-slate-50 border rounded-lg mt-1" onChange={e => setPhoneForm({...phoneForm, imei2: e.target.value})} />
+                     </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                     <div>
+                       <label className="text-xs font-bold text-slate-500">Marca</label>
+                       <input required className="w-full p-2 bg-slate-50 border rounded-lg mt-1" onChange={e => setPhoneForm({...phoneForm, marca: e.target.value})} />
+                     </div>
+                     <div>
+                       <label className="text-xs font-bold text-slate-500">Modelo</label>
+                       <input required className="w-full p-2 bg-slate-50 border rounded-lg mt-1" onChange={e => setPhoneForm({...phoneForm, modelo: e.target.value})} />
+                     </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                     <div>
+                       <label className="text-xs font-bold text-slate-500">Precio Compra</label>
+                       <input type="number" required className="w-full p-2 bg-slate-50 border rounded-lg mt-1" onChange={e => setPhoneForm({...phoneForm, precioCompra: Number(e.target.value)})} />
+                     </div>
+                     <div>
+                       <label className="text-xs font-bold text-slate-500">Precio Venta</label>
+                       <input type="number" required className="w-full p-2 bg-slate-50 border rounded-lg mt-1" onChange={e => setPhoneForm({...phoneForm, precioVenta: Number(e.target.value)})} />
+                     </div>
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-500">Proveedor</label>
+                    <select required className="w-full p-2 bg-slate-50 border rounded-lg mt-1" onChange={e => setPhoneForm({...phoneForm, codProveedor: e.target.value})}>
+                      <option value="">Seleccione...</option>
+                      {providers.map(p => <option key={p.codProveedor} value={p.codProveedor}>{p.nombre}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-500">Ubicación</label>
+                    <select required className="w-full p-2 bg-slate-50 border rounded-lg mt-1" onChange={e => setPhoneForm({...phoneForm, idubicacion: e.target.value})}>
+                      <option value="">Seleccione...</option>
+                      {locations.map(l => <option key={l.idUbicacion} value={l.idUbicacion}>{l.nombre}</option>)}
+                    </select>
+                  </div>
+                </>
+              )}
+
+              {/* FORM: STOCK ACCESORIOS */}
+              {activeTab === 'STOCK' && (
+                <>
+                  <div>
+                    <label className="text-xs font-bold text-slate-500">Producto (Master)</label>
+                    <select required className="w-full p-2 bg-slate-50 border rounded-lg mt-1" onChange={e => setStockForm({...stockForm, codAccesorio: e.target.value})}>
+                      <option value="">Seleccione...</option>
+                      {master.map(m => <option key={m.codAccesorio} value={m.codAccesorio}>{m.descripcion}</option>)}
+                    </select>
+                  </div>
+                  <div className="grid grid-cols-3 gap-4">
+                     <div>
+                       <label className="text-xs font-bold text-slate-500">Cantidad</label>
+                       <input type="number" required className="w-full p-2 bg-slate-50 border rounded-lg mt-1" onChange={e => setStockForm({...stockForm, cantidad: Number(e.target.value)})} />
+                     </div>
+                     <div>
+                       <label className="text-xs font-bold text-slate-500">Precio C.</label>
+                       <input type="number" required className="w-full p-2 bg-slate-50 border rounded-lg mt-1" onChange={e => setStockForm({...stockForm, precioCompra: Number(e.target.value)})} />
+                     </div>
+                     <div>
+                       <label className="text-xs font-bold text-slate-500">Precio V.</label>
+                       <input type="number" required className="w-full p-2 bg-slate-50 border rounded-lg mt-1" onChange={e => setStockForm({...stockForm, precioVenta: Number(e.target.value)})} />
+                     </div>
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-500">Proveedor</label>
+                    <select required className="w-full p-2 bg-slate-50 border rounded-lg mt-1" onChange={e => setStockForm({...stockForm, codProveedor: e.target.value})}>
+                      <option value="">Seleccione...</option>
+                      {providers.map(p => <option key={p.codProveedor} value={p.codProveedor}>{p.nombre}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-500">Ubicación</label>
+                    <select required className="w-full p-2 bg-slate-50 border rounded-lg mt-1" onChange={e => setStockForm({...stockForm, idubicacion: e.target.value})}>
+                      <option value="">Seleccione...</option>
+                      {locations.map(l => <option key={l.idUbicacion} value={l.idUbicacion}>{l.nombre}</option>)}
+                    </select>
+                  </div>
+                </>
+              )}
+
+              {/* FORM: MASTER (REGISTRAR ACCESORIO) */}
+              {activeTab === 'MASTER' && (
+                <>
+                  <div>
+                    <label className="text-xs font-bold text-slate-500">Categoría</label>
+                    <select required className="w-full p-2 bg-slate-50 border rounded-lg mt-1" onChange={e => setMasterForm({...masterForm, codCategoria: e.target.value})}>
+                      <option value="">Seleccione...</option>
+                      {categories.map(c => <option key={c.codCategoria} value={c.codCategoria}>{c.tipo}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-500">Descripción / Nombre</label>
+                    <input required className="w-full p-2 bg-slate-50 border rounded-lg mt-1" onChange={e => setMasterForm({...masterForm, descripcion: e.target.value})} />
+                  </div>
+                </>
+              )}
+
+              {/* FORM: CATEGORIAS */}
+              {activeTab === 'CATEGORIES' && (
+                <div>
+                   <label className="text-xs font-bold text-slate-500">Nombre Categoría</label>
+                   <input required className="w-full p-2 bg-slate-50 border rounded-lg mt-1" onChange={e => setCatForm({...catForm, tipo: e.target.value})} />
+                </div>
+              )}
+
+              {/* FORM: UBICACIONES */}
+              {activeTab === 'LOCATIONS' && (
+                <>
+                  <div>
+                     <label className="text-xs font-bold text-slate-500">Nombre</label>
+                     <input required className="w-full p-2 bg-slate-50 border rounded-lg mt-1" onChange={e => setLocForm({...locForm, nombre: e.target.value})} />
+                  </div>
+                  <div>
+                     <label className="text-xs font-bold text-slate-500">Descripción</label>
+                     <input required className="w-full p-2 bg-slate-50 border rounded-lg mt-1" onChange={e => setLocForm({...locForm, descripcion: e.target.value})} />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                     <div>
+                       <label className="text-xs font-bold text-slate-500">Estante</label>
+                       <input required className="w-full p-2 bg-slate-50 border rounded-lg mt-1" onChange={e => setLocForm({...locForm, estante: e.target.value})} />
+                     </div>
+                     <div>
+                       <label className="text-xs font-bold text-slate-500">Nivel</label>
+                       <input required className="w-full p-2 bg-slate-50 border rounded-lg mt-1" onChange={e => setLocForm({...locForm, nivel: e.target.value})} />
+                     </div>
+                  </div>
+                </>
+              )}
+
+              <div className="pt-4 flex gap-3">
+                <button type="button" onClick={() => setShowModal(false)} className="flex-1 px-4 py-3 bg-slate-100 text-slate-600 font-bold rounded-xl hover:bg-slate-200">Cancelar</button>
+                <button type="submit" className="flex-1 px-4 py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 shadow-lg shadow-indigo-600/20">Guardar</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

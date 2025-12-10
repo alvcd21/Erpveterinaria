@@ -2,11 +2,9 @@
 
 // --- ENUMS & CONSTANTS ---
 export type EstadoGeneral = 'Activo' | 'Inactivo';
-export type EstadoVenta = 'Completada' | 'Anulada' | 'Devolucion';
-export type TipoProducto = 'TELEFONO' | 'ACCESORIO' | 'RECARGA';
+export type EstadoInventario = 'Disponible' | 'Vendido' | 'Garantia' | 'Malo';
 
 // --- AUTH & PERMISSIONS ---
-
 export interface AuthResponse {
   token: string;
   user: UserSession;
@@ -15,7 +13,7 @@ export interface AuthResponse {
 export interface UserSession {
   codUsuario: string;
   usuario: string;
-  rol: string; // 'ADMIN', 'VENDEDOR', etc.
+  rol: string;
   nombreEmpleado: string;
 }
 
@@ -25,9 +23,8 @@ export interface LoginCredentials {
 }
 
 // --- CORE ENTITIES ---
-
 export interface Cliente {
-  identidad: string; // PK
+  identidad: string; 
   nombre: string;
   apellido: string;
   direccion: string;
@@ -37,7 +34,7 @@ export interface Cliente {
 }
 
 export interface Empleado {
-  identidad: string; // PK
+  identidad: string; 
   nombre: string;
   apellido: string;
   direccion: string;
@@ -46,16 +43,14 @@ export interface Empleado {
   fechaCreacion?: string;
 }
 
-// Extendido para incluir datos visuales en la tabla de admin
 export interface Usuario {
-  codUsuario: string; // PK
+  codUsuario: string; 
   usuario: string;
-  password?: string; // Solo para creación/update
-  identidad: string; // FK -> Empleado
-  idCaja: string; // FK -> Caja
-  idrol: string; // FK -> Rol
+  password?: string; 
+  identidad: string; 
+  idCaja: string; 
+  idrol: string; 
   estado: EstadoGeneral;
-  // UI Helpers
   nombreEmpleado?: string;
   nombreRol?: string;
   nombreCaja?: string;
@@ -67,19 +62,7 @@ export interface Rol {
   estado: EstadoGeneral;
 }
 
-// --- INVENTORY ---
-
-export interface Categoria {
-  codCategoria: string; // PK
-  tipo: string;
-}
-
-export interface Proveedor {
-  codProveedor: string; // PK
-  nombre: string;
-  telefono: string;
-  direccion: string;
-}
+// --- INVENTORY SCHEMA (STRICT) ---
 
 export interface Ubicacion {
   idUbicacion: string; // PK
@@ -87,138 +70,129 @@ export interface Ubicacion {
   descripcion: string;
   estante: string;
   nivel: string;
-  estado: EstadoGeneral;
+  estado: string;
 }
 
-// Tabla: telefonos
-export interface Telefono {
-  codigo: string; // PK
-  imei1: string;
-  imei2: string;
-  marca: string;
-  modelo: string;
-  precioCompra: number;
-  precioVenta: number;
-  codProveedor: string; // FK
-  idubicacion: string; // FK
-  estado: 'Disponible' | 'Vendido' | 'Garantia' | 'Malo';
-  fecha: string;
+export interface Categoria {
+  codCategoria: string; // PK
+  tipo: string;
 }
 
-// Tabla: accesorios (Master data)
-export interface Accesorio {
+export interface AccesorioMaster {
   codAccesorio: string; // PK
   codCategoria: string; // FK
-  descripcion: string;
+  descripcion: string; // The name of the product
+  // UI Helper
+  nombreCategoria?: string;
 }
 
-// Tabla: inventario (Stock for accessories)
 export interface InventarioAccesorio {
   codInventario: string; // PK
   codAccesorio: string; // FK
   cantidad: number;
   precioCompra: number;
   precioVenta: number;
-  codProveedor: string; // FK
+  codProveedor: string;
+  fecha: string; // date
   idubicacion: string; // FK
-  estado: EstadoGeneral;
-  fecha: string;
+  estado: string;
+  // UI Helpers (Joined fields)
+  descripcion?: string; 
+  categoria?: string;
+  nombreUbicacion?: string;
 }
 
-// Helper Type for UI (Unified View)
+export interface Telefono {
+  codigo: string; // PK (TELF-XXXX)
+  imei1: string;
+  imei2: string;
+  marca: string;
+  modelo: string;
+  precioCompra: number;
+  precioVenta: number;
+  codProveedor: string;
+  fecha: string;
+  idubicacion: string;
+  estado: string;
+  // UI Helper
+  nombreUbicacion?: string;
+}
+
+// Helper Type for POS Unified Search
 export interface ProductoUnified {
-  id: string; // codAccesorio OR codigo (telefono)
-  tipo: TipoProducto;
-  nombre: string; // descripcion OR marca + modelo
-  codigo: string;
+  id: string; // codInventario OR codigo
+  tipo: 'TELEFONO' | 'ACCESORIO';
+  nombre: string; 
+  codigo: string; // Display Code
   precioVenta: number;
   stock: number;
-  imei?: string; // Only phones
+  imei?: string; 
   ubicacion?: string;
-  categoria?: string;
+}
+
+export interface Proveedor {
+  codProveedor: string;
+  nombre: string;
+  telefono?: string;
 }
 
 // --- SALES / POS ---
 
 export interface Venta {
-  codVenta: string; // PK
+  codVenta: string;
   fecha: string;
   codVendedor: string;
   identidadCliente: string;
   total: number;
-  estado: EstadoVenta;
-  // UI helper: details are usually fetched separately or included
+  estado: string;
   detalles?: DetalleVenta[]; 
 }
 
 export interface DetalleVenta {
-  codDetalleVenta: string; // PK
-  idVenta: string; // FK
-  idAccesorio?: string; // Nullable
-  idTelefono?: string; // Nullable
+  codDetalleVenta: string;
+  idVenta: string;
+  idAccesorio?: string;
+  idTelefono?: string;
   cantidad: number;
   precioVenta: number;
   estado: EstadoGeneral;
-  // UI Helper
   descripcionProducto?: string;
 }
 
-export interface Recarga {
-  idRecargas: string;
-  red: string; // Tigo/Claro
-  tipo: string;
-  descripcion: string;
-  precioCobrado: number;
-  precioPagado: number;
+// --- CASH REGISTER ---
+
+export interface Caja {
+  idCaja: string;
+  nombre: string;
   estado: string;
 }
 
-// --- CASH REGISTER & FINANCE ---
-
-export interface Caja {
-  idCaja: string; // PK
-  nombre: string;
-  estado: EstadoGeneral | 'Activa' | 'Inactiva';
-}
-
 export interface Arqueo {
-  idArqueo: string; // PK
+  idArqueo: string;
   idCaja: string;
   idUsuario: string;
   fechaApertura: string;
-  fechaCierre?: string;
   montoInicial: number;
-  montoFinal?: number;
+  estado: 'Abierta' | 'Cerrada';
   totalVentas?: number;
   totalGastos?: number;
-  totalCostos?: number;
-  ganancia?: number;
-  estado: 'Abierta' | 'Cerrada';
 }
 
 export interface Ingreso {
-  idIngreso: string; // PK
+  idIngreso: string;
   idCaja: string;
   descripcion: string;
   monto: number;
-  costo: number; // Costo asociado al ingreso
+  costo: number;
   fechaCreacion: string;
   estado: string;
 }
 
 export interface Egreso {
-  idegresos: string; // PK
+  idegresos: string;
   idCaja: string;
   descripcion: string;
   monto: number;
   fechaCreacion: string;
   estado: string;
-}
-
-export interface Configuracion {
-  codConfiguracion: number;
-  nombreEmpresa: string;
-  rtn: string;
-  isv: number;
-  direccion: string;
 }
