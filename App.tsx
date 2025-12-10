@@ -89,11 +89,36 @@ const App: React.FC = () => {
                     } 
                   />
                   
+                  {/* Rutas Administrativas Desglosadas */}
                   <Route 
                     path="/admin/users" 
                     element={
                       <ProtectedRoute allowedRoles={['Administrador']}>
-                        <AdminUsers />
+                        <AdminUsers initialView="USERS" />
+                      </ProtectedRoute>
+                    } 
+                  />
+                  <Route 
+                    path="/admin/employees" 
+                    element={
+                      <ProtectedRoute allowedRoles={['Administrador']}>
+                        <AdminUsers initialView="EMPLOYEES" />
+                      </ProtectedRoute>
+                    } 
+                  />
+                  <Route 
+                    path="/admin/roles" 
+                    element={
+                      <ProtectedRoute allowedRoles={['Administrador']}>
+                        <AdminUsers initialView="ROLES" />
+                      </ProtectedRoute>
+                    } 
+                  />
+                  <Route 
+                    path="/admin/boxes" 
+                    element={
+                      <ProtectedRoute allowedRoles={['Administrador']}>
+                        <AdminUsers initialView="CAJAS" />
                       </ProtectedRoute>
                     } 
                   />

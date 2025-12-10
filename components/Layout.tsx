@@ -19,7 +19,9 @@ import {
   ChevronDown,
   ChevronRight,
   Package,
-  Briefcase
+  Briefcase,
+  Box,
+  UserCog
 } from 'lucide-react';
 
 interface LayoutProps {
@@ -36,7 +38,7 @@ interface NavItem {
 
 const Layout: React.FC<LayoutProps> = ({ children }) => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [expandedMenus, setExpandedMenus] = useState<string[]>(['Comercial', 'Logística']); // Default expanded
+  const [expandedMenus, setExpandedMenus] = useState<string[]>(['Comercial', 'Logística', 'Administración']); // Default expanded
   const { user, logout, hasPermission } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
@@ -52,7 +54,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
     );
   };
 
-  // Estructura de Menú con Submenús
+  // Estructura de Menú con Submenús Actualizada
   const navigationStructure: NavItem[] = [
     { 
       name: 'Dashboard', 
@@ -91,7 +93,10 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       icon: <ShieldCheck size={20} />,
       roles: ['Administrador'],
       subItems: [
-        { name: 'Usuarios y Roles', path: '/admin/users', icon: <ShieldCheck size={18} />, roles: ['Administrador'] },
+        { name: 'Usuarios', path: '/admin/users', icon: <UserCog size={18} />, roles: ['Administrador'] },
+        { name: 'Empleados', path: '/admin/employees', icon: <Briefcase size={18} />, roles: ['Administrador'] },
+        { name: 'Roles', path: '/admin/roles', icon: <ShieldCheck size={18} />, roles: ['Administrador'] },
+        { name: 'Cajas', path: '/admin/boxes', icon: <Box size={18} />, roles: ['Administrador'] },
         { name: 'Reportes', path: '/reports', icon: <FileText size={18} />, roles: ['Administrador'] },
       ]
     }
@@ -145,6 +150,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                              : 'text-slate-500 hover:text-slate-300'
                          }`}
                        >
+                         {subItem.icon}
                          {subItem.name}
                        </Link>
                      </li>
