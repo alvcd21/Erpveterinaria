@@ -1,3 +1,4 @@
+
 // Mapped strictly from PostgreSQL Schema
 
 // --- ENUMS & CONSTANTS ---
@@ -24,13 +25,13 @@ export interface LoginCredentials {
 
 // --- CORE ENTITIES ---
 export interface Cliente {
-  identidad: string; 
+  identidad: string; // PK
   nombre: string;
   apellido: string;
   direccion: string;
   telefono: string;
   correo?: string;
-  fechaCreacion: string;
+  fechaCreacion?: string;
 }
 
 export interface Empleado {
@@ -60,6 +61,13 @@ export interface Rol {
   idrol: string;
   nombre: string;
   estado: EstadoGeneral;
+}
+
+export interface Proveedor {
+  codProveedor: string;
+  nombre: string;
+  telefono: string;
+  direccion: string;
 }
 
 // --- INVENTORY SCHEMA (STRICT) ---
@@ -130,33 +138,41 @@ export interface ProductoUnified {
   ubicacion?: string;
 }
 
-export interface Proveedor {
-  codProveedor: string;
-  nombre: string;
-  telefono?: string;
-}
-
 // --- SALES / POS ---
+
+export interface VentaPayload {
+  identidadCliente: string;
+  tipoCompra: 'Contado' | 'Credito';
+  total: number;
+  isv: number;
+  descuento: number;
+  detalles: DetalleVenta[];
+}
 
 export interface Venta {
   codVenta: string;
   fecha: string;
-  codVendedor: string;
+  codUsuario: string;
   identidadCliente: string;
+  tipoCompra: string;
   total: number;
+  isv: number;
+  descuento: number;
   estado: string;
-  detalles?: DetalleVenta[]; 
+  // UI Helpers
+  nombreCliente?: string;
+  usuario?: string;
 }
 
 export interface DetalleVenta {
-  codDetalleVenta: string;
-  idVenta: string;
-  idAccesorio?: string;
-  idTelefono?: string;
+  codDetalleVenta?: string; // Optional for new items
+  idVenta?: string;
+  idTelefono?: string; // If it's a phone
+  idInventario?: string; // If it's an accessory (maps to codInventario)
   cantidad: number;
   precioVenta: number;
-  estado: EstadoGeneral;
-  descripcionProducto?: string;
+  descripcionProducto?: string; // UI Helper
+  tipoProducto?: 'TELEFONO' | 'ACCESORIO'; // UI Helper
 }
 
 // --- CASH REGISTER ---

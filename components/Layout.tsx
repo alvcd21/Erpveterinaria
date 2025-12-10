@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -14,7 +15,8 @@ import {
   Search,
   Bell,
   CloudLightning,
-  ShieldCheck
+  ShieldCheck,
+  Truck
 } from 'lucide-react';
 
 interface LayoutProps {
@@ -38,6 +40,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
     { name: 'Punto de Venta', path: '/pos', icon: <ShoppingCart size={20} />, roles: ['Administrador', 'Vendedor'] },
     { name: 'Inventario', path: '/inventory', icon: <Smartphone size={20} />, roles: ['Administrador', 'Inventario'] },
     { name: 'Clientes', path: '/clients', icon: <Users size={20} />, roles: ['Administrador', 'Vendedor'] },
+    { name: 'Proveedores', path: '/providers', icon: <Truck size={20} />, roles: ['Administrador', 'Inventario'] },
     { name: 'Caja y Movimientos', path: '/cash', icon: <DollarSign size={20} />, roles: ['Administrador', 'Cajero'] },
     { name: 'Reportes', path: '/reports', icon: <FileText size={20} />, roles: ['Administrador'] },
     { name: 'Usuarios & Roles', path: '/admin/users', icon: <ShieldCheck size={20} />, roles: ['Administrador'] },

@@ -1,3 +1,4 @@
+
 const express = require('express');
 const path = require('path');
 const { Pool } = require('pg');
@@ -29,8 +30,6 @@ pool.connect((err, client, release) => {
 // --- HELPER: GENERADOR DE IDs ---
 async function generateNextId(table, column, prefix) {
   try {
-    // Buscar el último ID que coincida con el prefijo
-    // Se ordena por longitud primero y luego por valor para manejar TELF-9 vs TELF-10 correctamente
     const query = `
       SELECT ${column} as id 
       FROM ${table} 
@@ -45,10 +44,8 @@ async function generateNextId(table, column, prefix) {
     }
 
     const lastId = result.rows[0].id; 
-    // Extraer la parte numérica asumiendo formato PREFIJO-NUMERO
     const parts = lastId.split('-');
     
-    // Si el ID no tiene guión o formato esperado, reiniciar
     if (parts.length < 2) return `${prefix}-0001`;
 
     const numberPart = parts[parts.length - 1]; 
@@ -108,12 +105,161 @@ app.post('/api/auth/login', async (req, res) => {
   } catch (err) { handleDbError(res, err); }
 });
 
-// --- INVENTORY ENDPOINTS ---
+// ==========================================
+// CLIENTES
+// ==========================================
+app.get('/api/clientes', authenticateToken, async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM clientes ORDER BY nombre ASC');
+    res.json(result.rows);
+  } catch (err) { handleDbError(res, err); }
+});
+
+app.post('/api/clientes', authenticateToken, async (req, res) => {
+  try {
+    const { identidad, nombre, apellido, direccion, telefono, correo } = req.body;
+    await pool.query(
+      `INSERT INTO clientes (identidad, nombre, apellido, direccion, telefono, correo) 
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [identidad, nombre, apellido, direccion, telefono, correo]
+    );
+    res.status(201).json({ message: 'Cliente registrado' });
+  } catch (err) { handleDbError(res, err); }
+});
+
+app.put('/api/clientes/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { nombre, apellido, direccion, telefono, correo } = req.body;
+    await pool.query(
+      `UPDATE clientes SET nombre=$1, apellido=$2, direccion=$3, telefono=$4, correo=$5 WHERE identidad=$6`,
+      [nombre, apellido, direccion, telefono, correo, id]
+    );
+    res.json({ message: 'Cliente actualizado' });
+  } catch (err) { handleDbError(res, err); }
+});
+
+app.delete('/api/clientes/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    await pool.query('DELETE FROM clientes WHERE identidad=$1', [id]);
+    res.json({ message: 'Cliente eliminado' });
+  } catch (err) { handleDbError(res, err); }
+});
+
+
+// ==========================================
+// PROVEEDORES
+// ==========================================
+app.get('/api/proveedores', authenticateToken, async (req, res) => {
+  try {
+     const result = await pool.query('SELECT codproveedor as "codProveedor", nombre, telefono, direccion FROM proveedores'); 
+     res.json(result.rows);
+  } catch (err) { handleDbError(res, err); }
+});
+
+app.post('/api/proveedores', authenticateToken, async (req, res) => {
+  try {
+    const { nombre, telefono, direccion } = req.body;
+    const codProveedor = await generateNextId('proveedores', 'codProveedor', 'PROV');
+    await pool.query(
+      "INSERT INTO proveedores (codProveedor, nombre, telefono, direccion) VALUES ($1, $2, $3, $4)",
+      [codProveedor, nombre, telefono, direccion]
+    );
+    res.status(201).json({ message: 'Proveedor creado', id: codProveedor });
+  } catch (err) { handleDbError(res, err); }
+});
+
+app.put('/api/proveedores/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { nombre, telefono, direccion } = req.body;
+    await pool.query(
+      "UPDATE proveedores SET nombre=$1, telefono=$2, direccion=$3 WHERE codProveedor=$4",
+      [nombre, telefono, direccion, id]
+    );
+    res.json({ message: 'Proveedor actualizado' });
+  } catch (err) { handleDbError(res, err); }
+});
+
+app.delete('/api/proveedores/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    await pool.query('DELETE FROM proveedores WHERE codProveedor=$1', [id]);
+    res.json({ message: 'Proveedor eliminado' });
+  } catch (err) { handleDbError(res, err); }
+});
+
+
+// ==========================================
+// VENTAS (POS) - TRANSACTIONAL
+// ==========================================
+app.post('/api/ventas', authenticateToken, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { identidadCliente, tipoCompra, total, isv, descuento, detalles } = req.body;
+    const codUsuario = req.user.codUsuario;
+
+    await client.query('BEGIN');
+
+    // 1. Crear Venta Header
+    const codVenta = await generateNextId('ventas', 'codVenta', 'FACT');
+    const fecha = new Date();
+    
+    await client.query(
+      `INSERT INTO ventas (codVenta, fecha, codUsuario, identidadCliente, tipoCompra, total, isv, descuento, estado)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'Completada')`,
+      [codVenta, fecha, codUsuario, identidadCliente, tipoCompra, total, isv, descuento]
+    );
+
+    // 2. Procesar Detalles y Actualizar Stock
+    for (const item of detalles) {
+      const codDetalle = await generateNextId('detalle_venta', 'codDetalleVenta', 'DET'); // In real high volume this might need sequence
+      
+      // Determine columns based on product type
+      // Note: React sends `idTelefono` or `idInventario` based on type
+      
+      await client.query(
+        `INSERT INTO detalle_venta (codDetalleVenta, idVenta, idTelefono, idInventario, cantidad, precioVenta)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [codDetalle, codVenta, item.idTelefono || null, item.idInventario || null, item.cantidad, item.precioVenta]
+      );
+
+      // STOCK UPDATE LOGIC
+      if (item.idTelefono) {
+        // Es un teléfono: Marcar como vendido
+        await client.query(
+          "UPDATE telefonos SET estado = 'Vendido' WHERE codigo = $1",
+          [item.idTelefono]
+        );
+      } else if (item.idInventario) {
+        // Es un accesorio: Restar cantidad
+        await client.query(
+          "UPDATE inventario SET cantidad = cantidad - $1 WHERE codInventario = $2",
+          [item.cantidad, item.idInventario]
+        );
+        // Validar que no quede negativo (Database Constraint usually handles this but good to be safe)
+      }
+    }
+
+    await client.query('COMMIT');
+    res.status(201).json({ message: 'Venta registrada con éxito', codVenta });
+
+  } catch (err) {
+    await client.query('ROLLBACK');
+    handleDbError(res, err);
+  } finally {
+    client.release();
+  }
+});
+
+// ==========================================
+// INVENTARIO ENDPOINTS
+// ==========================================
 
 // 1. TELEFONOS
 app.get('/api/inventory/telefonos', authenticateToken, async (req, res) => {
   try {
-    // IMPORTANT: Postgres returns lowercase columns. We use Aliases to match React types.
     const result = await pool.query(`
       SELECT 
         t.codigo, t.imei1, t.imei2, t.marca, t.modelo, 
@@ -363,34 +509,37 @@ app.get('/api/productos/unificados', authenticateToken, async (req, res) => {
   } catch(err) { handleDbError(res, err); }
 });
 
-app.get('/api/proveedores', authenticateToken, async (req, res) => {
-  try {
-     const result = await pool.query('SELECT codproveedor as "codProveedor", nombre FROM proveedores'); 
-     res.json(result.rows);
-  } catch (e) {
-     res.json([{codProveedor: 'PROV-001', nombre: 'Proveedor General'}]);
-  }
-});
 
 // --- SETUP ---
 app.get('/api/setup/install', async (req, res) => {
   try {
+    // 1. Tablas Base
     await pool.query(`CREATE TABLE IF NOT EXISTS roles (idrol varchar(100) PRIMARY KEY, nombre varchar(50) NOT NULL, estado varchar(20) NOT NULL DEFAULT 'Activo');`);
     await pool.query(`CREATE TABLE IF NOT EXISTS caja (idCaja varchar(100) PRIMARY KEY, nombre varchar(50) NOT NULL, estado varchar(50) NOT NULL DEFAULT 'Activa');`);
     await pool.query(`CREATE TABLE IF NOT EXISTS empleado (identidad varchar(20) PRIMARY KEY, nombre varchar(30) NOT NULL, apellido varchar(30) NOT NULL, direccion varchar(100) NOT NULL, telefono varchar(20) NOT NULL, estado varchar(20) NOT NULL DEFAULT 'Activo', fechaCreacion timestamp NOT NULL DEFAULT NOW(), fechaModificacion timestamp);`);
     await pool.query(`CREATE TABLE IF NOT EXISTS usuarios (codUsuario varchar(100) PRIMARY KEY, usuario varchar(100) NOT NULL, password varchar(100) NOT NULL, identidad varchar(20) NOT NULL, idCaja varchar(100) NOT NULL, idrol varchar(100) NOT NULL, foto bytea, fechaCreacion timestamp NOT NULL DEFAULT NOW(), fechaModificacion timestamp, estado varchar(20) NOT NULL DEFAULT 'Activo');`);
     
+    // 2. Inventario
     await pool.query(`CREATE TABLE IF NOT EXISTS ubicacion (idUbicacion varchar(100) PRIMARY KEY, nombre varchar(50) NOT NULL, descripcion varchar(100) NOT NULL, estante varchar(50) NOT NULL, nivel varchar(50) NOT NULL, estado varchar(20) NOT NULL);`);
     await pool.query(`CREATE TABLE IF NOT EXISTS categoria (codCategoria varchar(50) PRIMARY KEY, tipo varchar(30) NOT NULL);`);
     await pool.query(`CREATE TABLE IF NOT EXISTS accesorios (codAccesorio varchar(100) PRIMARY KEY, codCategoria varchar(50) NOT NULL, descripcion varchar(100) NOT NULL);`);
     await pool.query(`CREATE TABLE IF NOT EXISTS telefonos (codigo varchar(100) PRIMARY KEY, imei1 varchar(50) NOT NULL, imei2 varchar(50) NOT NULL, marca varchar(50) NOT NULL, modelo varchar(50) NOT NULL, precioCompra numeric(10,2) NOT NULL, precioVenta numeric(10,2) NOT NULL, codProveedor varchar(50) NOT NULL, fecha date NOT NULL, idubicacion varchar(100) NOT NULL, estado varchar(20) NOT NULL);`);
     await pool.query(`CREATE TABLE IF NOT EXISTS inventario (codInventario varchar(100) PRIMARY KEY, codAccesorio varchar(100), cantidad integer NOT NULL, precioCompra numeric(10,2) NOT NULL, precioVenta numeric(10,2) NOT NULL, codProveedor varchar(50) NOT NULL, fecha date NOT NULL, idubicacion varchar(100) NOT NULL, estado varchar(100) NOT NULL);`);
-    await pool.query(`CREATE TABLE IF NOT EXISTS proveedores (codProveedor varchar(50) PRIMARY KEY, nombre varchar(100) NOT NULL);`);
+    await pool.query(`CREATE TABLE IF NOT EXISTS proveedores (codProveedor varchar(50) PRIMARY KEY, nombre varchar(100) NOT NULL, telefono varchar(50), direccion varchar(150));`);
     
-    await pool.query("INSERT INTO proveedores (codProveedor, nombre) VALUES ('PROV-GEN', 'General') ON CONFLICT DO NOTHING");
+    // 3. Clientes
+    await pool.query(`CREATE TABLE IF NOT EXISTS clientes (identidad varchar(20) PRIMARY KEY, nombre varchar(50) NOT NULL, apellido varchar(50) NOT NULL, direccion varchar(150) NOT NULL, telefono varchar(20), correo varchar(100), fechaCreacion timestamp DEFAULT NOW());`);
+
+    // 4. Ventas
+    await pool.query(`CREATE TABLE IF NOT EXISTS ventas (codVenta varchar(100) PRIMARY KEY, fecha timestamp NOT NULL, codUsuario varchar(100) NOT NULL, identidadCliente varchar(20) NOT NULL, tipoCompra varchar(20) NOT NULL, total numeric(10,2) NOT NULL, isv numeric(10,2) NOT NULL, descuento numeric(10,2) NOT NULL, estado varchar(20) NOT NULL);`);
+    await pool.query(`CREATE TABLE IF NOT EXISTS detalle_venta (codDetalleVenta varchar(100) PRIMARY KEY, idVenta varchar(100) NOT NULL, idTelefono varchar(100), idInventario varchar(100), cantidad integer NOT NULL, precioVenta numeric(10,2) NOT NULL);`);
+
+    
+    // Data Inicial
+    await pool.query("INSERT INTO proveedores (codProveedor, nombre, telefono, direccion) VALUES ('PROV-GEN', 'General', '0000', 'Ciudad') ON CONFLICT DO NOTHING");
     await pool.query("INSERT INTO ubicacion (idUbicacion, nombre, descripcion, estante, nivel, estado) VALUES ('UBIC-0001', 'Vitrina Principal', 'Entrada', '1', '1', 'Activo') ON CONFLICT DO NOTHING");
     
-    res.send('✅ Tablas de Inventario Actualizadas Correctamente');
+    res.send('✅ Tablas Completas del ERP Actualizadas Correctamente');
   } catch (err) {
     console.error(err);
     res.status(500).send('Error Setup: ' + err.message);

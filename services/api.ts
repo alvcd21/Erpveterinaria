@@ -1,9 +1,10 @@
+
 import { 
   Telefono, 
   InventarioAccesorio, 
   AccesorioMaster, 
   Cliente, 
-  Venta, 
+  VentaPayload, 
   Arqueo, 
   Ingreso, 
   Egreso,
@@ -111,16 +112,20 @@ export const InventoryService = {
   deleteUbicacion: (id: string) => request(`/inventory/ubicaciones/${id}`, { method: 'DELETE' }),
 
   getProveedores: () => request<Proveedor[]>('/proveedores'),
+  createProveedor: (data: Partial<Proveedor>) => request('/proveedores', { method: 'POST', body: JSON.stringify(data) }),
+  updateProveedor: (id: string, data: Partial<Proveedor>) => request(`/proveedores/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteProveedor: (id: string) => request(`/proveedores/${id}`, { method: 'DELETE' }),
 };
 
 export const ClientService = {
   getAll: () => request<Cliente[]>('/clientes'),
-  getByDni: (dni: string) => request<Cliente>(`/clientes/${dni}`),
-  create: (data: Cliente) => request<Cliente>('/clientes', { method: 'POST', body: JSON.stringify(data) }),
+  create: (data: Cliente) => request('/clientes', { method: 'POST', body: JSON.stringify(data) }),
+  update: (id: string, data: Partial<Cliente>) => request(`/clientes/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  delete: (id: string) => request(`/clientes/${id}`, { method: 'DELETE' }),
 };
 
 export const SalesService = {
-  createVenta: (venta: Venta) => request<Venta>('/ventas', { method: 'POST', body: JSON.stringify(venta) }),
+  createVenta: (venta: VentaPayload) => request('/ventas', { method: 'POST', body: JSON.stringify(venta) }),
 };
 
 export const CashService = {

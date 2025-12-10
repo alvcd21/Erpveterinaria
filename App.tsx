@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
@@ -6,6 +7,8 @@ import Layout from './components/Layout';
 import Dashboard from './pages/Dashboard';
 import Inventory from './pages/Inventory';
 import POS from './pages/POS';
+import Clients from './pages/Clients';
+import Providers from './pages/Providers';
 import CashRegister from './pages/CashRegister';
 import Login from './pages/Login';
 import AdminUsers from './pages/AdminUsers';
@@ -45,7 +48,16 @@ const App: React.FC = () => {
                     path="/clients" 
                     element={
                       <ProtectedRoute allowedRoles={['Administrador', 'Vendedor']}>
-                        <Placeholder title="Gestión de Clientes" />
+                        <Clients />
+                      </ProtectedRoute>
+                    } 
+                  />
+
+                  <Route 
+                    path="/providers" 
+                    element={
+                      <ProtectedRoute allowedRoles={['Administrador', 'Inventario']}>
+                        <Providers />
                       </ProtectedRoute>
                     } 
                   />
