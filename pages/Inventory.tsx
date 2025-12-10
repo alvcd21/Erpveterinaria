@@ -11,7 +11,7 @@ import {
 } from '../types';
 import { 
   Search, Plus, Smartphone, Headphones, Box, MapPin, 
-  Tag, PlusCircle, X, RefreshCw, Printer, Edit2, Trash2
+  Tag, PlusCircle, X, RefreshCw, Printer, Edit2, Trash2, Calendar
 } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { jsPDF } from 'jspdf';
@@ -28,6 +28,7 @@ const Inventory: React.FC = () => {
   const [isEditing, setIsEditing] = useState(false);
   const [currentId, setCurrentId] = useState<string | null>(null);
 
+  // Data States
   const [phones, setPhones] = useState<Telefono[]>([]);
   const [stock, setStock] = useState<InventarioAccesorio[]>([]);
   const [master, setMaster] = useState<AccesorioMaster[]>([]);
@@ -35,18 +36,47 @@ const Inventory: React.FC = () => {
   const [locations, setLocations] = useState<Ubicacion[]>([]);
   const [providers, setProviders] = useState<Proveedor[]>([]);
 
+  // Forms States
   const [phoneForm, setPhoneForm] = useState<Partial<Telefono>>({});
   const [stockForm, setStockForm] = useState<Partial<InventarioAccesorio>>({});
   const [masterForm, setMasterForm] = useState<Partial<AccesorioMaster>>({});
   const [catForm, setCatForm] = useState<Partial<Categoria>>({});
   const [locForm, setLocForm] = useState<Partial<Ubicacion>>({});
 
+  // UI Helpers for Dynamic Selects
+  const [uniqueBrands, setUniqueBrands] = useState<string[]>([]);
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [manualBrandMode, setManualBrandMode] = useState(false);
+  const [manualModelMode, setManualModelMode] = useState(false);
+
   useEffect(() => {
     loadData();
+    // Cargar catálogos auxiliares al montar
     InventoryService.getCategorias().then(data => setCategories(data || []));
     InventoryService.getUbicaciones().then(data => setLocations(data || []));
     InventoryService.getProveedores().then(data => setProviders(data || []));
+    InventoryService.getAccesoriosMaster().then(data => setMaster(data || []));
   }, [activeTab]);
+
+  // Extract brands when phones change
+  useEffect(() => {
+    if (phones.length > 0) {
+      const brands = Array.from(new Set(phones.map(p => p.marca))).sort();
+      setUniqueBrands(brands);
+    }
+  }, [phones]);
+
+  // Filter models when Brand changes in form
+  useEffect(() => {
+    if (phoneForm.marca && !manualBrandMode) {
+      const models = phones
+        .filter(p => p.marca === phoneForm.marca)
+        .map(p => p.modelo);
+      setAvailableModels(Array.from(new Set(models)).sort());
+    } else {
+      setAvailableModels([]);
+    }
+  }, [phoneForm.marca, manualBrandMode, phones]);
 
   const loadData = async () => {
     setLoading(true);
@@ -69,9 +99,6 @@ const Inventory: React.FC = () => {
       }
     } catch (error) {
       console.error(error);
-      // Ensure state is at least empty array on error
-      if (activeTab === 'TELEPHONES') setPhones([]);
-      if (activeTab === 'STOCK') setStock([]);
     } finally {
       setLoading(false);
     }
@@ -80,11 +107,18 @@ const Inventory: React.FC = () => {
   const openNewModal = () => {
     setIsEditing(false);
     setCurrentId(null);
-    setPhoneForm({});
-    setStockForm({});
+    
+    // Reset Forms
+    setPhoneForm({ fecha: new Date().toISOString().split('T')[0] });
+    setStockForm({ fecha: new Date().toISOString().split('T')[0] });
     setMasterForm({});
     setCatForm({});
     setLocForm({});
+    
+    // Reset Logic UI
+    setManualBrandMode(false);
+    setManualModelMode(false);
+    
     setShowModal(true);
   };
 
@@ -92,8 +126,12 @@ const Inventory: React.FC = () => {
     setIsEditing(true);
     setCurrentId(item.codigo || item.codInventario || item.codAccesorio || item.codCategoria || item.idUbicacion);
     
-    if (activeTab === 'TELEPHONES') setPhoneForm({ ...item });
-    else if (activeTab === 'STOCK') setStockForm({ ...item });
+    if (activeTab === 'TELEPHONES') {
+      setPhoneForm({ ...item, fecha: item.fecha ? item.fecha.split('T')[0] : '' });
+      setManualBrandMode(true); // En edición permitimos editar texto directo para simplificar
+      setManualModelMode(true);
+    }
+    else if (activeTab === 'STOCK') setStockForm({ ...item, fecha: item.fecha ? item.fecha.split('T')[0] : '' });
     else if (activeTab === 'MASTER') setMasterForm({ ...item });
     else if (activeTab === 'CATEGORIES') setCatForm({ ...item });
     else if (activeTab === 'LOCATIONS') setLocForm({ ...item });
@@ -105,17 +143,26 @@ const Inventory: React.FC = () => {
     e.preventDefault();
     try {
       if (activeTab === 'TELEPHONES') {
+        // Validaciones Teléfono
+        if (!phoneForm.marca || phoneForm.marca === 'NEW') return Swal.fire('Error', 'Ingrese una marca válida', 'warning');
+        if (!phoneForm.modelo || phoneForm.modelo === 'NEW') return Swal.fire('Error', 'Ingrese un modelo válido', 'warning');
+        if (!phoneForm.imei1) return Swal.fire('Error', 'IMEI 1 es obligatorio', 'warning');
+
         if(isEditing) await InventoryService.updateTelefono(currentId!, phoneForm);
         else await InventoryService.createTelefono(phoneForm);
+
       } else if (activeTab === 'STOCK') {
         if(isEditing) await InventoryService.updateStock(currentId!, stockForm);
         else await InventoryService.createStock(stockForm);
+
       } else if (activeTab === 'MASTER') {
         if(isEditing) await InventoryService.updateAccesorioMaster(currentId!, masterForm);
         else await InventoryService.createAccesorioMaster(masterForm);
+
       } else if (activeTab === 'CATEGORIES') {
         if(isEditing) await InventoryService.updateCategoria(currentId!, catForm);
         else await InventoryService.createCategoria(catForm);
+
       } else if (activeTab === 'LOCATIONS') {
         if(isEditing) await InventoryService.updateUbicacion(currentId!, locForm);
         else await InventoryService.createUbicacion(locForm);
@@ -201,8 +248,8 @@ const Inventory: React.FC = () => {
         <div className="bg-white rounded-t-2xl border-b border-slate-200 px-2 pt-2 flex overflow-x-auto no-scrollbar">
           {[
             { id: 'TELEPHONES', label: 'Teléfonos', icon: <Smartphone size={18}/> },
-            { id: 'STOCK', label: 'Accesorios', icon: <Box size={18}/> },
-            { id: 'MASTER', label: 'Maestro', icon: <Headphones size={18}/> },
+            { id: 'STOCK', label: 'Accesorios (Stock)', icon: <Box size={18}/> },
+            { id: 'MASTER', label: 'Maestro Accesorios', icon: <Headphones size={18}/> },
             { id: 'CATEGORIES', label: 'Categorías', icon: <Tag size={18}/> },
             { id: 'LOCATIONS', label: 'Ubicaciones', icon: <MapPin size={18}/> },
           ].map(tab => (
@@ -272,7 +319,6 @@ const Inventory: React.FC = () => {
                     <th className="p-4 text-xs font-bold text-slate-500 uppercase text-center">Acciones</th>
                   </>
                 )}
-                {/* Simplified headers for other tabs */}
                  {(activeTab === 'CATEGORIES' || activeTab === 'LOCATIONS') && (
                   <>
                      <th className="p-4 text-xs font-bold text-slate-500 uppercase">ID</th>
@@ -288,7 +334,7 @@ const Inventory: React.FC = () => {
                   <td className="p-4 text-xs font-mono text-slate-500">{p.codigo}</td>
                   <td className="p-4 text-xs font-mono text-slate-600 font-bold">{p.imei1}</td>
                   <td className="p-4 text-sm font-medium text-slate-800">{p.marca} {p.modelo}</td>
-                  <td className="p-4 text-sm text-right font-bold text-emerald-600">L. {p.precioVenta}</td>
+                  <td className="p-4 text-sm text-right font-bold text-emerald-600">L. {Number(p.precioVenta).toFixed(2)}</td>
                   <td className="p-4 text-xs text-slate-500 truncate max-w-[150px]">{p.nombreUbicacion || p.idubicacion}</td>
                   <td className="p-4 text-center flex items-center justify-center gap-2">
                     <button onClick={() => handlePrintBarcode(p.codigo, `${p.marca} ${p.modelo}`)} className="text-slate-500 hover:text-indigo-600" title="Imprimir"><Printer size={16} /></button>
@@ -303,7 +349,7 @@ const Inventory: React.FC = () => {
                   <td className="p-4 text-xs font-mono text-slate-500">{s.codInventario}</td>
                   <td className="p-4 text-sm font-medium text-slate-800">{s.descripcionAccesorio || s.codAccesorio}</td>
                   <td className="p-4 text-center"><span className={`px-2 py-1 rounded text-xs font-bold ${s.cantidad < 3 ? 'bg-amber-100 text-amber-600' : 'bg-green-100 text-green-600'}`}>{s.cantidad}</span></td>
-                  <td className="p-4 text-sm text-right font-bold text-emerald-600">L. {s.precioVenta}</td>
+                  <td className="p-4 text-sm text-right font-bold text-emerald-600">L. {Number(s.precioVenta).toFixed(2)}</td>
                   <td className="p-4 text-xs text-slate-500 truncate max-w-[150px]">{s.nombreUbicacion || s.idubicacion}</td>
                   <td className="p-4 text-center flex items-center justify-center gap-2">
                     <button onClick={() => handlePrintBarcode(s.codInventario, s.descripcionAccesorio || 'Acc')} className="text-slate-500 hover:text-indigo-600" title="Imprimir"><Printer size={16} /></button>
@@ -316,7 +362,7 @@ const Inventory: React.FC = () => {
               {activeTab === 'MASTER' && master.filter(m => JSON.stringify(m).toLowerCase().includes(searchTerm.toLowerCase())).map(m => (
                 <tr key={m.codAccesorio} className="hover:bg-slate-50">
                   <td className="p-4 text-xs font-mono text-slate-500">{m.codAccesorio}</td>
-                  <td className="p-4 text-xs text-slate-500">{m.nombreCategoria}</td>
+                  <td className="p-4 text-xs text-slate-500">{m.nombreCategoria || m.codCategoria}</td>
                   <td className="p-4 text-sm font-medium text-slate-800">{m.descripcion}</td>
                   <td className="p-4 text-center flex items-center justify-center gap-2">
                     <button onClick={() => openEditModal(m)} className="text-blue-500 hover:bg-blue-50 p-1.5 rounded"><Edit2 size={16}/></button>
@@ -351,7 +397,7 @@ const Inventory: React.FC = () => {
         </div>
       </div>
 
-      {/* MODAL CREATION (Same Logic, Responsive Width) */}
+      {/* MODAL UNIVERSAL */}
       {showModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl p-6 animate-fade-in max-h-[90vh] overflow-y-auto">
@@ -363,32 +409,229 @@ const Inventory: React.FC = () => {
             </div>
             
             <form onSubmit={handleSubmit} className="space-y-4">
-               {/* Render fields based on activeTab (Kept simplified for brevity, assume same fields as before) */}
-               {/* Just forcing re-render of form fields in context */}
+               {/* --- FORMULARIO TELEFONOS --- */}
                {activeTab === 'TELEPHONES' && (
                  <>
-                   <input placeholder="IMEI 1" className="w-full p-2 border rounded" value={phoneForm.imei1 || ''} onChange={e => setPhoneForm({...phoneForm, imei1: e.target.value})} required/>
-                   <input placeholder="Marca" className="w-full p-2 border rounded" value={phoneForm.marca || ''} onChange={e => setPhoneForm({...phoneForm, marca: e.target.value})} required/>
-                   <input placeholder="Modelo" className="w-full p-2 border rounded" value={phoneForm.modelo || ''} onChange={e => setPhoneForm({...phoneForm, modelo: e.target.value})} required/>
-                   <div className="flex gap-2">
-                      <input type="number" placeholder="Precio Compra" className="w-1/2 p-2 border rounded" value={phoneForm.precioCompra || ''} onChange={e => setPhoneForm({...phoneForm, precioCompra: Number(e.target.value)})} required/>
-                      <input type="number" placeholder="Precio Venta" className="w-1/2 p-2 border rounded" value={phoneForm.precioVenta || ''} onChange={e => setPhoneForm({...phoneForm, precioVenta: Number(e.target.value)})} required/>
+                   <div className="grid grid-cols-2 gap-4">
+                     <div>
+                       <label className="text-xs font-bold text-slate-500 uppercase">IMEI 1</label>
+                       <input className="w-full p-2.5 border rounded-lg mt-1" value={phoneForm.imei1 || ''} onChange={e => setPhoneForm({...phoneForm, imei1: e.target.value})} required placeholder="Principal"/>
+                     </div>
+                     <div>
+                       <label className="text-xs font-bold text-slate-500 uppercase">IMEI 2 (Opcional)</label>
+                       <input className="w-full p-2.5 border rounded-lg mt-1" value={phoneForm.imei2 || ''} onChange={e => setPhoneForm({...phoneForm, imei2: e.target.value})} placeholder="Secundario"/>
+                     </div>
                    </div>
-                   <select className="w-full p-2 border rounded" value={phoneForm.idubicacion || ''} onChange={e => setPhoneForm({...phoneForm, idubicacion: e.target.value})} required>
-                      <option value="">Ubicación...</option>
-                      {locations.map(l => <option key={l.idUbicacion} value={l.idUbicacion}>{l.nombre}</option>)}
-                   </select>
-                   <select className="w-full p-2 border rounded" value={phoneForm.codProveedor || ''} onChange={e => setPhoneForm({...phoneForm, codProveedor: e.target.value})} required>
-                      <option value="">Proveedor...</option>
-                      {providers.map(p => <option key={p.codProveedor} value={p.codProveedor}>{p.nombre}</option>)}
-                   </select>
+
+                   {/* Marca Selector inteligente */}
+                   <div>
+                      <label className="text-xs font-bold text-slate-500 uppercase">Marca</label>
+                      {!manualBrandMode ? (
+                        <select 
+                          className="w-full p-2.5 border rounded-lg mt-1 bg-white"
+                          value={phoneForm.marca || ''} 
+                          onChange={(e) => {
+                             if(e.target.value === 'NEW') {
+                               setManualBrandMode(true);
+                               setPhoneForm({...phoneForm, marca: ''});
+                             } else {
+                               setPhoneForm({...phoneForm, marca: e.target.value});
+                             }
+                          }}
+                          required
+                        >
+                          <option value="">Seleccionar Marca...</option>
+                          {uniqueBrands.map(b => <option key={b} value={b}>{b}</option>)}
+                          <option value="NEW" className="font-bold text-indigo-600">+ NUEVA MARCA...</option>
+                        </select>
+                      ) : (
+                        <div className="flex gap-2">
+                           <input autoFocus className="w-full p-2.5 border-2 border-indigo-200 rounded-lg mt-1" placeholder="Escriba la marca..." value={phoneForm.marca || ''} onChange={e => setPhoneForm({...phoneForm, marca: e.target.value})} required />
+                           <button type="button" onClick={() => setManualBrandMode(false)} className="mt-1 p-2 bg-slate-100 rounded text-slate-500"><X size={16}/></button>
+                        </div>
+                      )}
+                   </div>
+
+                   {/* Modelo Selector inteligente (depende de marca) */}
+                   <div>
+                      <label className="text-xs font-bold text-slate-500 uppercase">Modelo</label>
+                      {!manualModelMode ? (
+                        <select 
+                          className="w-full p-2.5 border rounded-lg mt-1 bg-white disabled:bg-slate-100"
+                          value={phoneForm.modelo || ''} 
+                          disabled={!phoneForm.marca || manualBrandMode}
+                          onChange={(e) => {
+                             if(e.target.value === 'NEW') {
+                               setManualModelMode(true);
+                               setPhoneForm({...phoneForm, modelo: ''});
+                             } else {
+                               setPhoneForm({...phoneForm, modelo: e.target.value});
+                             }
+                          }}
+                          required
+                        >
+                          <option value="">Seleccionar Modelo...</option>
+                          {availableModels.map(m => <option key={m} value={m}>{m}</option>)}
+                          <option value="NEW" className="font-bold text-indigo-600">+ NUEVO MODELO...</option>
+                        </select>
+                      ) : (
+                         <div className="flex gap-2">
+                           <input autoFocus className="w-full p-2.5 border-2 border-indigo-200 rounded-lg mt-1" placeholder="Escriba el modelo..." value={phoneForm.modelo || ''} onChange={e => setPhoneForm({...phoneForm, modelo: e.target.value})} required />
+                           <button type="button" onClick={() => setManualModelMode(false)} className="mt-1 p-2 bg-slate-100 rounded text-slate-500"><X size={16}/></button>
+                        </div>
+                      )}
+                   </div>
+
+                   <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="text-xs font-bold text-slate-500 uppercase">Precio Compra</label>
+                        <input type="number" className="w-full p-2.5 border rounded-lg mt-1" value={phoneForm.precioCompra || ''} onChange={e => setPhoneForm({...phoneForm, precioCompra: Number(e.target.value)})} required/>
+                      </div>
+                      <div>
+                         <label className="text-xs font-bold text-slate-500 uppercase">Precio Venta</label>
+                         <input type="number" className="w-full p-2.5 border rounded-lg mt-1 font-bold text-emerald-600" value={phoneForm.precioVenta || ''} onChange={e => setPhoneForm({...phoneForm, precioVenta: Number(e.target.value)})} required/>
+                      </div>
+                   </div>
+
+                   <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="text-xs font-bold text-slate-500 uppercase">Fecha Compra</label>
+                        <input type="date" className="w-full p-2.5 border rounded-lg mt-1" value={phoneForm.fecha || ''} onChange={e => setPhoneForm({...phoneForm, fecha: e.target.value})} required/>
+                      </div>
+                      <div>
+                        <label className="text-xs font-bold text-slate-500 uppercase">Ubicación</label>
+                        <select className="w-full p-2.5 border rounded-lg mt-1" value={phoneForm.idubicacion || ''} onChange={e => setPhoneForm({...phoneForm, idubicacion: e.target.value})} required>
+                            <option value="">Seleccionar...</option>
+                            {locations.map(l => <option key={l.idUbicacion} value={l.idUbicacion}>{l.nombre}</option>)}
+                        </select>
+                      </div>
+                   </div>
+                   
+                   <div>
+                      <label className="text-xs font-bold text-slate-500 uppercase">Proveedor</label>
+                      <select className="w-full p-2.5 border rounded-lg mt-1" value={phoneForm.codProveedor || ''} onChange={e => setPhoneForm({...phoneForm, codProveedor: e.target.value})} required>
+                          <option value="">Seleccionar...</option>
+                          {providers.map(p => <option key={p.codProveedor} value={p.codProveedor}>{p.nombre}</option>)}
+                      </select>
+                   </div>
                  </>
                )}
-               {/* Other forms logic remains identical to previous file but responsive container handles it */}
+
+               {/* --- FORMULARIO STOCK ACCESORIOS --- */}
+               {activeTab === 'STOCK' && (
+                 <>
+                   <div>
+                      <label className="text-xs font-bold text-slate-500 uppercase">Accesorio (Maestro)</label>
+                      <select 
+                        disabled={isEditing}
+                        className="w-full p-2.5 border rounded-lg mt-1 disabled:bg-slate-200" 
+                        value={stockForm.codAccesorio || ''} 
+                        onChange={e => setStockForm({...stockForm, codAccesorio: e.target.value})} 
+                        required
+                      >
+                          <option value="">Seleccionar Producto Base...</option>
+                          {master.map(m => <option key={m.codAccesorio} value={m.codAccesorio}>{m.descripcion}</option>)}
+                      </select>
+                   </div>
+                   <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="text-xs font-bold text-slate-500 uppercase">Cantidad</label>
+                        <input type="number" className="w-full p-2.5 border rounded-lg mt-1 font-bold" value={stockForm.cantidad || ''} onChange={e => setStockForm({...stockForm, cantidad: Number(e.target.value)})} required/>
+                      </div>
+                      <div>
+                         <label className="text-xs font-bold text-slate-500 uppercase">Ubicación</label>
+                         <select className="w-full p-2.5 border rounded-lg mt-1" value={stockForm.idubicacion || ''} onChange={e => setStockForm({...stockForm, idubicacion: e.target.value})} required>
+                            <option value="">Seleccionar...</option>
+                            {locations.map(l => <option key={l.idUbicacion} value={l.idUbicacion}>{l.nombre}</option>)}
+                        </select>
+                      </div>
+                   </div>
+                   <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="text-xs font-bold text-slate-500 uppercase">Precio Compra</label>
+                        <input type="number" className="w-full p-2.5 border rounded-lg mt-1" value={stockForm.precioCompra || ''} onChange={e => setStockForm({...stockForm, precioCompra: Number(e.target.value)})} required/>
+                      </div>
+                      <div>
+                         <label className="text-xs font-bold text-slate-500 uppercase">Precio Venta</label>
+                         <input type="number" className="w-full p-2.5 border rounded-lg mt-1 font-bold text-emerald-600" value={stockForm.precioVenta || ''} onChange={e => setStockForm({...stockForm, precioVenta: Number(e.target.value)})} required/>
+                      </div>
+                   </div>
+                   <div>
+                      <label className="text-xs font-bold text-slate-500 uppercase">Proveedor</label>
+                      <select className="w-full p-2.5 border rounded-lg mt-1" value={stockForm.codProveedor || ''} onChange={e => setStockForm({...stockForm, codProveedor: e.target.value})} required>
+                          <option value="">Seleccionar...</option>
+                          {providers.map(p => <option key={p.codProveedor} value={p.codProveedor}>{p.nombre}</option>)}
+                      </select>
+                   </div>
+                   <div>
+                      <label className="text-xs font-bold text-slate-500 uppercase">Estado</label>
+                      <select className="w-full p-2.5 border rounded-lg mt-1" value={stockForm.estado || 'Activo'} onChange={e => setStockForm({...stockForm, estado: e.target.value})}>
+                          <option value="Activo">Activo</option>
+                          <option value="Inactivo">Inactivo</option>
+                      </select>
+                   </div>
+                 </>
+               )}
+
+               {/* --- FORMULARIO MAESTRO --- */}
+               {activeTab === 'MASTER' && (
+                 <>
+                   <div>
+                      <label className="text-xs font-bold text-slate-500 uppercase">Categoría</label>
+                      <select className="w-full p-2.5 border rounded-lg mt-1" value={masterForm.codCategoria || ''} onChange={e => setMasterForm({...masterForm, codCategoria: e.target.value})} required>
+                          <option value="">Seleccionar...</option>
+                          {categories.map(c => <option key={c.codCategoria} value={c.codCategoria}>{c.tipo}</option>)}
+                      </select>
+                   </div>
+                   <div>
+                      <label className="text-xs font-bold text-slate-500 uppercase">Descripción / Nombre Producto</label>
+                      <input className="w-full p-2.5 border rounded-lg mt-1" value={masterForm.descripcion || ''} onChange={e => setMasterForm({...masterForm, descripcion: e.target.value})} required placeholder="Ej: Funda Silicona iPhone 13"/>
+                   </div>
+                 </>
+               )}
+
+               {/* --- FORMULARIO CATEGORIAS --- */}
+               {activeTab === 'CATEGORIES' && (
+                 <div>
+                    <label className="text-xs font-bold text-slate-500 uppercase">Nombre Categoría</label>
+                    <input className="w-full p-2.5 border rounded-lg mt-1" value={catForm.tipo || ''} onChange={e => setCatForm({...catForm, tipo: e.target.value})} required placeholder="Ej: Fundas, Cargadores..."/>
+                 </div>
+               )}
+
+               {/* --- FORMULARIO UBICACIONES --- */}
+               {activeTab === 'LOCATIONS' && (
+                 <>
+                   <div>
+                      <label className="text-xs font-bold text-slate-500 uppercase">Nombre Ubicación</label>
+                      <input className="w-full p-2.5 border rounded-lg mt-1" value={locForm.nombre || ''} onChange={e => setLocForm({...locForm, nombre: e.target.value})} required placeholder="Ej: Vitrina Principal"/>
+                   </div>
+                   <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="text-xs font-bold text-slate-500 uppercase">Estante</label>
+                        <input className="w-full p-2.5 border rounded-lg mt-1" value={locForm.estante || ''} onChange={e => setLocForm({...locForm, estante: e.target.value})} required placeholder="A1"/>
+                      </div>
+                      <div>
+                        <label className="text-xs font-bold text-slate-500 uppercase">Nivel</label>
+                        <input className="w-full p-2.5 border rounded-lg mt-1" value={locForm.nivel || ''} onChange={e => setLocForm({...locForm, nivel: e.target.value})} required placeholder="1"/>
+                      </div>
+                   </div>
+                   <div>
+                      <label className="text-xs font-bold text-slate-500 uppercase">Descripción</label>
+                      <input className="w-full p-2.5 border rounded-lg mt-1" value={locForm.descripcion || ''} onChange={e => setLocForm({...locForm, descripcion: e.target.value})} required placeholder="Detalle..."/>
+                   </div>
+                   <div>
+                      <label className="text-xs font-bold text-slate-500 uppercase">Estado</label>
+                      <select className="w-full p-2.5 border rounded-lg mt-1" value={locForm.estado || 'Activo'} onChange={e => setLocForm({...locForm, estado: e.target.value})}>
+                          <option value="Activo">Activo</option>
+                          <option value="Inactivo">Inactivo</option>
+                      </select>
+                   </div>
+                 </>
+               )}
                
                <div className="pt-4 flex gap-3">
-                 <button type="button" onClick={() => setShowModal(false)} className="flex-1 px-4 py-3 bg-slate-100 font-bold rounded-xl">Cancelar</button>
-                 <button type="submit" className="flex-1 px-4 py-3 bg-indigo-600 text-white font-bold rounded-xl">Guardar</button>
+                 <button type="button" onClick={() => setShowModal(false)} className="flex-1 px-4 py-3 bg-slate-100 font-bold rounded-xl text-slate-600 hover:bg-slate-200">Cancelar</button>
+                 <button type="submit" className="flex-1 px-4 py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 shadow-lg">Guardar</button>
                </div>
             </form>
           </div>
