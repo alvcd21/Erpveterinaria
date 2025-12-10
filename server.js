@@ -29,6 +29,8 @@ pool.connect((err, client, release) => {
 // --- HELPER: GENERADOR DE IDs ---
 async function generateNextId(table, column, prefix) {
   try {
+    // Buscar el último ID que coincida con el prefijo
+    // Se ordena por longitud primero y luego por valor para manejar TELF-9 vs TELF-10 correctamente
     const query = `
       SELECT ${column} as id 
       FROM ${table} 
@@ -43,7 +45,13 @@ async function generateNextId(table, column, prefix) {
     }
 
     const lastId = result.rows[0].id; 
-    const numberPart = lastId.split('-')[1]; 
+    // Extraer la parte numérica asumiendo formato PREFIJO-NUMERO
+    const parts = lastId.split('-');
+    
+    // Si el ID no tiene guión o formato esperado, reiniciar
+    if (parts.length < 2) return `${prefix}-0001`;
+
+    const numberPart = parts[parts.length - 1]; 
     const nextNumber = parseInt(numberPart, 10) + 1; 
     
     const paddedNumber = nextNumber.toString().padStart(4, '0'); 
@@ -106,7 +114,7 @@ app.post('/api/auth/login', async (req, res) => {
 app.get('/api/inventory/telefonos', authenticateToken, async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT t.*, u.nombre as nombreUbicacion 
+      SELECT t.*, u.nombre as nombreUbicacion, u.estante, u.nivel
       FROM telefonos t
       LEFT JOIN ubicacion u ON t.idubicacion = u.idUbicacion
       ORDER BY t.codigo DESC
@@ -147,7 +155,7 @@ app.post('/api/inventory/categorias', authenticateToken, async (req, res) => {
   } catch(err) { handleDbError(res, err); }
 });
 
-// 3. ACCESORIOS (MASTER)
+// 3. ACCESORIOS (MASTER) - CORREGIDO
 app.get('/api/inventory/accesorios-master', authenticateToken, async (req, res) => {
   try {
     const result = await pool.query(`
@@ -163,15 +171,21 @@ app.get('/api/inventory/accesorios-master', authenticateToken, async (req, res) 
 app.post('/api/inventory/accesorios-master', authenticateToken, async (req, res) => {
   try {
     const { codCategoria, descripcion } = req.body;
-    const codAccesorio = await generateNextId('accesorios', 'codAccesorio', 'ACCS'); // Using ACCS per legacy shot (Wait, shot says ACCS is inventory, let's use AUDI/BATE for master? Or stick to schema. Let's use PROD for master and ACCS for inventory? No, usually master is the definition. Let's use MAST- for Master and INVA- for Inventory or similar. Screenshot 3 shows "AUDI-001" for a headphone master. Let's use prefix based on category if possible, but simplified: MAST.) 
-    // Actually, user screenshot shows 'AUDI-0001' for Audifonos, 'BATE-0001' for Bateria.
-    // For simplicity in this iteration, we will use a generic 'ITEM' or 'ACCM' prefix, OR try to use first 4 letters of category.
-    // Let's stick to 'ITEM' for master data to be safe, or 'ACCS' if user wants. Screenshot 2 shows ACCS-0003 in inventory table. Screenshot 3 shows AUDI-0001 in master table. 
-    // Let's use 'PROD' for master.
     
-    // UPDATE: Based on screenshot 3, master IDs are dynamic (AUDI, BATE). This is complex. 
-    // Let's generate a generic 'ITEM-XXXX' for now to ensure stability.
-    const id = await generateNextId('accesorios', 'codAccesorio', 'ITEM');
+    // 1. Obtener el nombre de la categoría para generar el prefijo
+    const catResult = await pool.query("SELECT tipo FROM categoria WHERE codCategoria = $1", [codCategoria]);
+    
+    if (catResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Categoría no encontrada' });
+    }
+
+    const nombreCategoria = catResult.rows[0].tipo;
+    // Generar prefijo: Primeras 4 letras de la categoría en mayúsculas (ej: AUDIFONOS -> AUDI)
+    let prefix = nombreCategoria.substring(0, 4).toUpperCase().replace(/[^A-Z]/g, 'X');
+    if (prefix.length < 3) prefix = 'ITEM';
+
+    // 2. Generar ID único basado en ese prefijo
+    const id = await generateNextId('accesorios', 'codAccesorio', prefix);
     
     await pool.query("INSERT INTO accesorios (codAccesorio, codCategoria, descripcion) VALUES ($1, $2, $3)", [id, codCategoria, descripcion]);
     res.status(201).json({ message: 'Accesorio creado', id });
@@ -182,7 +196,7 @@ app.post('/api/inventory/accesorios-master', authenticateToken, async (req, res)
 app.get('/api/inventory/stock', authenticateToken, async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT i.*, a.descripcion, c.tipo as categoria, u.nombre as nombreUbicacion
+      SELECT i.*, a.descripcion, c.tipo as categoria, u.nombre as nombreUbicacion, u.estante, u.nivel
       FROM inventario i
       JOIN accesorios a ON i.codAccesorio = a.codAccesorio
       JOIN categoria c ON a.codCategoria = c.codCategoria
@@ -196,7 +210,7 @@ app.get('/api/inventory/stock', authenticateToken, async (req, res) => {
 app.post('/api/inventory/stock', authenticateToken, async (req, res) => {
   try {
     const { codAccesorio, cantidad, precioCompra, precioVenta, codProveedor, idubicacion } = req.body;
-    const codInventario = await generateNextId('inventario', 'codInventario', 'ACCS'); // Matching Screenshot 2
+    const codInventario = await generateNextId('inventario', 'codInventario', 'ACCS'); 
     const fecha = new Date();
     
     await pool.query(
@@ -246,12 +260,9 @@ app.get('/api/productos/unificados', authenticateToken, async (req, res) => {
   } catch(err) { handleDbError(res, err); }
 });
 
-// --- BASIC ENTITY ROUTES (Users, Roles, Cajas defined in previous code block, keeping them brief here) ---
-// Note: Assuming previous routes exist. Adding PROVEEDORES mock/simple for FKs
+// --- BASIC ENTITY ROUTES ---
 app.get('/api/proveedores', authenticateToken, async (req, res) => {
-  // Simple mock or DB call
   try {
-     // Check if table exists, if not return mock
      const result = await pool.query("SELECT * FROM proveedores"); 
      res.json(result.rows);
   } catch (e) {
@@ -274,11 +285,11 @@ app.get('/api/setup/install', async (req, res) => {
     await pool.query(`CREATE TABLE IF NOT EXISTS accesorios (codAccesorio varchar(100) PRIMARY KEY, codCategoria varchar(50) NOT NULL, descripcion varchar(100) NOT NULL);`);
     await pool.query(`CREATE TABLE IF NOT EXISTS telefonos (codigo varchar(100) PRIMARY KEY, imei1 varchar(50) NOT NULL, imei2 varchar(50) NOT NULL, marca varchar(50) NOT NULL, modelo varchar(50) NOT NULL, precioCompra numeric(10,2) NOT NULL, precioVenta numeric(10,2) NOT NULL, codProveedor varchar(50) NOT NULL, fecha date NOT NULL, idubicacion varchar(100) NOT NULL, estado varchar(20) NOT NULL);`);
     await pool.query(`CREATE TABLE IF NOT EXISTS inventario (codInventario varchar(100) PRIMARY KEY, codAccesorio varchar(100), cantidad integer NOT NULL, precioCompra numeric(10,2) NOT NULL, precioVenta numeric(10,2) NOT NULL, codProveedor varchar(50) NOT NULL, fecha date NOT NULL, idubicacion varchar(100) NOT NULL, estado varchar(100) NOT NULL);`);
-    await pool.query(`CREATE TABLE IF NOT EXISTS proveedores (codProveedor varchar(50) PRIMARY KEY, nombre varchar(100) NOT NULL);`); // Added for FK integrity
+    await pool.query(`CREATE TABLE IF NOT EXISTS proveedores (codProveedor varchar(50) PRIMARY KEY, nombre varchar(100) NOT NULL);`);
     
     // SEED BASIC DATA
     await pool.query("INSERT INTO proveedores (codProveedor, nombre) VALUES ('PROV-GEN', 'General') ON CONFLICT DO NOTHING");
-    await pool.query("INSERT INTO ubicacion (idUbicacion, nombre, descripcion, estante, nivel, estado) VALUES ('UBIC-0001', 'Mostrador', 'Principal', '1', '1', 'Activo') ON CONFLICT DO NOTHING");
+    await pool.query("INSERT INTO ubicacion (idUbicacion, nombre, descripcion, estante, nivel, estado) VALUES ('UBIC-0001', 'Vitrina Principal', 'Entrada', '1', '1', 'Activo') ON CONFLICT DO NOTHING");
     
     res.send('✅ Tablas de Inventario Actualizadas Correctamente');
   } catch (err) {

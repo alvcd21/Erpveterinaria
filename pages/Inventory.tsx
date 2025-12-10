@@ -10,9 +10,11 @@ import {
 } from '../types';
 import { 
   Search, Plus, Smartphone, Headphones, Box, MapPin, 
-  Tag, List, PlusCircle, X, RefreshCw 
+  Tag, List, PlusCircle, X, RefreshCw, Printer
 } from 'lucide-react';
 import Swal from 'sweetalert2';
+import jsPDF from 'jspdf';
+import JsBarcode from 'jsbarcode';
 
 type InventoryTab = 'TELEPHONES' | 'STOCK' | 'MASTER' | 'CATEGORIES' | 'LOCATIONS';
 
@@ -102,6 +104,66 @@ const Inventory: React.FC = () => {
     setShowModal(true);
   };
 
+  // --- BARCODE GENERATION LOGIC ---
+  const handlePrintBarcode = (code: string, description: string) => {
+    try {
+      // 1. Setup PDF (25mm x 40mm)
+      const doc = new jsPDF({
+        orientation: 'p',
+        unit: 'mm',
+        format: [25, 40] // Width 25mm, Height 40mm (Tall & Narrow)
+      });
+
+      // 2. Create Barcode Image using Canvas
+      const canvas = document.createElement('canvas');
+      JsBarcode(canvas, code, {
+        format: "CODE128",
+        displayValue: true,
+        fontSize: 14,
+        textMargin: 0,
+        margin: 0,
+        width: 2,
+        height: 50
+      });
+      const barcodeImg = canvas.toDataURL("image/png");
+
+      // 3. Add Content to PDF
+      // Rotate Logic: The user legacy code shows rotation. 
+      // However, usually for a vertical label (25x40), we print normally 
+      // OR we print rotated if the printer expects it sideways.
+      // Based on legacy code: "pdfImg.setRotationDegrees(90)".
+      // This implies the physical label comes out wide-edge leading or similar.
+      // BUT, let's try standard vertical layout first which is easier for web.
+      // If text needs to be vertical on the side (like spine labels):
+      
+      // -- Standard Layout for 25x40mm Label --
+      doc.setFontSize(8);
+      
+      // Description (Word Wrap) - Centered at top, rotated if needed?
+      // Let's implement vertical text on the side (Legacy style interpretation)
+      // Actually legacy code: cb.showTextAligned(..., 90) -> Rotated 90 degrees.
+      
+      // Let's do a simple vertical layout first: Text Top, Barcode Bottom.
+      // Text
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(7);
+      
+      // Split text to fit width (approx 20mm usable)
+      const splitTitle = doc.splitTextToSize(description.substring(0, 30), 22);
+      doc.text(splitTitle, 12.5, 5, { align: "center" });
+
+      // Barcode Image
+      doc.addImage(barcodeImg, 'PNG', 1, 10, 23, 25); // x, y, w, h
+
+      // 4. Save
+      doc.save(`barcode_${code}.pdf`);
+
+    } catch (err) {
+      console.error(err);
+      Swal.fire('Error', 'No se pudo generar el código de barras', 'error');
+    }
+  };
+
   return (
     <div className="space-y-6 h-full flex flex-col">
       {/* HEADER & TABS */}
@@ -182,6 +244,7 @@ const Inventory: React.FC = () => {
                     <th className="p-4 text-xs font-bold text-slate-500 uppercase text-right">Precio V.</th>
                     <th className="p-4 text-xs font-bold text-slate-500 uppercase">Ubicación</th>
                     <th className="p-4 text-xs font-bold text-slate-500 uppercase">Fecha</th>
+                    <th className="p-4 text-xs font-bold text-slate-500 uppercase text-center">Imprimir</th>
                   </>
                 )}
                 {activeTab === 'STOCK' && (
@@ -193,6 +256,7 @@ const Inventory: React.FC = () => {
                     <th className="p-4 text-xs font-bold text-slate-500 uppercase text-right">Precio C.</th>
                     <th className="p-4 text-xs font-bold text-slate-500 uppercase text-right">Precio V.</th>
                     <th className="p-4 text-xs font-bold text-slate-500 uppercase">Ubicación</th>
+                    <th className="p-4 text-xs font-bold text-slate-500 uppercase text-center">Imprimir</th>
                   </>
                 )}
                 {activeTab === 'MASTER' && (
@@ -228,8 +292,26 @@ const Inventory: React.FC = () => {
                   <td className="p-4 text-sm font-medium text-slate-800">{p.marca} {p.modelo}</td>
                   <td className="p-4 text-sm text-right text-slate-500">L. {p.precioCompra}</td>
                   <td className="p-4 text-sm text-right font-bold text-emerald-600">L. {p.precioVenta}</td>
-                  <td className="p-4 text-xs text-slate-500">{p.nombreUbicacion || p.idubicacion}</td>
+                  <td className="p-4 text-xs text-slate-500">
+                    {p.nombreUbicacion ? (
+                      <div className="flex flex-col">
+                        <span className="font-bold">{p.nombreUbicacion}</span>
+                        {/* If backend returns estante/nivel for phones join query */}
+                        {/* Note: I updated the query in server.js to return these fields */}
+                        <span className="text-[10px] text-slate-400">Est: {(p as any).estante} - Nvl: {(p as any).nivel}</span>
+                      </div>
+                    ) : (p.idubicacion)}
+                  </td>
                   <td className="p-4 text-xs text-slate-400">{new Date(p.fecha).toLocaleDateString()}</td>
+                  <td className="p-4 text-center">
+                    <button 
+                      onClick={() => handlePrintBarcode(p.codigo, `${p.marca} ${p.modelo}`)}
+                      className="text-slate-500 hover:text-indigo-600 transition-colors"
+                      title="Imprimir Código de Barras"
+                    >
+                      <Printer size={18} />
+                    </button>
+                  </td>
                 </tr>
               ))}
 
@@ -246,7 +328,23 @@ const Inventory: React.FC = () => {
                   </td>
                   <td className="p-4 text-sm text-right text-slate-500">L. {s.precioCompra}</td>
                   <td className="p-4 text-sm text-right font-bold text-emerald-600">L. {s.precioVenta}</td>
-                  <td className="p-4 text-xs text-slate-500">{s.nombreUbicacion || s.idubicacion}</td>
+                  <td className="p-4 text-xs text-slate-500">
+                     {s.nombreUbicacion ? (
+                      <div className="flex flex-col">
+                        <span className="font-bold">{s.nombreUbicacion}</span>
+                        <span className="text-[10px] text-slate-400">Est: {(s as any).estante} - Nvl: {(s as any).nivel}</span>
+                      </div>
+                    ) : (s.idubicacion)}
+                  </td>
+                  <td className="p-4 text-center">
+                    <button 
+                      onClick={() => handlePrintBarcode(s.codInventario, s.descripcion || 'Accesorio')}
+                      className="text-slate-500 hover:text-indigo-600 transition-colors"
+                      title="Imprimir Código de Barras"
+                    >
+                      <Printer size={18} />
+                    </button>
+                  </td>
                 </tr>
               ))}
 
@@ -336,10 +434,14 @@ const Inventory: React.FC = () => {
                     </select>
                   </div>
                   <div>
-                    <label className="text-xs font-bold text-slate-500">Ubicación</label>
+                    <label className="text-xs font-bold text-slate-500">Ubicación Exacta</label>
                     <select required className="w-full p-2 bg-slate-50 border rounded-lg mt-1" onChange={e => setPhoneForm({...phoneForm, idubicacion: e.target.value})}>
                       <option value="">Seleccione...</option>
-                      {locations.map(l => <option key={l.idUbicacion} value={l.idUbicacion}>{l.nombre}</option>)}
+                      {locations.map(l => (
+                        <option key={l.idUbicacion} value={l.idUbicacion}>
+                          {l.nombre} - Estante {l.estante} (Nivel {l.nivel})
+                        </option>
+                      ))}
                     </select>
                   </div>
                 </>
@@ -377,10 +479,14 @@ const Inventory: React.FC = () => {
                     </select>
                   </div>
                   <div>
-                    <label className="text-xs font-bold text-slate-500">Ubicación</label>
+                    <label className="text-xs font-bold text-slate-500">Ubicación Exacta</label>
                     <select required className="w-full p-2 bg-slate-50 border rounded-lg mt-1" onChange={e => setStockForm({...stockForm, idubicacion: e.target.value})}>
                       <option value="">Seleccione...</option>
-                      {locations.map(l => <option key={l.idUbicacion} value={l.idUbicacion}>{l.nombre}</option>)}
+                      {locations.map(l => (
+                        <option key={l.idUbicacion} value={l.idUbicacion}>
+                           {l.nombre} - Estante {l.estante} (Nivel {l.nivel})
+                        </option>
+                      ))}
                     </select>
                   </div>
                 </>
