@@ -1,29 +1,54 @@
 
-// Mapped strictly from PostgreSQL Schema
+// --- ENTIDADES BASE DE DATOS (Mapeo Estricto SQL) ---
 
-// --- ENUMS & CONSTANTS ---
 export type EstadoGeneral = 'Activo' | 'Inactivo';
-export type EstadoInventario = 'Disponible' | 'Vendido' | 'Garantia' | 'Malo';
+export type TipoCosto = 'Costo Directo' | 'Costo Indirecto';
 
-// --- AUTH & PERMISSIONS ---
-export interface AuthResponse {
-  token: string;
-  user: UserSession;
-}
-
-export interface UserSession {
-  codUsuario: string;
+// Tabla: usuarios
+export interface Usuario {
+  codUsuario: string; // PK
   usuario: string;
-  rol: string;
-  nombreEmpleado: string;
+  password?: string;
+  identidad: string; // FK empleado
+  idCaja: string; // FK caja
+  idrol: string; // FK roles
+  foto?: string; // bytea in DB, string base64 here
+  fechaCreacion?: string;
+  fechaModificacion?: string;
+  estado: EstadoGeneral;
+  // UI Helpers
+  nombreEmpleado?: string;
+  nombreRol?: string;
+  nombreCaja?: string;
 }
 
-export interface LoginCredentials {
-  usuario: string;
-  password: string; 
+// Tabla: empleado
+export interface Empleado {
+  identidad: string; // PK
+  nombre: string;
+  apellido: string;
+  direccion: string;
+  telefono: string;
+  estado: EstadoGeneral;
+  fechaCreacion?: string;
+  fechaModificacion?: string;
 }
 
-// --- CORE ENTITIES ---
+// Tabla: roles
+export interface Rol {
+  idrol: string; // PK
+  nombre: string;
+  estado: EstadoGeneral;
+}
+
+// Tabla: caja
+export interface Caja {
+  idCaja: string; // PK
+  nombre: string;
+  estado: string;
+}
+
+// Tabla: clientes
 export interface Cliente {
   identidad: string; // PK
   nombre: string;
@@ -32,46 +57,35 @@ export interface Cliente {
   telefono: string;
   correo?: string;
   fechaCreacion?: string;
+  fechaModificacion?: string;
 }
 
-export interface Empleado {
-  identidad: string; 
-  nombre: string;
-  apellido: string;
-  direccion: string;
-  telefono: string;
-  estado: EstadoGeneral;
-  fechaCreacion?: string;
-}
-
-export interface Usuario {
-  codUsuario: string; 
-  usuario: string;
-  password?: string; 
-  identidad: string; 
-  idCaja: string; 
-  idrol: string; 
-  estado: EstadoGeneral;
-  nombreEmpleado?: string;
-  nombreRol?: string;
-  nombreCaja?: string;
-}
-
-export interface Rol {
-  idrol: string;
-  nombre: string;
-  estado: EstadoGeneral;
-}
-
+// Tabla: proveedores
 export interface Proveedor {
-  codProveedor: string;
+  codProveedor: string; // PK
   nombre: string;
   telefono: string;
   direccion: string;
+  fechaCreacion?: string;
+  fechaModificacion?: string;
 }
 
-// --- INVENTORY SCHEMA (STRICT) ---
+// Tabla: categoria
+export interface Categoria {
+  codCategoria: string; // PK
+  tipo: string;
+}
 
+// Tabla: accesorios (Maestro)
+export interface Accesorio {
+  codAccesorio: string; // PK
+  codCategoria: string; // FK
+  descripcion: string;
+  // UI Helper
+  nombreCategoria?: string;
+}
+
+// Tabla: ubicacion
 export interface Ubicacion {
   idUbicacion: string; // PK
   nombre: string;
@@ -81,52 +95,157 @@ export interface Ubicacion {
   estado: string;
 }
 
-export interface Categoria {
-  codCategoria: string; // PK
-  tipo: string;
-}
-
-export interface AccesorioMaster {
-  codAccesorio: string; // PK
-  codCategoria: string; // FK
-  descripcion: string; // The name of the product
-  // UI Helper
-  nombreCategoria?: string;
-}
-
-export interface InventarioAccesorio {
+// Tabla: inventario (Stock de Accesorios)
+export interface Inventario {
   codInventario: string; // PK
   codAccesorio: string; // FK
   cantidad: number;
   precioCompra: number;
   precioVenta: number;
-  codProveedor: string;
-  fecha: string; // date
+  codProveedor: string; // FK
+  fecha: string;
   idubicacion: string; // FK
   estado: string;
-  // UI Helpers (Joined fields)
-  descripcion?: string; 
-  categoria?: string;
+  // UI Helpers
+  descripcionAccesorio?: string;
   nombreUbicacion?: string;
 }
 
+// Tabla: telefonos
 export interface Telefono {
-  codigo: string; // PK (TELF-XXXX)
+  codigo: string; // PK
   imei1: string;
   imei2: string;
   marca: string;
   modelo: string;
   precioCompra: number;
   precioVenta: number;
-  codProveedor: string;
+  codProveedor: string; // FK
   fecha: string;
-  idubicacion: string;
+  idubicacion: string; // FK
   estado: string;
   // UI Helper
   nombreUbicacion?: string;
 }
 
-// Helper Type for POS Unified Search
+// Tabla: costos
+export interface Costo {
+  codCostos: string; // PK
+  tipo: TipoCosto;
+  descripcion: string;
+  monto: number;
+  estado: string;
+}
+
+// Tabla: arqueo
+export interface Arqueo {
+  idArqueo: string; // PK
+  idCaja: string; // FK
+  idUsuario: string; // FK
+  fechaApertura: string;
+  fechaCierre?: string;
+  montoInicial: number;
+  montoFinal?: number;
+  totalVentas?: number;
+  TotalGastos?: number;
+  totalCostos?: number;
+  ganancia?: number;
+  estado: string;
+}
+
+// Tabla: ingresos
+export interface Ingreso {
+  idIngreso: string; // PK
+  idCaja: string; // FK
+  descripcion: string;
+  monto: number;
+  costo: number;
+  fechaCreacion: string;
+  estado: string;
+  fechaModificacion?: number;
+}
+
+// Tabla: egresos
+export interface Egreso {
+  idegresos: string; // PK (Note lowercase 'd' in schema provided)
+  idCaja: string; // FK
+  descripcion: string;
+  monto: number;
+  fechaCreacion: string;
+  estado: string;
+  fechaModificacion?: string;
+}
+
+// Tabla: ventas
+export interface Venta {
+  codVenta: string; // PK
+  fecha: string;
+  codVendedor: string;
+  identidadCliente: string; // FK
+  total: number;
+  estado: string;
+  // UI Helpers
+  nombreCliente?: string;
+  nombreVendedor?: string;
+}
+
+// Tabla: detalleventa
+export interface DetalleVenta {
+  codDetalleVenta: string; // PK
+  idVenta?: string; // FK (Optional during creation before save)
+  idAccesorio?: string; // FK
+  idTelefono?: string; // FK
+  idIngreso?: string; 
+  idInventario?: string; // Added for POS logic linkage
+  cantidad: number;
+  precioVenta: number;
+  estado?: string;
+  // UI Helpers
+  descripcionProducto?: string;
+  tipoProducto?: 'TELEFONO' | 'ACCESORIO' | 'SERVICIO';
+}
+
+// Tabla: recargas
+export interface Recarga {
+  idRecargas: string;
+  red: string;
+  tipo: string;
+  descripcion: string;
+  precioCobrado: number;
+  precioPagado: number;
+  estado: string;
+}
+
+// Tabla: saldos
+export interface Saldo {
+  idsaldos: string; // PK
+  red: string;
+  saldoInicio: number;
+  saldoComprado?: number;
+  saldoFinal?: number;
+  fecha: string;
+}
+
+// --- UI / APP SPECIFIC ---
+
+export interface UserSession {
+  codUsuario: string;
+  usuario: string;
+  rol: string;
+  nombreEmpleado: string;
+  idCaja: string;
+}
+
+export interface AuthResponse {
+  token: string;
+  user: UserSession;
+}
+
+export interface LoginCredentials {
+  usuario: string;
+  password: string; 
+}
+
 export interface ProductoUnified {
   id: string; // codInventario OR codigo
   tipo: 'TELEFONO' | 'ACCESORIO';
@@ -138,77 +257,11 @@ export interface ProductoUnified {
   ubicacion?: string;
 }
 
-// --- SALES / POS ---
-
 export interface VentaPayload {
   identidadCliente: string;
-  tipoCompra: 'Contado' | 'Credito';
+  tipoCompra: 'Contado' | 'Credito'; // Although DB doesn't have tipoCompra in provided schema, logic requires it or we map to config
   total: number;
-  isv: number;
-  descuento: number;
-  detalles: DetalleVenta[];
-}
-
-export interface Venta {
-  codVenta: string;
-  fecha: string;
-  codUsuario: string;
-  identidadCliente: string;
-  tipoCompra: string;
-  total: number;
-  isv: number;
-  descuento: number;
-  estado: string;
-  // UI Helpers
-  nombreCliente?: string;
-  usuario?: string;
-}
-
-export interface DetalleVenta {
-  codDetalleVenta?: string; // Optional for new items
-  idVenta?: string;
-  idTelefono?: string; // If it's a phone
-  idInventario?: string; // If it's an accessory (maps to codInventario)
-  cantidad: number;
-  precioVenta: number;
-  descripcionProducto?: string; // UI Helper
-  tipoProducto?: 'TELEFONO' | 'ACCESORIO'; // UI Helper
-}
-
-// --- CASH REGISTER ---
-
-export interface Caja {
-  idCaja: string;
-  nombre: string;
-  estado: string;
-}
-
-export interface Arqueo {
-  idArqueo: string;
-  idCaja: string;
-  idUsuario: string;
-  fechaApertura: string;
-  montoInicial: number;
-  estado: 'Abierta' | 'Cerrada';
-  totalVentas?: number;
-  totalGastos?: number;
-}
-
-export interface Ingreso {
-  idIngreso: string;
-  idCaja: string;
-  descripcion: string;
-  monto: number;
-  costo: number;
-  fechaCreacion: string;
-  estado: string;
-}
-
-export interface Egreso {
-  idegresos: string;
-  idCaja: string;
-  descripcion: string;
-  monto: number;
-  fechaCreacion: string;
-  estado: string;
+  isv?: number;
+  descuento?: number;
+  detalles: Partial<DetalleVenta>[];
 }

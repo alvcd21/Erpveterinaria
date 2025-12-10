@@ -10,10 +10,10 @@ import POS from './pages/POS';
 import Clients from './pages/Clients';
 import Providers from './pages/Providers';
 import CashRegister from './pages/CashRegister';
+import Costs from './pages/Costs';
 import Login from './pages/Login';
 import AdminUsers from './pages/AdminUsers';
 
-// Placeholder components
 const Placeholder = ({ title }: { title: string }) => (
   <div className="flex flex-col items-center justify-center h-96 text-slate-400">
     <h2 className="text-2xl font-bold mb-2">{title}</h2>
@@ -28,100 +28,27 @@ const App: React.FC = () => {
         <Routes>
           <Route path="/login" element={<Login />} />
 
-          {/* Wrapper Route for all protected pages */}
           <Route path="/*" element={
             <ProtectedRoute>
               <Layout>
                 <Routes>
                   <Route path="/" element={<Dashboard />} />
                   
-                  <Route 
-                    path="/pos" 
-                    element={
-                      <ProtectedRoute allowedRoles={['Administrador', 'Vendedor']}>
-                        <POS />
-                      </ProtectedRoute>
-                    } 
-                  />
+                  <Route path="/pos" element={<ProtectedRoute allowedRoles={['Administrador', 'Vendedor']}><POS /></ProtectedRoute>} />
+                  <Route path="/clients" element={<ProtectedRoute allowedRoles={['Administrador', 'Vendedor']}><Clients /></ProtectedRoute>} />
+                  <Route path="/providers" element={<ProtectedRoute allowedRoles={['Administrador', 'Inventario']}><Providers /></ProtectedRoute>} />
+                  <Route path="/inventory" element={<ProtectedRoute allowedRoles={['Administrador', 'Inventario']}><Inventory /></ProtectedRoute>} />
+                  <Route path="/cash" element={<ProtectedRoute allowedRoles={['Administrador', 'Cajero']}><CashRegister /></ProtectedRoute>} />
                   
-                  <Route 
-                    path="/clients" 
-                    element={
-                      <ProtectedRoute allowedRoles={['Administrador', 'Vendedor']}>
-                        <Clients />
-                      </ProtectedRoute>
-                    } 
-                  />
+                  {/* Costos Route */}
+                  <Route path="/costs" element={<ProtectedRoute allowedRoles={['Administrador']}><Costs /></ProtectedRoute>} />
 
-                  <Route 
-                    path="/providers" 
-                    element={
-                      <ProtectedRoute allowedRoles={['Administrador', 'Inventario']}>
-                        <Providers />
-                      </ProtectedRoute>
-                    } 
-                  />
-
-                  <Route 
-                    path="/inventory" 
-                    element={
-                      <ProtectedRoute allowedRoles={['Administrador', 'Inventario']}>
-                        <Inventory />
-                      </ProtectedRoute>
-                    } 
-                  />
-
-                  <Route 
-                    path="/cash" 
-                    element={
-                      <ProtectedRoute allowedRoles={['Administrador', 'Cajero']}>
-                        <CashRegister />
-                      </ProtectedRoute>
-                    } 
-                  />
-
-                  <Route 
-                    path="/reports" 
-                    element={
-                      <ProtectedRoute allowedRoles={['Administrador']}>
-                        <Placeholder title="Reportes" />
-                      </ProtectedRoute>
-                    } 
-                  />
+                  <Route path="/reports" element={<ProtectedRoute allowedRoles={['Administrador']}><Placeholder title="Reportes" /></ProtectedRoute>} />
                   
-                  {/* Rutas Administrativas Desglosadas */}
-                  <Route 
-                    path="/admin/users" 
-                    element={
-                      <ProtectedRoute allowedRoles={['Administrador']}>
-                        <AdminUsers initialView="USERS" />
-                      </ProtectedRoute>
-                    } 
-                  />
-                  <Route 
-                    path="/admin/employees" 
-                    element={
-                      <ProtectedRoute allowedRoles={['Administrador']}>
-                        <AdminUsers initialView="EMPLOYEES" />
-                      </ProtectedRoute>
-                    } 
-                  />
-                  <Route 
-                    path="/admin/roles" 
-                    element={
-                      <ProtectedRoute allowedRoles={['Administrador']}>
-                        <AdminUsers initialView="ROLES" />
-                      </ProtectedRoute>
-                    } 
-                  />
-                  <Route 
-                    path="/admin/boxes" 
-                    element={
-                      <ProtectedRoute allowedRoles={['Administrador']}>
-                        <AdminUsers initialView="CAJAS" />
-                      </ProtectedRoute>
-                    } 
-                  />
+                  <Route path="/admin/users" element={<ProtectedRoute allowedRoles={['Administrador']}><AdminUsers initialView="USERS" /></ProtectedRoute>} />
+                  <Route path="/admin/employees" element={<ProtectedRoute allowedRoles={['Administrador']}><AdminUsers initialView="EMPLOYEES" /></ProtectedRoute>} />
+                  <Route path="/admin/roles" element={<ProtectedRoute allowedRoles={['Administrador']}><AdminUsers initialView="ROLES" /></ProtectedRoute>} />
+                  <Route path="/admin/boxes" element={<ProtectedRoute allowedRoles={['Administrador']}><AdminUsers initialView="CAJAS" /></ProtectedRoute>} />
 
                   <Route path="*" element={<Navigate to="/" replace />} />
                 </Routes>

@@ -1,7 +1,8 @@
+
 import { 
   Telefono, 
-  AccesorioMaster, 
-  InventarioAccesorio, 
+  Accesorio as AccesorioMaster, 
+  Inventario as InventarioAccesorio, 
   Cliente, 
   Venta, 
   Arqueo, 
@@ -99,8 +100,7 @@ export const MOCK_ARQUEO: Arqueo = {
   fechaApertura: '2023-10-27T08:00:00',
   montoInicial: 1000.00,
   estado: 'Abierta',
-  totalVentas: 0,
-  totalGastos: 0
+  totalVentas: 0
 };
 
 export const MOCK_INGRESOS: Ingreso[] = [

@@ -3,8 +3,8 @@ import React, { useState, useEffect } from 'react';
 import { InventoryService } from '../services/api';
 import { 
   Telefono, 
-  InventarioAccesorio, 
-  AccesorioMaster, 
+  Inventario as InventarioAccesorio, 
+  Accesorio as AccesorioMaster, 
   Categoria, 
   Ubicacion,
   Proveedor 
@@ -301,12 +301,12 @@ const Inventory: React.FC = () => {
               {activeTab === 'STOCK' && stock.filter(s => JSON.stringify(s).toLowerCase().includes(searchTerm.toLowerCase())).map(s => (
                 <tr key={s.codInventario} className="hover:bg-slate-50">
                   <td className="p-4 text-xs font-mono text-slate-500">{s.codInventario}</td>
-                  <td className="p-4 text-sm font-medium text-slate-800">{s.descripcion}</td>
+                  <td className="p-4 text-sm font-medium text-slate-800">{s.descripcionAccesorio || s.codAccesorio}</td>
                   <td className="p-4 text-center"><span className={`px-2 py-1 rounded text-xs font-bold ${s.cantidad < 3 ? 'bg-amber-100 text-amber-600' : 'bg-green-100 text-green-600'}`}>{s.cantidad}</span></td>
                   <td className="p-4 text-sm text-right font-bold text-emerald-600">L. {s.precioVenta}</td>
                   <td className="p-4 text-xs text-slate-500 truncate max-w-[150px]">{s.nombreUbicacion || s.idubicacion}</td>
                   <td className="p-4 text-center flex items-center justify-center gap-2">
-                    <button onClick={() => handlePrintBarcode(s.codInventario, s.descripcion || 'Acc')} className="text-slate-500 hover:text-indigo-600" title="Imprimir"><Printer size={16} /></button>
+                    <button onClick={() => handlePrintBarcode(s.codInventario, s.descripcionAccesorio || 'Acc')} className="text-slate-500 hover:text-indigo-600" title="Imprimir"><Printer size={16} /></button>
                     <button onClick={() => openEditModal(s)} className="text-blue-500 hover:bg-blue-50 p-1.5 rounded"><Edit2 size={16}/></button>
                     <button onClick={() => handleDelete(s.codInventario)} className="text-red-500 hover:bg-red-50 p-1.5 rounded"><Trash2 size={16}/></button>
                   </td>

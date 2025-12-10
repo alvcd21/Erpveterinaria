@@ -1,11 +1,12 @@
 
 import React, { useState, useEffect } from 'react';
-import { InventoryService, ClientService, SalesService } from '../services/api';
+import { InventoryService, ClientService, SalesService, CashService } from '../services/api';
 import { ProductoUnified, DetalleVenta, Cliente } from '../types';
 import { Search, ShoppingCart, Trash2, CreditCard, Smartphone, Headphones, Zap, RefreshCw, List, LayoutGrid } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { jsPDF } from 'jspdf';
 import { useAuth } from '../context/AuthContext';
+import { useNavigate } from 'react-router-dom';
 
 const POS: React.FC = () => {
   const [products, setProducts] = useState<ProductoUnified[]>([]);
@@ -23,10 +24,29 @@ const POS: React.FC = () => {
   const [discount, setDiscount] = useState<number>(0);
   const [isLoading, setIsLoading] = useState(false);
   const { user } = useAuth();
+  const navigate = useNavigate();
 
   useEffect(() => {
+    checkRegisterStatus();
     loadInitialData();
   }, []);
+
+  const checkRegisterStatus = async () => {
+     try {
+       const activeArqueo = await CashService.getActiveArqueo();
+       if (!activeArqueo) {
+         await Swal.fire({
+           title: 'Caja Cerrada',
+           text: 'Debes aperturar la caja antes de facturar.',
+           icon: 'warning',
+           confirmButtonText: 'Ir a Caja'
+         });
+         navigate('/cash');
+       }
+     } catch (error) {
+       console.error("Error checking register", error);
+     }
+  };
 
   const loadInitialData = () => {
     setIsLoading(true);
@@ -76,7 +96,7 @@ const POS: React.FC = () => {
       };
       return [...prev, newItem];
     });
-    // Feedback opcional para móvil: saltar a carrito o mostrar notificación
+    // Feedback
     const Toast = Swal.mixin({
       toast: true,
       position: 'top-end',

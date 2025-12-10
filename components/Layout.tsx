@@ -3,25 +3,7 @@ import React, { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { 
-  LayoutDashboard, 
-  ShoppingCart, 
-  Users, 
-  DollarSign, 
-  FileText, 
-  LogOut,
-  Menu,
-  X,
-  Search,
-  Bell,
-  CloudLightning,
-  ShieldCheck,
-  Truck,
-  ChevronDown,
-  ChevronRight,
-  Package,
-  Briefcase,
-  Box,
-  UserCog
+  LayoutDashboard, ShoppingCart, Users, DollarSign, FileText, LogOut, Menu, X, Search, Bell, CloudLightning, ShieldCheck, Truck, ChevronDown, ChevronRight, Package, Briefcase, Box, UserCog, Calculator
 } from 'lucide-react';
 
 interface LayoutProps {
@@ -38,7 +20,7 @@ interface NavItem {
 
 const Layout: React.FC<LayoutProps> = ({ children }) => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [expandedMenus, setExpandedMenus] = useState<string[]>(['Comercial', 'Logística', 'Administración']); // Default expanded
+  const [expandedMenus, setExpandedMenus] = useState<string[]>(['Comercial', 'Logística', 'Finanzas', 'Administración']); 
   const { user, logout, hasPermission } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
@@ -54,7 +36,6 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
     );
   };
 
-  // Estructura de Menú con Submenús Actualizada
   const navigationStructure: NavItem[] = [
     { 
       name: 'Dashboard', 
@@ -86,6 +67,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       roles: ['Administrador', 'Cajero'],
       subItems: [
         { name: 'Caja y Movimientos', path: '/cash', icon: <DollarSign size={18} />, roles: ['Administrador', 'Cajero'] },
+        { name: 'Costos y Gastos', path: '/costs', icon: <Calculator size={18} />, roles: ['Administrador'] },
       ]
     },
     {
@@ -103,7 +85,6 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   ];
 
   const getPageTitle = () => {
-    // Flatten logic just to find title
     const allItems = navigationStructure.flatMap(i => i.subItems ? i.subItems : [i]);
     const item = allItems.find(i => i.path === location.pathname);
     return item ? item.name : 'SmartCloud ERP';
@@ -111,10 +92,8 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
 
   const renderNavItems = (items: NavItem[], isMobile = false) => {
     return items.map((item) => {
-      // Verificar permisos
       if (!hasPermission(item.roles)) return null;
 
-      // Si tiene subitems, renderizar como grupo desplegable
       if (item.subItems) {
         const isExpanded = expandedMenus.includes(item.name);
         const hasActiveChild = item.subItems.some(sub => sub.path === location.pathname);
@@ -134,7 +113,6 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
               {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
             </button>
             
-            {/* Submenu List */}
             <div className={`overflow-hidden transition-all duration-300 ease-in-out ${isExpanded ? 'max-h-96 opacity-100 mt-1' : 'max-h-0 opacity-0'}`}>
               <ul className="pl-4 space-y-1 border-l-2 border-slate-800 ml-6 my-1">
                 {item.subItems.map(subItem => {
@@ -162,7 +140,6 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
         );
       }
 
-      // Item normal sin hijos
       const isActive = location.pathname === item.path;
       return (
         <li key={item.path} className="mb-2">
@@ -238,21 +215,16 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
             </button>
             <h1 className="text-lg md:text-2xl font-bold text-slate-800 tracking-tight truncate">{getPageTitle()}</h1>
           </div>
-
+          
           <div className="flex items-center gap-4 md:gap-6">
-            <div className="hidden md:flex items-center bg-slate-100/80 rounded-xl px-4 py-2.5 border border-slate-200/50 focus-within:ring-2 focus-within:ring-indigo-500/20 focus-within:border-indigo-500 transition-all w-64 lg:w-80">
-              <Search size={18} className="text-slate-400" />
-              <input 
-                type="text" 
-                placeholder="Buscar..." 
-                className="bg-transparent border-none focus:outline-none text-sm ml-3 w-full text-slate-700 placeholder:text-slate-400"
-              />
-            </div>
-            
-            <button className="relative p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-full transition-all">
-              <Bell size={20} />
-              <span className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full border-2 border-white"></span>
-            </button>
+             <div className="text-right hidden sm:block">
+                 <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">Caja Asignada</p>
+                 <p className="text-sm font-bold text-indigo-600">{user?.idCaja}</p>
+             </div>
+             <button className="relative p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-full transition-all">
+               <Bell size={20} />
+               <span className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full border-2 border-white"></span>
+             </button>
           </div>
         </header>
 
