@@ -52,10 +52,10 @@ router.post('/ventas', authenticateToken, async (req, res) => {
     
     // 1. Crear Venta
     const codVenta = await generateNextId('ventas', 'codVenta', 'FAC', client);
-    const fecha = new Date().toISOString().split('T')[0];
+    // Usamos CURRENT_DATE de la BD para asegurar consistencia
     await client.query(
-      `INSERT INTO ventas (codVenta, fecha, codVendedor, identidadCliente, total, estado) VALUES ($1, $2, $3, $4, $5, 'Completada')`,
-      [codVenta, fecha, codUsuario, identidadCliente, total]
+      `INSERT INTO ventas (codVenta, fecha, codVendedor, identidadCliente, total, estado) VALUES ($1, CURRENT_DATE, $2, $3, $4, 'Completada')`,
+      [codVenta, codUsuario, identidadCliente, total]
     );
 
     let totalCostoVenta = 0;
@@ -115,14 +115,14 @@ router.post('/ventas', authenticateToken, async (req, res) => {
 
 router.get('/ventas/historial', authenticateToken, async (req, res) => {
     try {
-        const { fecha } = req.query;
-        // Filtra ventas por usuario logueado en esa fecha
+        const { fecha } = req.query; // Espera formato YYYY-MM-DD
+        // Compara casteando a DATE para ignorar hora y zona horaria
         const result = await pool.query(`
             SELECT v.codVenta as "codVenta", v.fecha, v.total, v.estado,
             c.nombre || ' ' || c.apellido as "nombreCliente"
             FROM ventas v
             JOIN clientes c ON v.identidadCliente = c.identidad
-            WHERE v.fecha = $1 AND v.codVendedor = $2
+            WHERE v.fecha::DATE = $1::DATE AND v.codVendedor = $2
             ORDER BY v.codVenta DESC
         `, [fecha, req.user.codUsuario]);
         res.json(result.rows);
@@ -150,14 +150,13 @@ router.put('/ventas/:id/anular', authenticateToken, async (req, res) => {
             if(det.idtelefono) {
                 await client.query("UPDATE telefonos SET estado = 'Disponible' WHERE codigo = $1", [det.idtelefono]);
             } else if (det.idaccesorio) {
-                // Devolver al stock. Busca un lote disponible del accesorio.
-                const lastInv = await client.query("SELECT codInventario FROM inventario WHERE codAccesorio = (SELECT codAccesorio FROM inventario WHERE codInventario = $1 LIMIT 1) LIMIT 1", [det.idinventario || '']); 
+                // Devolver al stock.
+                // Busca el inventario original si existe, o uno compatible
+                let targetInv = det.idinventario;
                 
-                // Fallback si idInventario en detalle era null (legacy) o ya no existe
-                // Intenta buscar por codAccesorio si está en detalle (debería estar)
-                let targetInv = lastInv.rows.length > 0 ? lastInv.rows[0].codinventario : null;
-                
-                if (!targetInv && det.idaccesorio) {
+                // Si el ID especifico ya no existe o es nulo, buscar por accesorio y proveedor si es posible, o cualquiera del mismo tipo
+                const checkInv = await client.query("SELECT codInventario FROM inventario WHERE codInventario = $1", [targetInv]);
+                if (checkInv.rows.length === 0 && det.idaccesorio) {
                      const anyInv = await client.query("SELECT codInventario FROM inventario WHERE codAccesorio = $1 LIMIT 1", [det.idaccesorio]);
                      if(anyInv.rows.length > 0) targetInv = anyInv.rows[0].codinventario;
                 }

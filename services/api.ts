@@ -82,9 +82,9 @@ export const CostsService = {
 
 export const CashService = {
   getActiveArqueo: () => request<Arqueo | null>(`/arqueo/active`),
-  getSaldosToday: () => request<Saldo[]>('/saldos/today').then(res => Array.isArray(res) ? res : []),
-  getSaldosStatus: () => request<{ tigo: boolean, claro: boolean }>('/saldos/status'),
-  openCaja: (data: { montoInicial: number, saldoTigoInicial: number, saldoClaroInicial: number }) => request('/arqueo/open', { method: 'POST', body: JSON.stringify(data) }),
+  getSaldosToday: (fecha?: string) => request<Saldo[]>(`/saldos/today${fecha ? `?fecha=${fecha}` : ''}`).then(res => Array.isArray(res) ? res : []),
+  getSaldosStatus: (fecha?: string) => request<{ tigo: boolean, claro: boolean }>(`/saldos/status${fecha ? `?fecha=${fecha}` : ''}`),
+  openCaja: (data: { montoInicial: number, saldoTigoInicial: number, saldoClaroInicial: number, fechaLocal?: string }) => request('/arqueo/open', { method: 'POST', body: JSON.stringify(data) }),
   closeCaja: (idArqueo: string) => request<{ message: string, resumen: any }>('/arqueo/close', { method: 'POST', body: JSON.stringify({ idArqueo }) }),
   
   getIngresos: (idCaja: string) => request<Ingreso[]>(`/ingresos?idCaja=${idCaja}`).then(res => Array.isArray(res) ? res : []),
@@ -99,7 +99,7 @@ export const CashService = {
   deleteEgreso: (id: string) => request(`/egresos/${id}`, { method: 'DELETE' }),
   
   createRecarga: (data: any) => request('/recargas', { method: 'POST', body: JSON.stringify(data) }),
-  buySaldo: (data: { red: string, montoPagado: number, montoRecibido: number }) => request('/saldos/buy', { method: 'POST', body: JSON.stringify(data) }),
+  buySaldo: (data: { red: string, montoPagado: number, montoRecibido: number, fechaLocal?: string }) => request('/saldos/buy', { method: 'POST', body: JSON.stringify(data) }),
 
   getAdminBoxesStatus: () => request<any[]>('/admin/cajas-status').then(res => Array.isArray(res) ? res : []),
   reopenBox: (idArqueo: string) => request('/admin/reopen-box', { method: 'POST', body: JSON.stringify({ idArqueo }) }),

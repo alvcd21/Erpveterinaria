@@ -21,9 +21,12 @@ router.get('/arqueo/active', authenticateToken, async (req, res) => {
 router.post('/arqueo/open', authenticateToken, async (req, res) => {
   const client = await pool.connect();
   try {
-    const { montoInicial, saldoTigoInicial, saldoClaroInicial } = req.body;
+    const { montoInicial, saldoTigoInicial, saldoClaroInicial, fechaLocal } = req.body;
     const { codUsuario, idCaja } = req.user;
     
+    // Usar fecha local enviada por cliente o CURRENT_DATE
+    const today = fechaLocal || new Date().toISOString().split('T')[0];
+
     const check = await client.query(`SELECT * FROM arqueo WHERE idCaja = $1 AND estado = 'Activo'`, [idCaja]);
     if (check.rows.length > 0) return res.status(400).json({ error: 'Caja ya abierta.' });
 
@@ -36,9 +39,7 @@ router.post('/arqueo/open', authenticateToken, async (req, res) => {
       [idArqueo, idCaja, codUsuario, montoInicial]
     );
 
-    const today = new Date().toISOString().split('T')[0];
-    
-    // Validar si ya existen saldos HOY (para cualquiera)
+    // Validar si ya existen saldos HOY
     const checkSaldosTigo = await client.query('SELECT * FROM saldos WHERE red=$1 AND fecha = $2', ['TIGO', today]);
     if (checkSaldosTigo.rows.length === 0 && saldoTigoInicial !== undefined) {
       const idSaldoTigo = await generateNextId('saldos', 'idsaldos', 'SAL', client);
@@ -203,8 +204,17 @@ router.delete('/egresos/:id', authenticateToken, async (req, res) => {
 // --- SALDOS ---
 router.get('/saldos/today', authenticateToken, async (req, res) => {
   try {
-    const today = new Date().toISOString().split('T')[0];
-    const result = await pool.query(`SELECT idsaldos as "idsaldos", red, saldoInicio as "saldoInicio", saldoComprado as "saldoComprado", saldoFinal as "saldoFinal", fecha FROM saldos WHERE fecha = $1`, [today]);
+    const { fecha } = req.query; // Esperar fecha local del frontend
+    // Si no hay fecha, usar CURRENT_DATE de la BD (mejor que new Date() de Node)
+    let query = `SELECT idsaldos as "idsaldos", red, saldoInicio as "saldoInicio", saldoComprado as "saldoComprado", saldoFinal as "saldoFinal", fecha FROM saldos WHERE fecha = $1`;
+    let params = [fecha];
+    
+    if(!fecha) {
+         query = `SELECT idsaldos as "idsaldos", red, saldoInicio as "saldoInicio", saldoComprado as "saldoComprado", saldoFinal as "saldoFinal", fecha FROM saldos WHERE fecha = CURRENT_DATE`;
+         params = [];
+    }
+    
+    const result = await pool.query(query, params);
     res.json(result.rows);
   } catch(err) { handleDbError(res, err); }
 });
@@ -212,9 +222,21 @@ router.get('/saldos/today', authenticateToken, async (req, res) => {
 // Verificación inteligente: ¿Ya existen saldos hoy?
 router.get('/saldos/status', authenticateToken, async (req, res) => {
     try {
-        const today = new Date().toISOString().split('T')[0];
-        const tigo = await pool.query('SELECT 1 FROM saldos WHERE red=$1 AND fecha=$2', ['TIGO', today]);
-        const claro = await pool.query('SELECT 1 FROM saldos WHERE red=$1 AND fecha=$2', ['CLARO', today]);
+        const { fecha } = req.query;
+        let queryTigo = 'SELECT 1 FROM saldos WHERE red=$1 AND fecha=$2';
+        let queryClaro = 'SELECT 1 FROM saldos WHERE red=$1 AND fecha=$2';
+        let paramsTigo = ['TIGO', fecha];
+        let paramsClaro = ['CLARO', fecha];
+
+        if(!fecha) {
+             queryTigo = 'SELECT 1 FROM saldos WHERE red=$1 AND fecha=CURRENT_DATE';
+             queryClaro = 'SELECT 1 FROM saldos WHERE red=$1 AND fecha=CURRENT_DATE';
+             paramsTigo = ['TIGO'];
+             paramsClaro = ['CLARO'];
+        }
+
+        const tigo = await pool.query(queryTigo, paramsTigo);
+        const claro = await pool.query(queryClaro, paramsClaro);
         res.json({
             tigo: tigo.rows.length > 0,
             claro: claro.rows.length > 0
@@ -225,8 +247,10 @@ router.get('/saldos/status', authenticateToken, async (req, res) => {
 router.post('/saldos/buy', authenticateToken, async (req, res) => {
     const client = await pool.connect();
     try {
-        const { red, montoPagado, montoRecibido } = req.body;
+        const { red, montoPagado, montoRecibido, fechaLocal } = req.body;
         const { idCaja } = req.user;
+        const today = fechaLocal || new Date().toISOString().split('T')[0];
+        
         await client.query('BEGIN');
 
         const idegresos = await generateNextId('egresos', 'idegresos', 'EGRE', client);
@@ -236,7 +260,6 @@ router.post('/saldos/buy', authenticateToken, async (req, res) => {
             [idegresos, idCaja, `COMPRA SALDO ${red}`, montoPagado]
         );
 
-        const today = new Date().toISOString().split('T')[0];
         const check = await client.query('SELECT idsaldos FROM saldos WHERE red=$1 AND fecha=$2', [red, today]);
         
         if (check.rows.length === 0) {
@@ -261,8 +284,10 @@ router.post('/saldos/buy', authenticateToken, async (req, res) => {
 router.post('/recargas', authenticateToken, async (req, res) => {
   const client = await pool.connect();
   try {
-    const { red, tipo, descripcion, precioCobrado, precioPagado } = req.body;
+    const { red, tipo, descripcion, precioCobrado, precioPagado, fechaLocal } = req.body;
     const { idCaja } = req.user;
+    const today = fechaLocal || new Date().toISOString().split('T')[0];
+
     await client.query('BEGIN');
 
     const idIngreso = await generateNextId('ingresos', 'idIngreso', 'INGR', client);
@@ -277,7 +302,6 @@ router.post('/recargas', authenticateToken, async (req, res) => {
       [idRecargas, red, tipo, descripcion, precioCobrado, precioPagado]
     );
 
-    const today = new Date().toISOString().split('T')[0];
     await client.query(`UPDATE saldos SET saldoFinal = COALESCE(saldoFinal, saldoInicio) - $1 WHERE red = $2 AND fecha = $3`, [precioPagado, red, today]);
 
     // UPDATE BALANCE

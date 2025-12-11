@@ -45,6 +45,13 @@ const CashRegister: React.FC = () => {
   const [showRecargaModal, setShowRecargaModal] = useState<{red: 'TIGO' | 'CLARO', tipo: 'RECARGA' | 'PAQUETE'} | null>(null);
   const [recargaForm, setRecargaForm] = useState({ tipo: 'RECARGA', monto: '', precio: '', paqueteId: '' });
 
+  // Obtener fecha local en formato YYYY-MM-DD
+  const getLocalDate = () => {
+    const d = new Date();
+    const offset = d.getTimezoneOffset() * 60000;
+    return new Date(d.getTime() - offset).toISOString().split('T')[0];
+  };
+
   useEffect(() => {
     loadData();
     loadCatalogos();
@@ -58,19 +65,20 @@ const CashRegister: React.FC = () => {
   const loadData = async () => {
     try {
       const active = await CashService.getActiveArqueo();
-      
+      const localDate = getLocalDate();
+
       if (!active) {
         setArqueo(null);
-        // Check if balances exist for today
-        const status = await CashService.getSaldosStatus();
+        // Check if balances exist for today (Local)
+        const status = await CashService.getSaldosStatus(localDate);
         setExistingBalances(status);
       } else {
         setArqueo(active);
         const [ing, egr, vts, slds] = await Promise.all([
            CashService.getIngresos(user?.idCaja || ''),
            CashService.getEgresos(user?.idCaja || ''),
-           SalesService.getVentasDiarias(new Date().toISOString().split('T')[0]),
-           CashService.getSaldosToday()
+           SalesService.getVentasDiarias(localDate),
+           CashService.getSaldosToday(localDate)
         ]);
         setIngresos(ing);
         setEgresos(egr);
@@ -91,7 +99,8 @@ const CashRegister: React.FC = () => {
          montoInicial: Number(openForm.monto),
          // Send 0 if hidden (existing) or empty
          saldoTigoInicial: existingBalances.tigo ? 0 : Number(openForm.tigo || 0),
-         saldoClaroInicial: existingBalances.claro ? 0 : Number(openForm.claro || 0)
+         saldoClaroInicial: existingBalances.claro ? 0 : Number(openForm.claro || 0),
+         fechaLocal: getLocalDate()
        });
        Swal.fire('Éxito', 'Caja Aperturada', 'success');
        loadData();
@@ -236,7 +245,8 @@ const CashRegister: React.FC = () => {
           await CashService.buySaldo({
               red: saldoForm.red,
               montoPagado: Number(saldoForm.montoPagado),
-              montoRecibido: Number(saldoForm.montoRecibido)
+              montoRecibido: Number(saldoForm.montoRecibido),
+              fechaLocal: getLocalDate()
           });
           setShowSaldoModal(false);
           setSaldoForm({ red: 'TIGO', montoPagado: '', montoRecibido: '' });
@@ -272,7 +282,8 @@ const CashRegister: React.FC = () => {
         tipo: showRecargaModal.tipo,
         descripcion: desc,
         precioCobrado: montoCobrado,
-        precioPagado: montoPagado
+        precioPagado: montoPagado,
+        fechaLocal: getLocalDate()
       });
       
       setShowRecargaModal(null);
@@ -283,10 +294,18 @@ const CashRegister: React.FC = () => {
   };
 
   const totalIngresos = ingresos.reduce((a,b) => a + Number(b.monto), 0);
+  
   const getSaldoRed = (red: string) => {
+    // Buscar coincidencia exacta por red
     const s = saldos.find(x => x.red === red);
-    return s ? (s.saldoFinal !== null && s.saldoFinal !== undefined ? Number(s.saldoFinal) : Number(s.saldoInicio)) : 0;
+    if (!s) return 0;
+    
+    // Si saldoFinal existe (incluso si es 0), úsalo. Si no, usa saldoInicio.
+    return s.saldoFinal !== null && s.saldoFinal !== undefined 
+           ? Number(s.saldoFinal) 
+           : Number(s.saldoInicio);
   };
+  
   const paquetesFiltrados = showRecargaModal ? paquetes.filter(p => p.red === showRecargaModal.red && p.estado === 'Activo') : [];
 
   const openEditIngreso = (item: Ingreso) => {
@@ -392,7 +411,7 @@ const CashRegister: React.FC = () => {
               <div className="bg-white/10 p-4 rounded-xl backdrop-blur-sm border border-white/5">
                  <p className="text-xs text-slate-400 mb-1 font-bold uppercase">Efectivo en Caja</p>
                  {/* Se usa arqueo.montoFinal calculado por el backend */}
-                 <h3 className="text-3xl font-bold tracking-tight">L. {Number(arqueo.montoFinal || arqueo.montoInicial).toFixed(2)}</h3>
+                 <h3 className="text-3xl font-bold tracking-tight">L. {Number(arqueo.montoFinal).toFixed(2)}</h3>
               </div>
               <div className="bg-white/10 p-4 rounded-xl backdrop-blur-sm border border-white/5">
                  <p className="text-xs text-emerald-400 mb-1 font-bold uppercase">Total Ingresos Hoy</p>
@@ -539,7 +558,7 @@ const CashRegister: React.FC = () => {
          
          {activeTab === 'VENTAS' && (
            <div className="space-y-4">
-              <h3 className="font-bold text-slate-700">Historial Ventas POS</h3>
+              <h3 className="font-bold text-slate-700">Historial Ventas POS (Hoy)</h3>
               <div className="overflow-x-auto">
                 <table className="w-full text-left">
                     <thead className="bg-slate-50 text-slate-500 uppercase text-xs"><tr><th className="p-3">Factura</th><th className="p-3">Cliente</th><th className="p-3">Total</th><th className="p-3">Estado</th><th className="p-3 text-right">Acción</th></tr></thead>
