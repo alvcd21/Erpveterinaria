@@ -1,4 +1,5 @@
 
+
 import { 
   Telefono, 
   Inventario, 
@@ -24,7 +25,7 @@ import {
   DetalleVenta
 } from '../types';
 
-// Extended payload to include date
+// Extended payload to include date and correct sales fields
 export interface VentaPayload extends VentaPayloadBase {
     fecha?: string;
 }

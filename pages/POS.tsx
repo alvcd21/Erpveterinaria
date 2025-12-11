@@ -22,6 +22,7 @@ const POS: React.FC = () => {
   
   const [paymentType, setPaymentType] = useState<'Contado' | 'Credito'>('Contado');
   const [discount, setDiscount] = useState<number>(0);
+  const [taxAmount, setTaxAmount] = useState<number>(0); // Estado para ISV visual
   const [isLoading, setIsLoading] = useState(false);
   
   // Edit Mode State
@@ -115,20 +116,17 @@ const POS: React.FC = () => {
           }));
           setCart(cleanDetails);
 
-          // 2. Obtener cabecera de la venta (Total, Cliente, Estado)
+          // 2. Obtener cabecera de la venta (Total, Cliente, Estado, Impuestos)
           const header = await SalesService.getVenta(saleId);
           
           if (header) {
-              // Asegurar el seteo del cliente
+              // Asegurar el seteo del cliente y configuración
               setSelectedClientId(header.identidadCliente);
-
-              // Calcular descuento inverso: (Suma Productos) - (Total Pagado)
-              const subtotalCalculado = cleanDetails.reduce((sum, item) => sum + (item.cantidad * item.precioVenta), 0);
-              const totalGuardado = Number(header.total);
-              // Si el total guardado es menor que la suma de productos, hubo descuento
-              const descuentoAplicado = subtotalCalculado - totalGuardado;
+              setPaymentType(header.tipoCompra as any || 'Contado');
               
-              setDiscount(descuentoAplicado > 0.01 ? descuentoAplicado : 0);
+              // Setear valores monetarios guardados
+              setDiscount(Number(header.descuento) || 0);
+              setTaxAmount(Number(header.isv) || 0);
           }
           
           const Toast = Swal.mixin({
@@ -203,7 +201,7 @@ const POS: React.FC = () => {
   const calculateTotal = () => {
     const grossTotal = cart.reduce((acc, item) => acc + (item.cantidad * item.precioVenta), 0);
     const finalTotal = grossTotal - discount;
-    const isv = finalTotal * 0.15; // Estimado, backend calcula si es necesario
+    const isv = finalTotal * 0.15; // 15% ISV fijo
     const subtotal = finalTotal - isv;
 
     return { 
@@ -325,6 +323,7 @@ const POS: React.FC = () => {
         // Reset
         setCart([]);
         setDiscount(0);
+        setTaxAmount(0);
         setSelectedClientId('');
         setIsEditing(false);
         setEditingSaleId(null);
@@ -344,6 +343,7 @@ const POS: React.FC = () => {
       setCart([]);
       setSelectedClientId('');
       setDiscount(0);
+      setTaxAmount(0);
       window.history.replaceState({}, document.title);
       Swal.fire('Edición Cancelada', 'Se ha limpiado el punto de venta.', 'info');
   };

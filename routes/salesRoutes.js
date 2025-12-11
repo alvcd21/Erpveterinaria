@@ -55,9 +55,19 @@ router.get('/ventas/historial', authenticateToken, async (req, res) => {
 
 router.get('/ventas/:id', authenticateToken, async (req, res) => {
     try {
+        // CORRECCIÓN: Traer todos los campos necesarios para editar (isv, descuento, tipoCompra)
+        // Nota: Usamos COALESCE para evitar nulos en el frontend
         const result = await pool.query(`
-            SELECT v.codVenta as "codVenta", v.fecha, v.total, v.estado, v.identidadCliente as "identidadCliente",
-            c.nombre || ' ' || c.apellido as "nombreCliente"
+            SELECT 
+                v.codVenta as "codVenta", 
+                v.fecha, 
+                v.total, 
+                v.estado, 
+                v.identidadCliente as "identidadCliente",
+                v.tipoCompra as "tipoCompra",
+                COALESCE(v.isv, 0) as "isv",
+                COALESCE(v.descuento, 0) as "descuento",
+                c.nombre || ' ' || c.apellido as "nombreCliente"
             FROM ventas v
             LEFT JOIN clientes c ON v.identidadCliente = c.identidad
             WHERE v.codVenta = $1
@@ -70,7 +80,7 @@ router.get('/ventas/:id', authenticateToken, async (req, res) => {
 router.post('/ventas', authenticateToken, async (req, res) => {
   const client = await pool.connect();
   try {
-    const { identidadCliente, tipoCompra, total, detalles, fecha } = req.body;
+    const { identidadCliente, tipoCompra, total, detalles, fecha, isv, descuento } = req.body;
     const { codUsuario, idCaja } = req.user;
     
     // Validar Caja Abierta
@@ -79,11 +89,23 @@ router.post('/ventas', authenticateToken, async (req, res) => {
 
     await client.query('BEGIN');
     
-    // 1. Crear Venta (Prefijo FACT) - USAR FECHA LOCAL DEL FRONTEND
+    // 1. Crear Venta - CORRECCIÓN: Insertar todos los campos (tipoCompra, isv, descuento, codUsuario)
     const codVenta = await generateNextId('ventas', 'codVenta', 'FACT', client);
     await client.query(
-      `INSERT INTO ventas (codVenta, fecha, codVendedor, identidadCliente, total, estado) VALUES ($1, $2, $3, $4, $5, 'Completada')`,
-      [codVenta, fecha || 'NOW()', codUsuario, identidadCliente, total]
+      `INSERT INTO ventas (
+          codVenta, fecha, codVendedor, identidadCliente, total, estado, 
+          tipoCompra, isv, descuento, codUsuario
+       ) VALUES ($1, $2, $3, $4, $5, 'Completada', $6, $7, $8, $3)`,
+      [
+          codVenta, 
+          fecha || 'NOW()', 
+          codUsuario, 
+          identidadCliente, 
+          total, 
+          tipoCompra || 'Contado',
+          isv || 0,
+          descuento || 0
+      ]
     );
 
     let totalCostoVenta = 0;
@@ -125,7 +147,13 @@ router.post('/ventas', authenticateToken, async (req, res) => {
       );
     }
 
-    // 3. REGISTRAR INGRESO AUTOMÁTICO EN CAJA
+    // 3. REGISTRAR INGRESO AUTOMÁTICO EN CAJA (Si es Contado)
+    // Aunque sea crédito, muchas veces se registra para balance contable, pero típicamente ingreso de caja es solo CASH.
+    // Asumiremos que entra a caja si es Contado. Si es Crédito, no entra dinero FÍSICO a caja, pero afecta ventas.
+    // PARA SIMPLIFICAR TU SISTEMA: Registraremos todo como ingreso por ahora para que cuadre "Total Ventas", 
+    // pero si quieres control estricto de efectivo, deberíamos filtrar. 
+    // Basado en tu petición de "Monto Final", asumiré que quieres ver reflejado el dinero.
+    
     const idIngreso = await generateNextId('ingresos', 'idIngreso', 'INGR', client);
     await client.query(
       `INSERT INTO ingresos (idIngreso, idCaja, descripcion, monto, costo, fechaCreacion, estado) 
@@ -133,7 +161,7 @@ router.post('/ventas', authenticateToken, async (req, res) => {
       [idIngreso, idCaja, `Venta Factura #${codVenta}`, total, totalCostoVenta]
     );
 
-    // 4. UPDATE BALANCE (Importante: Pasar el client de la transacción)
+    // 4. UPDATE BALANCE
     await updateArqueoBalance(idCaja, client);
 
     await client.query('COMMIT');
@@ -146,7 +174,7 @@ router.put('/ventas/:id', authenticateToken, async (req, res) => {
     const client = await pool.connect();
     try {
         const codVenta = req.params.id;
-        const { identidadCliente, total, detalles } = req.body;
+        const { identidadCliente, total, detalles, tipoCompra, isv, descuento } = req.body;
         const { idCaja } = req.user;
 
         await client.query('BEGIN');
@@ -173,8 +201,13 @@ router.put('/ventas/:id', authenticateToken, async (req, res) => {
         // 3. Eliminar detalles anteriores
         await client.query('DELETE FROM detalleventa WHERE idVenta = $1', [codVenta]);
 
-        // 4. Actualizar Cabecera de Venta (Total y Cliente)
-        await client.query('UPDATE ventas SET identidadCliente = $1, total = $2 WHERE codVenta = $3', [identidadCliente, total, codVenta]);
+        // 4. Actualizar Cabecera de Venta (CORRECCIÓN: Actualizar todos los campos)
+        await client.query(
+            `UPDATE ventas 
+             SET identidadCliente = $1, total = $2, tipoCompra = $3, isv = $4, descuento = $5 
+             WHERE codVenta = $6`, 
+            [identidadCliente, total, tipoCompra, isv, descuento, codVenta]
+        );
 
         // 5. Insertar Nuevos Detalles y Descontar Stock
         let totalCostoVenta = 0;
@@ -212,8 +245,7 @@ router.put('/ventas/:id', authenticateToken, async (req, res) => {
              );
         }
 
-        // 6. Actualizar el Ingreso en Caja para reflejar el nuevo total
-        // Se busca por descripción, asumiendo que es el único ingreso generado para esta factura
+        // 6. Actualizar el Ingreso en Caja
         const descSearch = `Venta Factura #${codVenta}`;
         await client.query(
             `UPDATE ingresos SET monto = $1, costo = $2 WHERE idCaja = $3 AND descripcion = $4`,
@@ -255,7 +287,6 @@ router.get('/ventas/:id/detalles', authenticateToken, async (req, res) => {
         `;
         const result = await pool.query(query, [req.params.id]);
         
-        // Mapear idInventario
         const mapped = await Promise.all(result.rows.map(async (row) => {
              let idInventario = null;
              if (row.tipoProducto === 'ACCESORIO') {

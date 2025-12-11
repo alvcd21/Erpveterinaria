@@ -1,4 +1,5 @@
 
+
 // --- ENTIDADES BASE DE DATOS (Mapeo Estricto SQL) ---
 
 export type EstadoGeneral = 'Activo' | 'Inactivo';
@@ -195,6 +196,9 @@ export interface Venta {
   identidadCliente: string; // FK
   total: number;
   estado: string;
+  tipoCompra?: 'Contado' | 'Credito';
+  isv?: number;
+  descuento?: number;
   // UI Helpers
   nombreCliente?: string;
   nombreVendedor?: string;
