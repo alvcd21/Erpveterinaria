@@ -15,12 +15,13 @@ const inventoryRoutes = require('./routes/inventoryRoutes');
 const salesRoutes = require('./routes/salesRoutes');
 const financeRoutes = require('./routes/financeRoutes');
 const reportsRoutes = require('./routes/reportsRoutes');
+const labelRoutes = require('./routes/labelRoutes'); // NUEVA RUTA
 
 const app = express();
 const port = process.env.PORT || 3000;
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '50mb' })); // Aumentar limite para imagenes base64
 
 // --- INICIALIZACIÓN BD (Tablas Nuevas) ---
 const initDB = async () => {
@@ -33,6 +34,17 @@ const initDB = async () => {
                 precio numeric(10,2) NOT NULL,
                 costo numeric(10,2) NOT NULL,
                 estado varchar(20) NOT NULL DEFAULT 'Activo'
+            );
+
+            CREATE TABLE IF NOT EXISTS label_templates (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                name VARCHAR(100) NOT NULL,
+                is_default BOOLEAN DEFAULT FALSE,
+                width NUMERIC(10,2) NOT NULL,
+                height NUMERIC(10,2) NOT NULL,
+                elements JSONB NOT NULL,
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW()
             );
         `);
     } catch (err) { console.error("Error init DB:", err); }
@@ -93,6 +105,7 @@ app.use('/api', inventoryRoutes);
 app.use('/api', salesRoutes);
 app.use('/api', financeRoutes);
 app.use('/api', reportsRoutes);
+app.use('/api', labelRoutes); // REGISTRO
 
 // --- STATIC FILES ---
 app.use(express.static(path.join(__dirname, 'build')));
