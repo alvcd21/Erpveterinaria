@@ -32,6 +32,13 @@ const POS: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
 
+  // Obtener fecha local en formato YYYY-MM-DD
+  const getLocalDate = () => {
+    const d = new Date();
+    const offset = d.getTimezoneOffset() * 60000;
+    return new Date(d.getTime() - offset).toISOString().split('T')[0];
+  };
+
   useEffect(() => {
     checkRegisterStatus();
     loadInitialData();
@@ -100,7 +107,13 @@ const POS: React.FC = () => {
           
           // 1. Obtener detalles de productos (Items)
           const details = await SalesService.getDetallesVenta(saleId);
-          setCart(details);
+          // Mapear asegurando tipos numéricos para evitar NaN
+          const cleanDetails = details.map(d => ({
+              ...d,
+              cantidad: Number(d.cantidad),
+              precioVenta: Number(d.precioVenta)
+          }));
+          setCart(cleanDetails);
 
           // 2. Obtener cabecera de la venta (Total, Cliente, Estado)
           const header = await SalesService.getVenta(saleId);
@@ -110,7 +123,7 @@ const POS: React.FC = () => {
               setSelectedClientId(header.identidadCliente);
 
               // Calcular descuento inverso: (Suma Productos) - (Total Pagado)
-              const subtotalCalculado = details.reduce((sum, item) => sum + (Number(item.cantidad) * Number(item.precioVenta)), 0);
+              const subtotalCalculado = cleanDetails.reduce((sum, item) => sum + (item.cantidad * item.precioVenta), 0);
               const totalGuardado = Number(header.total);
               // Si el total guardado es menor que la suma de productos, hubo descuento
               const descuentoAplicado = subtotalCalculado - totalGuardado;
@@ -285,7 +298,8 @@ const POS: React.FC = () => {
             total: total,
             isv: tax,
             descuento: discount,
-            detalles: cart
+            detalles: cart,
+            fecha: getLocalDate() // Enviar fecha local explícita
         };
 
         let response;

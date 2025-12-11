@@ -43,18 +43,18 @@ async function updateArqueoBalance(idCaja, client = pool) {
         const { idArqueo, montoInicial, fechaApertura } = arqRes.rows[0];
 
         // 2. Calcular Totales usando SQL para precisión (Ingresos y Egresos desde la apertura)
-        // NOTA: Se usa COALESCE para evitar nulos y asegurar retornos numéricos
+        // Se usa ::numeric para asegurar que COALESCE trabaje con tipos consistentes
         const statsQuery = `
             SELECT 
-                (SELECT COALESCE(SUM(monto), 0) FROM ingresos WHERE idCaja = $1 AND fechaCreacion >= $2) as total_ingresos,
-                (SELECT COALESCE(SUM(costo), 0) FROM ingresos WHERE idCaja = $1 AND fechaCreacion >= $2) as total_costos_ventas,
-                (SELECT COALESCE(SUM(monto), 0) FROM egresos WHERE idCaja = $1 AND fechaCreacion >= $2) as total_egresos
+                (SELECT COALESCE(SUM(monto), 0)::numeric FROM ingresos WHERE idCaja = $1 AND fechaCreacion >= $2) as total_ingresos,
+                (SELECT COALESCE(SUM(costo), 0)::numeric FROM ingresos WHERE idCaja = $1 AND fechaCreacion >= $2) as total_costos_ventas,
+                (SELECT COALESCE(SUM(monto), 0)::numeric FROM egresos WHERE idCaja = $1 AND fechaCreacion >= $2) as total_egresos
         `;
         
         const statsRes = await client.query(statsQuery, [idCaja, fechaApertura]);
         const { total_ingresos, total_costos_ventas, total_egresos } = statsRes.rows[0];
 
-        // Convertir a float para JS math (aunque vienen como strings numéricos de PG)
+        // Convertir a float para JS math
         const tIngresos = parseFloat(total_ingresos);
         const tCostos = parseFloat(total_costos_ventas);
         const tEgresos = parseFloat(total_egresos);

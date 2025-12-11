@@ -70,7 +70,7 @@ router.get('/ventas/:id', authenticateToken, async (req, res) => {
 router.post('/ventas', authenticateToken, async (req, res) => {
   const client = await pool.connect();
   try {
-    const { identidadCliente, tipoCompra, total, detalles } = req.body;
+    const { identidadCliente, tipoCompra, total, detalles, fecha } = req.body;
     const { codUsuario, idCaja } = req.user;
     
     // Validar Caja Abierta
@@ -79,11 +79,11 @@ router.post('/ventas', authenticateToken, async (req, res) => {
 
     await client.query('BEGIN');
     
-    // 1. Crear Venta (Prefijo FACT)
+    // 1. Crear Venta (Prefijo FACT) - USAR FECHA LOCAL DEL FRONTEND
     const codVenta = await generateNextId('ventas', 'codVenta', 'FACT', client);
     await client.query(
-      `INSERT INTO ventas (codVenta, fecha, codVendedor, identidadCliente, total, estado) VALUES ($1, CURRENT_DATE, $2, $3, $4, 'Completada')`,
-      [codVenta, codUsuario, identidadCliente, total]
+      `INSERT INTO ventas (codVenta, fecha, codVendedor, identidadCliente, total, estado) VALUES ($1, $2, $3, $4, $5, 'Completada')`,
+      [codVenta, fecha || 'NOW()', codUsuario, identidadCliente, total]
     );
 
     let totalCostoVenta = 0;
@@ -236,10 +236,14 @@ router.put('/ventas/:id', authenticateToken, async (req, res) => {
 
 router.get('/ventas/:id/detalles', authenticateToken, async (req, res) => {
     try {
+        // Alias explícitos para asegurar que el frontend reciba "precioVenta" y no "precioventa"
         const query = `
             SELECT 
-                dv.codDetalleVenta, dv.cantidad, dv.precioVenta, 
-                dv.idTelefono, dv.idAccesorio,
+                dv.codDetalleVenta as "codDetalleVenta", 
+                dv.cantidad, 
+                dv.precioVenta as "precioVenta", 
+                dv.idTelefono as "idTelefono", 
+                dv.idAccesorio as "idAccesorio",
                 COALESCE(t.marca || ' ' || t.modelo, a.descripcion) as "descripcionProducto",
                 CASE WHEN dv.idTelefono IS NOT NULL THEN 'TELEFONO' ELSE 'ACCESORIO' END as "tipoProducto",
                 t.codigo as "telefonoId",

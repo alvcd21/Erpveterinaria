@@ -4,7 +4,7 @@ import {
   Inventario, 
   Accesorio, 
   Cliente, 
-  VentaPayload, 
+  VentaPayload as VentaPayloadBase, 
   Venta,
   Arqueo, 
   Ingreso, 
@@ -23,6 +23,11 @@ import {
   ProductoUnified,
   DetalleVenta
 } from '../types';
+
+// Extended payload to include date
+export interface VentaPayload extends VentaPayloadBase {
+    fecha?: string;
+}
 
 const API_URL = '/api';
 
