@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { useAuth } from '../context/AuthContext';
-import { useHistory } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 
 type TabType = 'INGRESOS' | 'EGRESOS' | 'VENTAS' | 'RECARGAS';
 
@@ -28,7 +28,7 @@ const CashRegister: React.FC = () => {
   const [openForm, setOpenForm] = useState({ monto: '', tigo: '', claro: '' });
   
   const { user, hasPermission } = useAuth();
-  const history = useHistory();
+  const navigate = useNavigate();
 
   // Modals Forms
   const [showIngresoModal, setShowIngresoModal] = useState(false);
@@ -149,8 +149,7 @@ const CashRegister: React.FC = () => {
          } catch(err:any) { Swal.fire('Error', err.message, 'error'); }
      } else {
          if (ingresoForm.irAPos) {
-             history.push({ 
-                 pathname: '/pos',
+             navigate('/pos', { 
                  state: { 
                      customItem: {
                          descripcion: ingresoForm.descripcion,
@@ -542,7 +541,7 @@ const CashRegister: React.FC = () => {
            <div className="space-y-4">
               <h3 className="font-bold text-slate-700">Historial Ventas POS</h3>
               <div className="overflow-x-auto">
-                <table className="w-full text-sm text-left">
+                <table className="w-full text-left">
                     <thead className="bg-slate-50 text-slate-500 uppercase text-xs"><tr><th className="p-3">Factura</th><th className="p-3">Cliente</th><th className="p-3">Total</th><th className="p-3">Estado</th><th className="p-3 text-right">Acción</th></tr></thead>
                     <tbody>
                         {ventas.length === 0 ? (

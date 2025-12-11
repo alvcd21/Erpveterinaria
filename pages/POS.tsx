@@ -6,7 +6,7 @@ import { Search, ShoppingCart, Trash2, CreditCard, Smartphone, Headphones, Zap, 
 import Swal from 'sweetalert2';
 import { jsPDF } from 'jspdf';
 import { useAuth } from '../context/AuthContext';
-import { useHistory, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 
 const POS: React.FC = () => {
   const [products, setProducts] = useState<ProductoUnified[]>([]);
@@ -24,8 +24,8 @@ const POS: React.FC = () => {
   const [discount, setDiscount] = useState<number>(0);
   const [isLoading, setIsLoading] = useState(false);
   const { user } = useAuth();
-  const history = useHistory();
-  const location = useLocation<any>();
+  const navigate = useNavigate();
+  const location = useLocation();
 
   useEffect(() => {
     checkRegisterStatus();
@@ -34,8 +34,9 @@ const POS: React.FC = () => {
 
   // Handle Custom Item passed from Cash Register
   useEffect(() => {
-      if (location.state && location.state.customItem) {
-          const { descripcion, precio } = location.state.customItem;
+      const state = location.state as any;
+      if (state && state.customItem) {
+          const { descripcion, precio } = state.customItem;
           // Add as custom item to cart
           const newItem: DetalleVenta = {
               codDetalleVenta: `MANUAL-${Date.now()}`,
@@ -61,7 +62,7 @@ const POS: React.FC = () => {
            icon: 'warning',
            confirmButtonText: 'Ir a Caja'
          });
-         history.push('/cash');
+         navigate('/cash');
        }
      } catch (error) {
        console.error("Error checking register", error);

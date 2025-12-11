@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { Redirect, useLocation } from 'react-router-dom';
+import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
 interface ProtectedRouteProps {
@@ -15,17 +15,17 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, allowedRoles,
 
   if (!isAuthenticated) {
     // Redirect to login while saving the attempted location
-    return <Redirect to={{ pathname: "/login", state: { from: location } }} />;
+    return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
   // Nueva validación por permiso específico
   if (requiredPermission && !hasPermission(requiredPermission)) {
-    return <Redirect to="/" />;
+    return <Navigate to="/" replace />;
   }
 
   // Validación Legacy por Rol (si no se pasa permission)
   if (!requiredPermission && allowedRoles && !allowedRoles.some(r => hasPermission(r.toUpperCase()) || hasPermission())) {
-     return <Redirect to="/" />;
+     return <Navigate to="/" replace />;
   }
 
   return <>{children}</>;
