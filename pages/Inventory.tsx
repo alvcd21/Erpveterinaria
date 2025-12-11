@@ -256,7 +256,7 @@ const Inventory: React.FC = () => {
 
       // 2. CONFIGURACIÓN VISUAL DEL CÓDIGO DE BARRAS
       // El grosor visual determina cuánto espacio ocupa a lo ancho del papel
-      const BARCODE_VISUAL_WIDTH = 14; // 10mm de grosor total (MÁS FINO VISUALMENTE PARA DEJAR ESPACIO)
+      const BARCODE_VISUAL_WIDTH = 20; // 10mm de grosor total (MÁS FINO VISUALMENTE PARA DEJAR ESPACIO)
       const BARCODE_VISUAL_HEIGHT = 65; // 65mm de largo (casi todo el alto del papel)
 
       // 3. POSICIONES X (Horizontal en el papel de 50mm)
@@ -267,7 +267,7 @@ const Inventory: React.FC = () => {
       // -> POSICIÓN TÍTULO (Marca/Modelo)
       // Si no lo ves, AUMENTA este valor (ej. de 5 a 8) para alejarlo del borde izquierdo.
       // Si choca con el código, DISMINUYE el valor.
-      const POS_X_TITULO = 20; 
+      const POS_X_TITULO = 30; 
 
       // -> POSICIÓN CÓDIGO BARRAS
       // Calculamos para centrarlo aproximadamente
