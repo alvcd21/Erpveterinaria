@@ -215,64 +215,65 @@ const Inventory: React.FC = () => {
 
   const handlePrintBarcode = (code: string, description: string) => {
     try {
-      // --- CONFIGURACIÓN DE PÁGINA (Modificar aquí si cambia el rollo de etiquetas) ---
-      const PAGE_WIDTH = 50;  // Ancho del papel en mm
-      const PAGE_HEIGHT = 80; // Alto del papel en mm
+      // --- CONFIGURACIÓN DE PÁGINA ---
+      // Formato: 50mm Ancho x 80mm Alto.
+      const PAGE_WIDTH = 50;  
+      const PAGE_HEIGHT = 80; 
       
-      // --- CONFIGURACIÓN VISUAL DEL CÓDIGO ---
-      const BARCODE_LENGTH = 65; // Largo visual del código (vertical en el papel)
-      const BARCODE_THICKNESS = 22; // Grosor de las barras
+      // --- CONFIGURACIÓN VISUAL DEL CÓDIGO DE BARRAS ---
+      // Dimensiones visuales en la etiqueta vertical (final)
+      const BARCODE_VISUAL_LENGTH = 65; // Alto visual del código (largo de las barras en horizontal antes de rotar)
+      const BARCODE_VISUAL_THICKNESS = 16; // Ancho visual del código (grosor del conjunto de barras)
       
       const doc = new jsPDF({ orientation: 'p', unit: 'mm', format: [PAGE_WIDTH, PAGE_HEIGHT] });
       const canvas = document.createElement('canvas');
       
-      // Generar código de barras en canvas con alta resolución
+      // Generar código de barras horizontal de alta resolución
       JsBarcode(canvas, code, { 
           format: "CODE128", 
           displayValue: false, 
           margin: 0,
-          width: 4,    
-          height: 100, 
+          width: 3, // Grosor de barra individual
+          height: 100, // Altura de barra (resolución)
+          fontSize: 20
       });
       const barcodeImg = canvas.toDataURL("image/png");
 
       doc.setFont("helvetica", "bold");
       
-      // COORDENADAS PARA ROTACIÓN DE 90 GRADOS (Clockwise)
-      // Visualmente queremos:
-      // Arriba (Visual) -> Lado Izquierdo del PDF (X bajo) -> TÍTULO
-      // Centro (Visual) -> Centro del PDF (X medio) -> CÓDIGO BARRAS
-      // Abajo (Visual) -> Lado Derecho del PDF (X alto) -> CÓDIGO TEXTO
+      // --- GEOMETRÍA DE ROTACIÓN (90 GRADOS) ---
+      // El eje Y del PDF (0-80) se convierte en el eje horizontal visual.
+      // El eje X del PDF (0-50) se convierte en el eje vertical visual.
+      // Centro Visual = (25, 40) en coordenadas PDF.
       
-      // Centros geométricos de la página
-      const centerX = PAGE_WIDTH / 2; // 25
-      const centerY = PAGE_HEIGHT / 2; // 40
+      const cy = PAGE_HEIGHT / 2; // 40 (Centro horizontal visual)
 
-      // 1. TÍTULO (Arriba Visualmente)
-      // En PDF: X=8mm (Margen Izquierdo). Centrado verticalmente en Y=40.
+      // 1. TÍTULO (Arriba Visualmente -> Izquierda del PDF)
+      // X=8mm aprox margen izquierdo del PDF.
       doc.setFontSize(9);
-      const maxWidth = PAGE_HEIGHT - 10; // Margen de seguridad
+      const maxWidth = PAGE_HEIGHT - 6; // Margen seguridad
       const splitTitle = doc.splitTextToSize(description.toUpperCase(), maxWidth);
-      doc.text(splitTitle, 8, centerY, { align: "center", angle: 90 });
+      doc.text(splitTitle, 8, cy, { align: "center", angle: 90 });
 
-      // 2. CÓDIGO DE BARRAS (Centro Visualmente)
-      // Para centrar una imagen rotada 90 grados:
-      // Pivot X = CenterX + (Height / 2)
-      // Pivot Y = CenterY - (Width / 2)  (Donde Width es el largo visual)
+      // 2. CÓDIGO DE BARRAS (Centro Visualmente -> Centro del PDF en X)
+      // Para centrar una imagen rotada 90 grados en X=26 (aprox centro óptico entre textos):
+      // addImage(img, fmt, x, y, w, h, ..., 90)
+      // Con rotación 90, la imagen se dibuja hacia "arriba" desde el punto (x,y).
+      // 'w' es el largo visual vertical. 'h' es el grosor visual horizontal.
+      // Coordenada X de inserción = Centro Deseado X + (Grosor / 2).
+      // Coordenada Y de inserción = Centro Deseado Y - (Largo / 2).
       
-      const pivotX = centerX + (BARCODE_THICKNESS / 2) + 2; // +2 ajuste visual para separar del título
-      const pivotY = centerY - (BARCODE_LENGTH / 2);
+      const targetCenterX = 26; // Centro deseado en el ancho del papel
+      const imgX = targetCenterX + (BARCODE_VISUAL_THICKNESS / 2);
+      const imgY = cy - (BARCODE_VISUAL_LENGTH / 2); // 40 - 32.5 = 7.5
       
-      // addImage(img, fmt, x, y, w, h, alias, compression, rotation)
-      // w = Largo del código (65), h = Grosor (22)
-      // Al rotar 90, ocupará 22 de ancho en X y 65 de alto en Y.
-      doc.addImage(barcodeImg, 'PNG', pivotX, pivotY, BARCODE_LENGTH, BARCODE_THICKNESS, undefined, 'FAST', 90);
+      doc.addImage(barcodeImg, 'PNG', imgX, imgY, BARCODE_VISUAL_LENGTH, BARCODE_VISUAL_THICKNESS, undefined, 'FAST', 90);
 
-      // 3. CÓDIGO TEXTO (Abajo Visualmente)
-      // En PDF: X=45mm (Margen Derecho). Centrado verticalmente en Y=40.
-      doc.setFontSize(12);
+      // 3. CÓDIGO TEXTO (Abajo Visualmente -> Derecha del PDF)
+      // X=44mm aprox margen derecho del PDF.
+      doc.setFontSize(11);
       doc.setFont("courier", "bold");
-      doc.text(code, 45, centerY, { align: "center", angle: 90 });
+      doc.text(code, 44, cy, { align: "center", angle: 90 });
 
       doc.save(`etiqueta_${code}.pdf`);
     } catch (err) {
