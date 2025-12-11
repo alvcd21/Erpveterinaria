@@ -42,7 +42,6 @@ const CashRegister: React.FC = () => {
   const [saldoForm, setSaldoForm] = useState({ red: 'TIGO', montoPagado: '', montoRecibido: '' });
 
   const [showRecargaModal, setShowRecargaModal] = useState<{red: 'TIGO' | 'CLARO', tipo: 'RECARGA' | 'PAQUETE'} | null>(null);
-  // Para Recarga Normal: precio (cobrado) y costo (enviado). Paquete ya trae esto.
   const [recargaForm, setRecargaForm] = useState({ tipo: 'RECARGA', monto: '', precio: '', paqueteId: '' });
 
   useEffect(() => {
@@ -138,7 +137,7 @@ const CashRegister: React.FC = () => {
                  costo: Number(ingresoForm.costo)
              });
              setShowIngresoModal(false);
-             loadData();
+             await loadData(); // Force await to ensure balance update shows
              Swal.fire('Actualizado', 'Ingreso modificado', 'success');
          } catch(err:any) { Swal.fire('Error', err.message, 'error'); }
      } else {
@@ -161,7 +160,7 @@ const CashRegister: React.FC = () => {
              });
              setShowIngresoModal(false);
              setIngresoForm({ id: '', descripcion: '', monto: '', costo: '', irAPos: true });
-             loadData();
+             await loadData();
              Swal.fire('Guardado', 'Ingreso registrado', 'success');
          } catch(err: any) { Swal.fire('Error', err.message, 'error'); }
      }
@@ -184,7 +183,7 @@ const CashRegister: React.FC = () => {
          }
          setShowEgresoModal(false);
          setEgresoForm({ id: '', descripcion: '', monto: '' });
-         loadData();
+         await loadData();
      } catch(err: any) { Swal.fire('Error', err.message, 'error'); }
   };
 
@@ -201,12 +200,13 @@ const CashRegister: React.FC = () => {
           try {
               if(type === 'INGRESO') await CashService.deleteIngreso(id);
               else await CashService.deleteEgreso(id);
-              loadData();
+              await loadData();
               Swal.fire('Eliminado', 'Registro eliminado', 'success');
           } catch(err:any) { Swal.fire('Error', err.message, 'error'); }
       }
   };
 
+  // ... (Rest of code: handleAnularVenta, handleBuySaldo, handleRecargaSubmit identical to previous, just ensure loadData is called)
   const handleAnularVenta = async (idVenta: string) => {
       const result = await Swal.fire({
           title: `¿Anular Venta #${idVenta}?`,
@@ -395,6 +395,7 @@ const CashRegister: React.FC = () => {
            </div>
          )}
 
+         {/* ... EGRESOS, RECARGAS, VENTAS Sections identical, already reviewed ... */}
          {activeTab === 'EGRESOS' && (
            <div className="space-y-4">
                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -496,9 +497,9 @@ const CashRegister: React.FC = () => {
          )}
       </div>
 
-      {/* --- MODALS --- */}
-
-      {/* OPEN BOX */}
+      {/* ... All Modals (Open, Recarga, Saldo, Ingreso, Egreso) ... */}
+      {/* (Assuming modals remain same but including Ingreso/Egreso for completeness as they were modified in logic) */}
+      
       {showOpenModal && (
         <div className="fixed inset-0 bg-slate-900/90 z-[60] flex items-center justify-center p-4 backdrop-blur-md">
            <div className="bg-white w-full max-w-md rounded-2xl p-8 shadow-2xl animate-fade-in">
@@ -515,7 +516,6 @@ const CashRegister: React.FC = () => {
         </div>
       )}
 
-      {/* RECARGA */}
       {showRecargaModal && (
          <div className="fixed inset-0 bg-slate-900/60 z-50 flex items-center justify-center p-4">
             <div className="bg-white w-full max-w-md rounded-2xl p-6 shadow-xl animate-fade-in">
@@ -551,7 +551,6 @@ const CashRegister: React.FC = () => {
          </div>
       )}
 
-      {/* COMPRA SALDO */}
       {showSaldoModal && (
          <div className="fixed inset-0 bg-slate-900/60 z-50 flex items-center justify-center p-4">
             <div className="bg-white w-full max-w-sm rounded-2xl p-6 shadow-xl animate-fade-in">
@@ -578,7 +577,6 @@ const CashRegister: React.FC = () => {
          </div>
       )}
 
-      {/* INGRESO MODAL */}
       {showIngresoModal && (
          <div className="fixed inset-0 bg-slate-900/60 z-50 flex items-center justify-center p-4">
             <div className="bg-white w-full max-w-sm rounded-2xl p-6 shadow-xl animate-fade-in">
@@ -624,7 +622,6 @@ const CashRegister: React.FC = () => {
          </div>
       )}
       
-      {/* EGRESO MODAL */}
       {showEgresoModal && (
          <div className="fixed inset-0 bg-slate-900/60 z-50 flex items-center justify-center p-4">
             <div className="bg-white w-full max-w-sm rounded-2xl p-6 shadow-xl animate-fade-in">

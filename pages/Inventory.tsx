@@ -11,7 +11,7 @@ import {
 } from '../types';
 import { 
   Search, Plus, Smartphone, Headphones, Box, MapPin, 
-  Tag, PlusCircle, X, RefreshCw, Printer, Edit2, Trash2, Calendar
+  Tag, PlusCircle, X, RefreshCw, Printer, Edit2, Trash2, Calendar, Filter
 } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { jsPDF } from 'jspdf';
@@ -24,6 +24,9 @@ const Inventory: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   
+  // Filters
+  const [phoneStateFilter, setPhoneStateFilter] = useState<string>('Disponible');
+
   const [showModal, setShowModal] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [currentId, setCurrentId] = useState<string | null>(null);
@@ -127,8 +130,9 @@ const Inventory: React.FC = () => {
     setCurrentId(item.codigo || item.codInventario || item.codAccesorio || item.codCategoria || item.idUbicacion);
     
     if (activeTab === 'TELEPHONES') {
+      // Nota: item.codProveedor debe venir del backend con alias correcto
       setPhoneForm({ ...item, fecha: item.fecha ? item.fecha.split('T')[0] : '' });
-      setManualBrandMode(true); // En edición permitimos editar texto directo para simplificar
+      setManualBrandMode(true); 
       setManualModelMode(true);
     }
     else if (activeTab === 'STOCK') setStockForm({ ...item, fecha: item.fecha ? item.fecha.split('T')[0] : '' });
@@ -211,21 +215,56 @@ const Inventory: React.FC = () => {
 
   const handlePrintBarcode = (code: string, description: string) => {
     try {
-      const doc = new jsPDF({ orientation: 'p', unit: 'mm', format: [25, 40] });
+      // 50mm x 25mm Label
+      const doc = new jsPDF({ orientation: 'l', unit: 'mm', format: [50, 25] });
       const canvas = document.createElement('canvas');
-      JsBarcode(canvas, code, { format: "CODE128", displayValue: true, fontSize: 14, textMargin: 0, margin: 0, width: 2, height: 50 });
+      
+      // Generar código de barras limpio, SIN texto (lo agregamos manualmente)
+      JsBarcode(canvas, code, { 
+          format: "CODE128", 
+          displayValue: false, // Desactivar texto automático para control total
+          margin: 0,
+          width: 2, 
+          height: 50 
+      });
       const barcodeImg = canvas.toDataURL("image/png");
+
+      // 1. Título (Descripción) - Arriba, ajustado a 2 líneas
       doc.setFont("helvetica", "bold");
-      doc.setFontSize(7);
-      const splitTitle = doc.splitTextToSize(description.substring(0, 30), 22);
-      doc.text(splitTitle, 12.5, 5, { align: "center" });
-      doc.addImage(barcodeImg, 'PNG', 1, 10, 23, 25); 
+      doc.setFontSize(8);
+      
+      const maxWidth = 46; // mm
+      const splitTitle = doc.splitTextToSize(description.toUpperCase(), maxWidth);
+      // Limitar a 2 filas para que no tape el código
+      const finalTitle = splitTitle.length > 2 ? splitTitle.slice(0, 2) : splitTitle;
+      
+      // Centrar título horizontalmente
+      doc.text(finalTitle, 25, 4, { align: "center", baseline: "top" });
+
+      // Calcular posición Y del código según lineas de titulo
+      let barcodeY = finalTitle.length > 1 ? 8 : 7;
+      let barcodeHeight = 10; 
+
+      // 2. Código de Barras - Centro
+      doc.addImage(barcodeImg, 'PNG', 5, barcodeY, 40, barcodeHeight); 
+
+      // 3. Texto del Código - Abajo, centrado
+      doc.setFont("helvetica", "bold"); // Fuente mono o negrita
+      doc.setFontSize(9);
+      doc.text(code, 25, barcodeY + barcodeHeight + 4, { align: "center" });
+
       doc.save(`barcode_${code}.pdf`);
     } catch (err) {
       console.error(err);
       Swal.fire('Error', 'No se pudo generar el código de barras', 'error');
     }
   };
+
+  const filteredPhones = phones.filter(p => {
+      const matchSearch = JSON.stringify(p).toLowerCase().includes(searchTerm.toLowerCase());
+      const matchState = phoneStateFilter === 'TODOS' ? true : p.estado === phoneStateFilter;
+      return matchSearch && matchState;
+  });
 
   return (
     <div className="space-y-6 h-full flex flex-col">
@@ -248,8 +287,8 @@ const Inventory: React.FC = () => {
         <div className="bg-white rounded-t-2xl border-b border-slate-200 px-2 pt-2 flex overflow-x-auto no-scrollbar">
           {[
             { id: 'TELEPHONES', label: 'Teléfonos', icon: <Smartphone size={18}/> },
-            { id: 'STOCK', label: 'Accesorios (Stock)', icon: <Box size={18}/> },
-            { id: 'MASTER', label: 'Maestro Accesorios', icon: <Headphones size={18}/> },
+            { id: 'STOCK', label: 'Stock Accesorios', icon: <Box size={18}/> },
+            { id: 'MASTER', label: 'Accesorios', icon: <Headphones size={18}/> },
             { id: 'CATEGORIES', label: 'Categorías', icon: <Tag size={18}/> },
             { id: 'LOCATIONS', label: 'Ubicaciones', icon: <MapPin size={18}/> },
           ].map(tab => (
@@ -267,8 +306,8 @@ const Inventory: React.FC = () => {
           ))}
         </div>
         
-        {/* SEARCH BAR */}
-        <div className="bg-white border-x border-b border-slate-200 p-3 flex gap-3 rounded-b-xl mb-4">
+        {/* SEARCH BAR & FILTERS */}
+        <div className="bg-white border-x border-b border-slate-200 p-3 flex flex-col md:flex-row gap-3 rounded-b-xl mb-4">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
             <input 
@@ -279,6 +318,22 @@ const Inventory: React.FC = () => {
               className="w-full pl-10 pr-4 py-2 bg-slate-100 border-none rounded-lg text-sm focus:ring-2 focus:ring-indigo-500/20"
             />
           </div>
+          
+          {activeTab === 'TELEPHONES' && (
+              <div className="flex items-center gap-2 bg-slate-100 rounded-lg px-3 py-1">
+                  <Filter size={16} className="text-slate-400"/>
+                  <select 
+                    value={phoneStateFilter} 
+                    onChange={e => setPhoneStateFilter(e.target.value)}
+                    className="bg-transparent text-sm border-none focus:ring-0 text-slate-700 font-medium"
+                  >
+                      <option value="Disponible">Disponibles</option>
+                      <option value="Vendido">Vendidos</option>
+                      <option value="TODOS">Todos</option>
+                  </select>
+              </div>
+          )}
+
           <button onClick={loadData} className="p-2 text-slate-500 hover:bg-slate-100 rounded-lg">
             <RefreshCw size={20} />
           </button>
@@ -297,7 +352,7 @@ const Inventory: React.FC = () => {
                     <th className="p-4 text-xs font-bold text-slate-500 uppercase">IMEI</th>
                     <th className="p-4 text-xs font-bold text-slate-500 uppercase">Marca/Modelo</th>
                     <th className="p-4 text-xs font-bold text-slate-500 uppercase text-right">Precio V.</th>
-                    <th className="p-4 text-xs font-bold text-slate-500 uppercase">Ubicación</th>
+                    <th className="p-4 text-xs font-bold text-slate-500 uppercase text-center">Estado</th>
                     <th className="p-4 text-xs font-bold text-slate-500 uppercase text-center">Acciones</th>
                   </>
                 )}
@@ -329,13 +384,15 @@ const Inventory: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {activeTab === 'TELEPHONES' && phones.filter(p => JSON.stringify(p).toLowerCase().includes(searchTerm.toLowerCase())).map(p => (
+              {activeTab === 'TELEPHONES' && filteredPhones.map(p => (
                 <tr key={p.codigo} className="hover:bg-slate-50">
                   <td className="p-4 text-xs font-mono text-slate-500">{p.codigo}</td>
                   <td className="p-4 text-xs font-mono text-slate-600 font-bold">{p.imei1}</td>
                   <td className="p-4 text-sm font-medium text-slate-800">{p.marca} {p.modelo}</td>
                   <td className="p-4 text-sm text-right font-bold text-emerald-600">L. {Number(p.precioVenta).toFixed(2)}</td>
-                  <td className="p-4 text-xs text-slate-500 truncate max-w-[150px]">{p.nombreUbicacion || p.idubicacion}</td>
+                  <td className="p-4 text-center">
+                      <span className={`text-[10px] px-2 py-1 rounded font-bold uppercase ${p.estado === 'Disponible' ? 'bg-green-100 text-green-700' : 'bg-slate-200 text-slate-600'}`}>{p.estado}</span>
+                  </td>
                   <td className="p-4 text-center flex items-center justify-center gap-2">
                     <button onClick={() => handlePrintBarcode(p.codigo, `${p.marca} ${p.modelo}`)} className="text-slate-500 hover:text-indigo-600" title="Imprimir"><Printer size={16} /></button>
                     <button onClick={() => openEditModal(p)} className="text-blue-500 hover:bg-blue-50 p-1.5 rounded"><Edit2 size={16}/></button>
@@ -371,6 +428,7 @@ const Inventory: React.FC = () => {
                 </tr>
               ))}
               
+              {/* Categories & Locations similar to previous code... */}
               {activeTab === 'CATEGORIES' && categories.map(c => (
                 <tr key={c.codCategoria} className="hover:bg-slate-50">
                    <td className="p-4 text-xs font-mono text-slate-500">{c.codCategoria}</td>
@@ -403,7 +461,7 @@ const Inventory: React.FC = () => {
           <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl p-6 animate-fade-in max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center mb-6 border-b border-slate-100 pb-4">
               <h3 className="text-xl font-bold text-slate-800">
-                {isEditing ? 'Editar' : 'Nuevo'}: {activeTab}
+                {isEditing ? 'Editar' : 'Nuevo'}
               </h3>
               <button onClick={() => setShowModal(false)} className="text-slate-400 hover:text-red-500"><X size={24}/></button>
             </div>
@@ -565,15 +623,15 @@ const Inventory: React.FC = () => {
                    </div>
                    <div>
                       <label className="text-xs font-bold text-slate-500 uppercase">Estado</label>
-                      <select className="w-full p-2.5 border rounded-lg mt-1" value={stockForm.estado || 'Activo'} onChange={e => setStockForm({...stockForm, estado: e.target.value})}>
-                          <option value="Activo">Activo</option>
+                      <select className="w-full p-2.5 border rounded-lg mt-1" value={stockForm.estado || 'Disponible'} onChange={e => setStockForm({...stockForm, estado: e.target.value})}>
+                          <option value="Disponible">Disponible</option>
                           <option value="Inactivo">Inactivo</option>
                       </select>
                    </div>
                  </>
                )}
 
-               {/* --- FORMULARIO MAESTRO --- */}
+               {/* ... Other forms (MASTER, CATEGORIES, LOCATIONS) same as before ... */}
                {activeTab === 'MASTER' && (
                  <>
                    <div>
@@ -590,7 +648,6 @@ const Inventory: React.FC = () => {
                  </>
                )}
 
-               {/* --- FORMULARIO CATEGORIAS --- */}
                {activeTab === 'CATEGORIES' && (
                  <div>
                     <label className="text-xs font-bold text-slate-500 uppercase">Nombre Categoría</label>
@@ -598,7 +655,6 @@ const Inventory: React.FC = () => {
                  </div>
                )}
 
-               {/* --- FORMULARIO UBICACIONES --- */}
                {activeTab === 'LOCATIONS' && (
                  <>
                    <div>

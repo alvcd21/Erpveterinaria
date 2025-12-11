@@ -180,7 +180,8 @@ router.post('/cajas', authenticateToken, async (req, res) => {
     try {
         const { nombre } = req.body;
         const idCaja = await generateNextId('caja', 'idCaja', 'CAJA');
-        await pool.query('INSERT INTO caja (idCaja, nombre, estado) VALUES ($1, $2, $3)', [idCaja, nombre, 'Activa']);
+        // ESTANDARIZACIÓN: 'Activo' (Singular Masculino)
+        await pool.query('INSERT INTO caja (idCaja, nombre, estado) VALUES ($1, $2, $3)', [idCaja, nombre, 'Activo']);
         res.status(201).json({ message: 'Caja creada', idCaja });
     } catch(e) { handleDbError(res, e); }
 });

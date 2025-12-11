@@ -7,11 +7,12 @@ const { authenticateToken } = require('../middleware/auth');
 // --- PRODUCTOS UNIFICADOS (POS) ---
 router.get('/productos/unificados', authenticateToken, async (req, res) => {
     try {
-        // Se eliminó la restricción estricta de stock para que al menos aparezcan (visual feedback)
-        // Se unifican teléfonos disponibles y accesorios activos
+        // Se unifican teléfonos disponibles y accesorios con stock
+        // ESTANDARIZACIÓN: Solo se muestran productos con estado 'Disponible'
         const query = `
             SELECT 
-                codigo as id, 'TELEFONO' as tipo, 
+                codigo as id, 
+                'TELEFONO' as tipo, 
                 (marca || ' ' || modelo) as nombre, 
                 codigo, 
                 precioVenta as "precioVenta", 
@@ -21,7 +22,8 @@ router.get('/productos/unificados', authenticateToken, async (req, res) => {
             FROM telefonos WHERE estado = 'Disponible'
             UNION ALL
             SELECT 
-                i.codInventario as id, 'ACCESORIO' as tipo, 
+                i.codInventario as id, 
+                'ACCESORIO' as tipo, 
                 a.descripcion as nombre, 
                 a.codAccesorio as codigo, 
                 i.precioVenta as "precioVenta", 
@@ -30,7 +32,7 @@ router.get('/productos/unificados', authenticateToken, async (req, res) => {
                 i.idubicacion as ubicacion
             FROM inventario i
             JOIN accesorios a ON i.codAccesorio = a.codAccesorio
-            WHERE i.estado = 'Activo'
+            WHERE i.cantidad > 0 AND i.estado = 'Disponible'
         `;
         const result = await pool.query(query);
         res.json(result.rows);
@@ -40,11 +42,18 @@ router.get('/productos/unificados', authenticateToken, async (req, res) => {
 // --- TELEFONOS ---
 router.get('/inventory/telefonos', authenticateToken, async (req, res) => {
     try {
+        // AGREGADO alias "codProveedor" para que el frontend lo mapee correctamente en el Select
         const r = await pool.query(`
-            SELECT t.codigo, t.imei1, t.imei2, t.marca, t.modelo, t.precioCompra as "precioCompra", t.precioVenta as "precioVenta", t.idubicacion, t.estado, t.fecha,
-            u.nombre as "nombreUbicacion"
+            SELECT 
+                t.codigo, t.imei1, t.imei2, t.marca, t.modelo, 
+                t.precioCompra as "precioCompra", 
+                t.precioVenta as "precioVenta", 
+                t.idubicacion, t.estado, t.fecha,
+                t.codProveedor as "codProveedor",
+                u.nombre as "nombreUbicacion"
             FROM telefonos t
             LEFT JOIN ubicacion u ON t.idubicacion = u.idUbicacion
+            ORDER BY t.fecha DESC
         `);
         res.json(r.rows);
     } catch(e) { handleDbError(res, e); }
@@ -86,11 +95,21 @@ router.delete('/inventory/telefonos/:id', authenticateToken, async (req, res) =>
 router.get('/inventory/stock', authenticateToken, async (req, res) => {
     try {
         const r = await pool.query(`
-            SELECT i.codInventario as "codInventario", i.codAccesorio as "codAccesorio", i.cantidad, i.precioVenta as "precioVenta", i.precioCompra as "precioCompra", i.estado, i.idubicacion,
-            a.descripcion as "descripcionAccesorio", u.nombre as "nombreUbicacion"
+            SELECT 
+                i.codInventario as "codInventario", 
+                i.codAccesorio as "codAccesorio", 
+                i.cantidad, 
+                i.precioVenta as "precioVenta", 
+                i.precioCompra as "precioCompra", 
+                i.estado, 
+                i.idubicacion,
+                i.codProveedor as "codProveedor",
+                a.descripcion as "descripcionAccesorio", 
+                u.nombre as "nombreUbicacion"
             FROM inventario i
             JOIN accesorios a ON i.codAccesorio = a.codAccesorio
             LEFT JOIN ubicacion u ON i.idubicacion = u.idUbicacion
+            ORDER BY i.fecha DESC
         `);
         res.json(r.rows);
     } catch(e) { handleDbError(res, e); }
@@ -100,10 +119,11 @@ router.post('/inventory/stock', authenticateToken, async (req, res) => {
     try {
         const { codAccesorio, cantidad, precioCompra, precioVenta, codProveedor, fecha, idubicacion, estado } = req.body;
         const codInventario = await generateNextId('inventario', 'codInventario', 'INV');
+        // ESTANDARIZACIÓN: Por defecto 'Disponible' para inventario comercial
         await pool.query(
             `INSERT INTO inventario (codInventario, codAccesorio, cantidad, precioCompra, precioVenta, codProveedor, fecha, idubicacion, estado)
              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-            [codInventario, codAccesorio, cantidad, precioCompra, precioVenta, codProveedor, fecha, idubicacion, estado || 'Activo']
+            [codInventario, codAccesorio, cantidad, precioCompra, precioVenta, codProveedor, fecha, idubicacion, estado || 'Disponible']
         );
         res.status(201).json({ message: 'Stock agregado' });
     } catch(e) { handleDbError(res, e); }
