@@ -115,7 +115,8 @@ router.get('/inventory/stock', authenticateToken, async (req, res) => {
 router.post('/inventory/stock', authenticateToken, async (req, res) => {
     try {
         const { codAccesorio, cantidad, precioCompra, precioVenta, codProveedor, fecha, idubicacion, estado } = req.body;
-        const codInventario = await generateNextId('inventario', 'codInventario', 'INV');
+        // ACTUALIZADO: Prefijo INVT para inventario
+        const codInventario = await generateNextId('inventario', 'codInventario', 'INVT');
         await pool.query(
             `INSERT INTO inventario (codInventario, codAccesorio, cantidad, precioCompra, precioVenta, codProveedor, fecha, idubicacion, estado)
              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
@@ -158,7 +159,8 @@ router.get('/inventory/accesorios-master', authenticateToken, async (req, res) =
 router.post('/inventory/accesorios-master', authenticateToken, async (req, res) => {
     try {
         const { codCategoria, descripcion } = req.body;
-        const id = await generateNextId('accesorios', 'codAccesorio', 'ACC');
+        // ACTUALIZADO: Prefijo ACCS para accesorios
+        const id = await generateNextId('accesorios', 'codAccesorio', 'ACCS');
         await pool.query('INSERT INTO accesorios VALUES ($1, $2, $3)', [id, codCategoria, descripcion]);
         res.status(201).json({ message: 'Accesorio creado' });
     } catch(e) { handleDbError(res, e); }

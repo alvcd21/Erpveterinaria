@@ -215,43 +215,45 @@ const Inventory: React.FC = () => {
 
   const handlePrintBarcode = (code: string, description: string) => {
     try {
-      // 50mm x 25mm Label
-      const doc = new jsPDF({ orientation: 'l', unit: 'mm', format: [50, 25] });
+      // CONFIGURACIÓN ACTUALIZADA: VERTICAL, MÁS ANCHO, BARRAS MÁS ALTAS
+      // Orientation: 'p' (Portrait / Vertical)
+      // Format: [Ancho, Alto] -> 80mm Ancho x 60mm Alto (Más espacio lateral y vertical)
+      const doc = new jsPDF({ orientation: 'p', unit: 'mm', format: [80, 60] });
       const canvas = document.createElement('canvas');
       
-      // Generar código de barras limpio, SIN texto (lo agregamos manualmente)
       JsBarcode(canvas, code, { 
           format: "CODE128", 
-          displayValue: false, // Desactivar texto automático para control total
+          displayValue: false, 
           margin: 0,
-          width: 2, 
-          height: 50 
+          width: 2.5, // Barras un poco más anchas para legibilidad
+          height: 100 // Altura del código mucho mayor
       });
       const barcodeImg = canvas.toDataURL("image/png");
 
-      // 1. Título (Descripción) - Arriba, ajustado a 2 líneas
+      const centerX = 40; // Mitad de 80mm
+
+      // 1. Título (Descripción)
       doc.setFont("helvetica", "bold");
-      doc.setFontSize(8);
+      doc.setFontSize(10); // Un poco más grande
       
-      const maxWidth = 46; // mm
+      const maxWidth = 70; // mm (Dejando 5mm de margen a cada lado)
       const splitTitle = doc.splitTextToSize(description.toUpperCase(), maxWidth);
-      // Limitar a 2 filas para que no tape el código
       const finalTitle = splitTitle.length > 2 ? splitTitle.slice(0, 2) : splitTitle;
       
-      // Centrar título horizontalmente
-      doc.text(finalTitle, 25, 4, { align: "center", baseline: "top" });
+      doc.text(finalTitle, centerX, 6, { align: "center", baseline: "top" });
 
-      // Calcular posición Y del código según lineas de titulo
-      let barcodeY = finalTitle.length > 1 ? 8 : 7;
-      let barcodeHeight = 10; 
+      // Calcular posición Y del código
+      let barcodeY = finalTitle.length > 1 ? 14 : 12;
+      let barcodeHeight = 25; // Altura visual en el PDF
 
-      // 2. Código de Barras - Centro
-      doc.addImage(barcodeImg, 'PNG', 5, barcodeY, 40, barcodeHeight); 
+      // 2. Código de Barras
+      // Centrado: ancho imagen 60mm, margen izq = (80-60)/2 = 10
+      doc.addImage(barcodeImg, 'PNG', 10, barcodeY, 60, barcodeHeight); 
 
-      // 3. Texto del Código - Abajo, centrado
-      doc.setFont("helvetica", "bold"); // Fuente mono o negrita
-      doc.setFontSize(9);
-      doc.text(code, 25, barcodeY + barcodeHeight + 4, { align: "center" });
+      // 3. Texto del Código
+      doc.setFont("helvetica", "bold"); 
+      doc.setFontSize(12);
+      doc.text(code, centerX, barcodeY + barcodeHeight + 6, { align: "center" });
 
       doc.save(`barcode_${code}.pdf`);
     } catch (err) {

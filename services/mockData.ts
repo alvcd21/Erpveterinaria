@@ -43,14 +43,14 @@ export const MOCK_TELEFONOS: Telefono[] = [
 ];
 
 export const MOCK_ACCESORIOS: AccesorioMaster[] = [
-  { codAccesorio: 'ACC-001', codCategoria: 'CAT-01', descripcion: 'Funda Silicona S23' },
-  { codAccesorio: 'ACC-002', codCategoria: 'CAT-02', descripcion: 'Cargador 25W Samsung' }
+  { codAccesorio: 'ACCS-0001', codCategoria: 'CAT-01', descripcion: 'Funda Silicona S23' },
+  { codAccesorio: 'ACCS-0002', codCategoria: 'CAT-02', descripcion: 'Cargador 25W Samsung' }
 ];
 
 export const MOCK_INVENTARIO: InventarioAccesorio[] = [
   {
-    codInventario: 'INV-001',
-    codAccesorio: 'ACC-001',
+    codInventario: 'INVT-0001',
+    codAccesorio: 'ACCS-0001',
     cantidad: 15,
     precioCompra: 100,
     precioVenta: 250,
@@ -60,8 +60,8 @@ export const MOCK_INVENTARIO: InventarioAccesorio[] = [
     fecha: '2023-09-01'
   },
   {
-    codInventario: 'INV-002',
-    codAccesorio: 'ACC-002',
+    codInventario: 'INVT-0002',
+    codAccesorio: 'ACCS-0002',
     cantidad: 8,
     precioCompra: 300,
     precioVenta: 600,
