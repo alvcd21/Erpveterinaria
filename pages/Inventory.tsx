@@ -267,7 +267,7 @@ const Inventory: React.FC = () => {
       // -> TÍTULO (Marca/Modelo)
       // Modifica este valor para subir o bajar el título.
       // 4 = Muy arriba, 8 = Más abajo.
-      const POS_X_TITULO = 25; 
+      const POS_X_TITULO = 28; 
 
       // -> CÓDIGO DE BARRAS (Imagen)
       // Se calcula para que esté centrado entre el título y el SKU.
