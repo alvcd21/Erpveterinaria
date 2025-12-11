@@ -1,3 +1,4 @@
+
 import { 
   Telefono, 
   Inventario, 
@@ -125,6 +126,8 @@ export const CashService = {
 };
 
 export const AdminService = {
+  getSchema: () => request<Record<string, {name: string, type: string}[]>>('/schema'),
+  
   getUsers: () => request<Usuario[]>('/users'),
   createUser: (data: Partial<Usuario>) => request('/users', { method: 'POST', body: JSON.stringify(data) }),
   updateUser: (id: string, data: Partial<Usuario>) => request(`/users/${id}`, { method: 'PUT', body: JSON.stringify(data) }),

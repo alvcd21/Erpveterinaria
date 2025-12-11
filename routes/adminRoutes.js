@@ -5,6 +5,35 @@ const bcrypt = require('bcryptjs');
 const { pool, generateNextId, handleDbError } = require('../config/db');
 const { authenticateToken } = require('../middleware/auth');
 
+// --- ESQUEMA DE BASE DE DATOS (PARA DISEÑADOR) ---
+router.get('/schema', authenticateToken, async (req, res) => {
+    try {
+        // Obtenemos tablas y columnas públicas relevantes
+        const query = `
+            SELECT table_name, column_name, data_type 
+            FROM information_schema.columns 
+            WHERE table_schema = 'public' 
+            AND table_name IN ('ventas', 'detalleventa', 'clientes', 'telefonos', 'inventario', 'proveedores', 'usuarios', 'caja', 'ingresos', 'egresos')
+            ORDER BY table_name, ordinal_position;
+        `;
+        const result = await pool.query(query);
+        
+        // Agrupar por tabla
+        const schema = result.rows.reduce((acc, row) => {
+            if (!acc[row.table_name]) {
+                acc[row.table_name] = [];
+            }
+            acc[row.table_name].push({
+                name: row.column_name,
+                type: row.data_type
+            });
+            return acc;
+        }, {});
+
+        res.json(schema);
+    } catch(e) { handleDbError(res, e); }
+});
+
 // --- USUARIOS ---
 router.get('/users', authenticateToken, async (req, res) => {
     try {
