@@ -59,11 +59,15 @@ router.get('/inventory/telefonos', authenticateToken, async (req, res) => {
 router.post('/inventory/telefonos', authenticateToken, async (req, res) => {
     try {
         const { imei1, imei2, marca, modelo, precioCompra, precioVenta, codProveedor, fecha, idubicacion } = req.body;
+        
+        // CORRECCION: Validar imei2 para evitar error NOT NULL
+        const safeImei2 = imei2 || ''; 
+
         const codigo = await generateNextId('telefonos', 'codigo', 'TEL');
         await pool.query(
             `INSERT INTO telefonos (codigo, imei1, imei2, marca, modelo, precioCompra, precioVenta, codProveedor, fecha, idubicacion, estado)
              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, 'Disponible')`,
-            [codigo, imei1, imei2, marca, modelo, precioCompra, precioVenta, codProveedor, fecha, idubicacion]
+            [codigo, imei1, safeImei2, marca, modelo, precioCompra, precioVenta, codProveedor, fecha, idubicacion]
         );
         res.status(201).json({ message: 'Teléfono registrado' });
     } catch(e) { handleDbError(res, e); }
@@ -72,10 +76,14 @@ router.post('/inventory/telefonos', authenticateToken, async (req, res) => {
 router.put('/inventory/telefonos/:id', authenticateToken, async (req, res) => {
     try {
         const { imei1, imei2, marca, modelo, precioCompra, precioVenta, codProveedor, fecha, idubicacion } = req.body;
+        
+        // CORRECCION: Validar imei2 para evitar error NOT NULL
+        const safeImei2 = imei2 || '';
+
         await pool.query(
             `UPDATE telefonos SET imei1=$1, imei2=$2, marca=$3, modelo=$4, precioCompra=$5, precioVenta=$6, codProveedor=$7, fecha=$8, idubicacion=$9 
              WHERE codigo=$10`,
-            [imei1, imei2, marca, modelo, precioCompra, precioVenta, codProveedor, fecha, idubicacion, req.params.id]
+            [imei1, safeImei2, marca, modelo, precioCompra, precioVenta, codProveedor, fecha, idubicacion, req.params.id]
         );
         res.json({ message: 'Teléfono actualizado' });
     } catch(e) { handleDbError(res, e); }
@@ -115,7 +123,7 @@ router.get('/inventory/stock', authenticateToken, async (req, res) => {
 router.post('/inventory/stock', authenticateToken, async (req, res) => {
     try {
         const { codAccesorio, cantidad, precioCompra, precioVenta, codProveedor, fecha, idubicacion, estado } = req.body;
-        // ACTUALIZADO: Prefijo INVT para inventario
+        // Prefijo INVT para inventario
         const codInventario = await generateNextId('inventario', 'codInventario', 'INVT');
         await pool.query(
             `INSERT INTO inventario (codInventario, codAccesorio, cantidad, precioCompra, precioVenta, codProveedor, fecha, idubicacion, estado)
@@ -159,7 +167,7 @@ router.get('/inventory/accesorios-master', authenticateToken, async (req, res) =
 router.post('/inventory/accesorios-master', authenticateToken, async (req, res) => {
     try {
         const { codCategoria, descripcion } = req.body;
-        // ACTUALIZADO: Prefijo ACCS para accesorios
+        // Prefijo ACCS para accesorios
         const id = await generateNextId('accesorios', 'codAccesorio', 'ACCS');
         await pool.query('INSERT INTO accesorios VALUES ($1, $2, $3)', [id, codCategoria, descripcion]);
         res.status(201).json({ message: 'Accesorio creado' });

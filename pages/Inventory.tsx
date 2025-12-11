@@ -215,54 +215,42 @@ const Inventory: React.FC = () => {
 
   const handlePrintBarcode = (code: string, description: string) => {
     try {
-      // 1. Configuración de Página: Vertical (Portrait)
-      // Formato: 80mm (ancho ticket estandar) x 100mm (alto/vertical)
-      // Esto asegura que sea "hacia abajo" como pediste
-      const doc = new jsPDF({ orientation: 'p', unit: 'mm', format: [80, 100] });
+      // CORRECCIÓN: Etiqueta Vertical con rotación de 90 grados para texto y código
+      // Formato: 50mm Ancho x 80mm Alto (Etiqueta estrecha y alta)
+      const doc = new jsPDF({ orientation: 'p', unit: 'mm', format: [50, 80] });
       const canvas = document.createElement('canvas');
       
-      // 2. Generación del Código de Barras
       JsBarcode(canvas, code, { 
           format: "CODE128", 
-          displayValue: false, // Quitamos el valor por defecto para ponerlo nosotros con mejor fuente
+          displayValue: true, // Mostramos el valor dentro del barcode, pero la orientación la dará la rotación
           margin: 0,
-          width: 3,    // Barras más anchas (antes 2.5) para que no se vea delgado
-          height: 150, // Barras MUCHO más altas (antes 100) para ocupar más espacio vertical
-          fontSize: 20
+          width: 2,    
+          height: 60,  // Altura del código (será el ancho al rotar)
+          fontSize: 16,
+          textMargin: 2
       });
       const barcodeImg = canvas.toDataURL("image/png");
 
-      const pageWidth = 80;
-      const centerX = pageWidth / 2;
-
-      // 3. Título del Producto (Arriba)
       doc.setFont("helvetica", "bold");
-      doc.setFontSize(11);
-      
-      const maxWidth = 70; // Dejando 5mm de margen a cada lado (80 - 10)
+      doc.setFontSize(10);
+
+      // --- 1. TEXTO DESCRIPTIVO (ROTADO 90 GRADOS) ---
+      // Alineado a la izquierda del papel (parte inferior de la rotación)
+      // Ajustamos para que empiece desde abajo (y=75) hacia arriba
+      const maxWidth = 75; // Alto disponible para el texto
       const splitTitle = doc.splitTextToSize(description.toUpperCase(), maxWidth);
       
-      // Posición Y inicial
-      let yPos = 10;
-      doc.text(splitTitle, centerX, yPos, { align: "center", baseline: "top" });
+      // x=10 (margen izquierdo), y=75 (base del texto)
+      doc.text(splitTitle, 10, 75, { angle: 90 });
 
-      // Calcular espacio usado por el título (aprox 5mm por línea)
-      const titleHeight = splitTitle.length * 5;
-
-      // 4. Imagen del Código de Barras
-      // Posición Y debajo del título
-      const barcodeY = yPos + titleHeight + 5; 
-      const barcodeWidth = 70;  // Ocupa casi todo el ancho disponible (70mm de 80mm)
-      const barcodeHeight = 40; // Altura visual considerable en el PDF
-
-      // Centramos la imagen: (80 - 70) / 2 = 5mm margen izquierdo
-      doc.addImage(barcodeImg, 'PNG', 5, barcodeY, barcodeWidth, barcodeHeight); 
-
-      // 5. Texto del Código (Abajo)
-      // Usamos fuente monoespaciada para que se vea técnico y claro
-      doc.setFont("courier", "bold"); 
-      doc.setFontSize(14);
-      doc.text(code, centerX, barcodeY + barcodeHeight + 8, { align: "center" });
+      // --- 2. CÓDIGO DE BARRAS (ROTADO 90 GRADOS) ---
+      // Para que aparezca a la derecha del texto
+      // addImage(img, format, x, y, w, h, alias, compression, rotation)
+      // Al rotar 90 grados, el punto (x,y) es la esquina inferior izquierda de la imagen rotada.
+      // x=22 (dejamos espacio para el texto), y=75 (misma base)
+      // w=60 (largo del código hacia arriba), h=20 (ancho del código/barras)
+      
+      doc.addImage(barcodeImg, 'PNG', 22, 75, 60, 18, undefined, 'FAST', 90);
 
       doc.save(`etiqueta_${code}.pdf`);
     } catch (err) {
@@ -569,9 +557,14 @@ const Inventory: React.FC = () => {
                       </div>
                       <div>
                         <label className="text-xs font-bold text-slate-500 uppercase">Ubicación</label>
+                        {/* CORRECCIÓN: Mostrar ubicación concatenada */}
                         <select className="w-full p-2.5 border rounded-lg mt-1" value={phoneForm.idubicacion || ''} onChange={e => setPhoneForm({...phoneForm, idubicacion: e.target.value})} required>
                             <option value="">Seleccionar...</option>
-                            {locations.map(l => <option key={l.idUbicacion} value={l.idUbicacion}>{l.nombre}</option>)}
+                            {locations.map(l => (
+                                <option key={l.idUbicacion} value={l.idUbicacion}>
+                                    {l.nombre} - Estante {l.estante} (Nivel {l.nivel})
+                                </option>
+                            ))}
                         </select>
                       </div>
                    </div>
@@ -609,9 +602,14 @@ const Inventory: React.FC = () => {
                       </div>
                       <div>
                          <label className="text-xs font-bold text-slate-500 uppercase">Ubicación</label>
+                         {/* CORRECCIÓN: Mostrar ubicación concatenada */}
                          <select className="w-full p-2.5 border rounded-lg mt-1" value={stockForm.idubicacion || ''} onChange={e => setStockForm({...stockForm, idubicacion: e.target.value})} required>
                             <option value="">Seleccionar...</option>
-                            {locations.map(l => <option key={l.idUbicacion} value={l.idUbicacion}>{l.nombre}</option>)}
+                            {locations.map(l => (
+                                <option key={l.idUbicacion} value={l.idUbicacion}>
+                                    {l.nombre} - Estante {l.estante} (Nivel {l.nivel})
+                                </option>
+                            ))}
                         </select>
                       </div>
                    </div>
