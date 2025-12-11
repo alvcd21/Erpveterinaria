@@ -38,7 +38,7 @@ async function updateArqueoBalance(idCaja, client = pool) {
     console.log(`--- INICIO RECALCULO SALDO CAJA: ${idCaja} ---`);
     try {
         // 1. Obtener datos de la sesión activa
-        // CORRECCION: Usar alias con comillas para garantizar que PG devuelva CamelCase
+        // CORRECCION IMPORTANTE: Usamos AS "nombre" con comillas para que Postgres respete las mayúsculas
         const arqRes = await client.query(
             `SELECT idArqueo as "idArqueo", montoInicial as "montoInicial", fechaApertura as "fechaApertura" 
              FROM arqueo 
@@ -47,24 +47,21 @@ async function updateArqueoBalance(idCaja, client = pool) {
         );
         
         if (arqRes.rows.length === 0) {
-            console.error(`[ERROR] No se pudo actualizar: La Caja ${idCaja} NO tiene una sesión activa (Arqueo cerrado o inexistente).`);
+            console.error(`[ERROR] No se pudo actualizar: La Caja ${idCaja} NO tiene una sesión activa.`);
             return; 
         }
 
-        // Ahora las propiedades coinciden exactamente gracias a los alias
         const { idArqueo, montoInicial, fechaApertura } = arqRes.rows[0];
-        console.log(`1. Sesión Activa Encontrada: ${idArqueo} | Inicio: ${montoInicial} | Fecha Apertura: ${fechaApertura}`);
+        console.log(`1. Sesión Activa: ${idArqueo} | Inicio: ${montoInicial} | Apertura: ${fechaApertura}`);
 
-        // 2. Calcular sumatorias. Usamos la fecha de apertura como punto de partida.
-        
-        // Calcular Ingresos
+        // 2. Calcular sumatorias (Ingresos)
         const ingRes = await client.query(`
             SELECT COALESCE(SUM(monto), 0) as total, COALESCE(SUM(costo), 0) as costo
             FROM ingresos 
             WHERE idCaja = $1 AND fechaCreacion >= $2
         `, [idCaja, fechaApertura]);
 
-        // Calcular Egresos
+        // 3. Calcular sumatorias (Egresos)
         const egrRes = await client.query(`
             SELECT COALESCE(SUM(monto), 0) as total
             FROM egresos 
@@ -76,7 +73,7 @@ async function updateArqueoBalance(idCaja, client = pool) {
         const totalEgresos = Number(egrRes.rows[0].total);
         const baseInicial = Number(montoInicial);
 
-        console.log(`2. Movimientos Calculados: Ingresos(+): ${totalIngresos} | Egresos(-): ${totalEgresos}`);
+        console.log(`2. Movimientos: Ingresos(+): ${totalIngresos} | Egresos(-): ${totalEgresos}`);
 
         // Fórmula: Caja Final = Lo que había al inicio + Lo que entró - Lo que salió
         const montoFinal = (baseInicial + totalIngresos) - totalEgresos;
@@ -96,8 +93,7 @@ async function updateArqueoBalance(idCaja, client = pool) {
             WHERE idArqueo = $6
         `, [totalIngresos, totalCostos, totalEgresos, montoFinal, ganancia, idArqueo]);
         
-        console.log(`[EXITO] Balance actualizado en BD para Arqueo ${idArqueo}. Nuevo Monto Final: ${montoFinal}`);
-        console.log(`-----------------------------------------------`);
+        console.log(`[EXITO] Balance actualizado correctamente para ${idArqueo}`);
         
     } catch (err) {
         console.error("[CRITICAL ERROR] Fallo actualizando balance:", err);

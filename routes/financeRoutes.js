@@ -35,14 +35,11 @@ router.get('/arqueo/active', authenticateToken, async (req, res) => {
 
     // 2. Validar cambio de día
     if (activeArqueo) {
-        // Usamos strings para comparar fechas locales y evitar problemas de UTC
         const dbDate = new Date(activeArqueo.fechaApertura).toISOString().split('T')[0];
-        // Ajuste manual de zona horaria local simple
         const now = new Date();
         const offset = now.getTimezoneOffset() * 60000;
         const todayLocal = new Date(now.getTime() - offset).toISOString().split('T')[0];
 
-        // Si la fecha de la base de datos es distinta a hoy localmente, cerrar caja
         if (dbDate !== todayLocal) {
              const idArqueo = activeArqueo.idArqueo;
              console.log(`Auto-closing expired box session ${idArqueo} (Date: ${dbDate} vs Today: ${todayLocal})`);
@@ -137,6 +134,8 @@ router.get('/ingresos', authenticateToken, async (req, res) => {
   const queryCaja = req.query.idCaja || idCaja;
   const fecha = req.query.fecha; 
 
+  console.log(`GET /ingresos - Caja: ${queryCaja}, Fecha Solicitada: ${fecha}`);
+
   try {
     let query = `
          SELECT idIngreso as "idIngreso", idCaja as "idCaja", descripcion, monto, costo, fechaCreacion as "fechaCreacion", estado 
@@ -146,25 +145,26 @@ router.get('/ingresos', authenticateToken, async (req, res) => {
     const params = [queryCaja];
 
     if (fecha) {
-        // CORRECCIÓN: Usar casting directo a date en PostgreSQL para comparar solo la parte de la fecha,
-        // o comparar string contra string. Usamos string para ser agnósticos a la hora del servidor.
+        // Usamos TO_CHAR para comparar la cadena de fecha exacta y evitar offset UTC
         query += ` AND TO_CHAR(fechaCreacion, 'YYYY-MM-DD') = $2`;
         params.push(fecha);
     } else {
-        // Fallback a CURRENT_DATE si no envían fecha (Cuidado con UTC servers)
-        query += ` AND fechaCreacion::date = CURRENT_DATE`;
+        // Si no hay fecha, traemos TODO (o puedes poner un límite)
+        // query += ` AND fechaCreacion::date = CURRENT_DATE`; 
+        // Si quieres por defecto HOY:
+        // query += ` AND TO_CHAR(fechaCreacion, 'YYYY-MM-DD') = TO_CHAR(NOW(), 'YYYY-MM-DD')`;
     }
 
     query += ` ORDER BY fechaCreacion DESC`;
 
     const result = await pool.query(query, params);
+    console.log(`Ingresos encontrados: ${result.rows.length}`);
     res.json(result.rows);
   } catch(err) { handleDbError(res, err); }
 });
 
 router.post('/ingresos', authenticateToken, async (req, res) => {
   try {
-    console.log("POST /ingresos recibido:", req.body);
     const { descripcion, monto, costo } = req.body;
     const { idCaja } = req.user;
     
@@ -177,8 +177,6 @@ router.post('/ingresos', authenticateToken, async (req, res) => {
         [idIngreso, idCaja, descripcion, monto, costo || 0]
     );
     
-    // Llamada explícita para actualizar arqueo
-    console.log("Ingreso insertado. Ejecutando updateArqueoBalance...");
     await updateArqueoBalance(idCaja, pool);
     
     res.status(201).json({ message: 'Ingreso registrado', idIngreso });
@@ -218,6 +216,8 @@ router.get('/egresos', authenticateToken, async (req, res) => {
   const queryCaja = req.query.idCaja || idCaja;
   const fecha = req.query.fecha;
 
+  console.log(`GET /egresos - Caja: ${queryCaja}, Fecha Solicitada: ${fecha}`);
+
   try {
     let query = `
          SELECT idegresos as "idegresos", idCaja as "idCaja", descripcion, monto, fechaCreacion as "fechaCreacion", estado 
@@ -229,20 +229,18 @@ router.get('/egresos', authenticateToken, async (req, res) => {
     if (fecha) {
         query += ` AND TO_CHAR(fechaCreacion, 'YYYY-MM-DD') = $2`;
         params.push(fecha);
-    } else {
-        query += ` AND fechaCreacion::date = CURRENT_DATE`;
-    }
+    } 
 
     query += ` ORDER BY fechaCreacion DESC`;
 
     const result = await pool.query(query, params);
+    console.log(`Egresos encontrados: ${result.rows.length}`);
     res.json(result.rows);
   } catch(err) { handleDbError(res, err); }
 });
 
 router.post('/egresos', authenticateToken, async (req, res) => {
   try {
-    console.log("POST /egresos recibido:", req.body);
     const { descripcion, monto } = req.body;
     const { idCaja } = req.user;
     
@@ -255,7 +253,6 @@ router.post('/egresos', authenticateToken, async (req, res) => {
         [idegresos, idCaja, descripcion, monto]
     );
     
-    console.log("Egreso insertado. Ejecutando updateArqueoBalance...");
     await updateArqueoBalance(idCaja, pool);
 
     res.status(201).json({ message: 'Egreso registrado', idegresos });
@@ -346,7 +343,6 @@ router.post('/saldos/buy', authenticateToken, async (req, res) => {
             [montoRecibido, red, today]);
         }
         
-        console.log("Saldo comprado. Actualizando Arqueo...");
         await updateArqueoBalance(idCaja, client);
         await client.query('COMMIT');
         res.status(201).json({ message: 'Saldo comprado registrado' });
@@ -381,7 +377,6 @@ router.post('/recargas', authenticateToken, async (req, res) => {
 
     await client.query(`UPDATE saldos SET saldoFinal = COALESCE(saldoFinal, saldoInicio) - $1 WHERE red = $2 AND fecha = $3`, [precioPagado, red, today]);
 
-    console.log("Recarga vendida. Actualizando Arqueo...");
     await updateArqueoBalance(idCaja, client);
 
     await client.query('COMMIT');
