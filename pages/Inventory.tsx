@@ -221,8 +221,8 @@ const Inventory: React.FC = () => {
           format: "CODE128", 
           displayValue: false, 
           margin: 0,
-          width: 2, // Más fino para mejor escalado en rotación
-          height: 100, // Altura original (será el largo vertical final)
+          width: 4, // AUMENTADO: Grosor de línea 4px para que se vean gruesas
+          height: 100, // Altura original
           fontSize: 0
       });
 
@@ -258,11 +258,12 @@ const Inventory: React.FC = () => {
       const barcodeImg = createRotatedBarcode(code);
       
       // Dimensiones visuales finales en el PDF
-      const BC_WIDTH_VISUAL = 8; // MUCHO MÁS FINO para evitar solapamientos (Ancho en PDF)
+      const BC_WIDTH_VISUAL = 16; // AUMENTADO: Ancho visual solicitado (14-16mm)
       const BC_HEIGHT_VISUAL = 60; // Largo del código (Alto en PDF)
       
-      // Centrar geométricamente en X=25
-      const bcX = (PAGE_WIDTH - BC_WIDTH_VISUAL) / 2; // (50 - 8) / 2 = 21
+      // Centrar geométricamente en X
+      // Con ancho 50 y barcode 16, el barcode ocupa de X=17 a X=33
+      const bcX = (PAGE_WIDTH - BC_WIDTH_VISUAL) / 2; // (50 - 16) / 2 = 17
       const bcY = (PAGE_HEIGHT - BC_HEIGHT_VISUAL) / 2; // (80 - 60) / 2 = 10
 
       // Insertar imagen vertical
@@ -272,20 +273,20 @@ const Inventory: React.FC = () => {
       // Y=40 es el centro vertical del papel.
       const cy = PAGE_HEIGHT / 2;
 
-      // A. TÍTULO (Marca/Modelo)
+      // A. TÍTULO (Marca/Modelo) - SOBRE el código de barras
       // Visualmente Arriba -> Izquierda del PDF
-      // Posición X=8 para asegurar margen izquierdo
-      doc.setFontSize(8);
+      // Posición X=5 para asegurar margen izquierdo y no chocar con el barcode que empieza en 17
+      doc.setFontSize(9); // Tamaño legible
       const maxWidth = PAGE_HEIGHT - 10; 
       const splitTitle = doc.splitTextToSize(description.toUpperCase(), maxWidth);
-      doc.text(splitTitle, 8, cy, { align: "center", angle: 90 });
+      doc.text(splitTitle, 5, cy, { align: "center", angle: 90 });
 
-      // B. SKU (Código Texto)
+      // B. SKU (Código Texto) - DEBAJO del código de barras
       // Visualmente Abajo -> Derecha del PDF
-      // Posición X=45. Con el código terminando en X=29 (21+8), hay 16mm de espacio libre.
-      doc.setFontSize(10);
+      // Posición X=42. El barcode termina en X=33, así que hay espacio suficiente.
+      doc.setFontSize(12); // Un poco más grande y claro
       doc.setFont("courier", "bold");
-      doc.text(code, 45, cy, { align: "center", angle: 90 });
+      doc.text(code, 42, cy, { align: "center", angle: 90 });
 
       doc.save(`etiqueta_${code}.pdf`);
     } catch (err) {
