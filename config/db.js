@@ -38,8 +38,11 @@ async function updateArqueoBalance(idCaja, client = pool) {
     console.log(`--- INICIO RECALCULO SALDO CAJA: ${idCaja} ---`);
     try {
         // 1. Obtener datos de la sesión activa
+        // CORRECCION: Usar alias con comillas para garantizar que PG devuelva CamelCase
         const arqRes = await client.query(
-            `SELECT idArqueo, montoInicial, fechaApertura FROM arqueo WHERE idCaja = $1 AND estado = 'Activo'`, 
+            `SELECT idArqueo as "idArqueo", montoInicial as "montoInicial", fechaApertura as "fechaApertura" 
+             FROM arqueo 
+             WHERE idCaja = $1 AND estado = 'Activo'`, 
             [idCaja]
         );
         
@@ -48,6 +51,7 @@ async function updateArqueoBalance(idCaja, client = pool) {
             return; 
         }
 
+        // Ahora las propiedades coinciden exactamente gracias a los alias
         const { idArqueo, montoInicial, fechaApertura } = arqRes.rows[0];
         console.log(`1. Sesión Activa Encontrada: ${idArqueo} | Inicio: ${montoInicial} | Fecha Apertura: ${fechaApertura}`);
 
