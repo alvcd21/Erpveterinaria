@@ -16,6 +16,7 @@ import AdminUsers from './pages/AdminUsers';
 import Packages from './pages/Packages';
 import AdminCashDashboard from './pages/AdminCashDashboard';
 import Reports from './pages/Reports';
+import LabelDesigner from './pages/LabelDesigner';
 
 const App: React.FC = () => {
   return (
@@ -47,6 +48,9 @@ const App: React.FC = () => {
                   } />
                   <Route path="/inventory" element={
                     <ProtectedRoute requiredPermission="VER_INVENTARIO"><Inventory /></ProtectedRoute>
+                  } />
+                  <Route path="/label-designer" element={
+                    <ProtectedRoute requiredPermission="VER_INVENTARIO"><LabelDesigner /></ProtectedRoute>
                   } />
                   
                   <Route path="/cash" element={

@@ -10,12 +10,11 @@ import {
   Proveedor 
 } from '../types';
 import { 
-  Search, Plus, Smartphone, Headphones, Box, MapPin, 
-  Tag, PlusCircle, X, RefreshCw, Printer, Edit2, Trash2, Calendar, Filter
+  Search, Smartphone, Headphones, Box, MapPin, 
+  Tag, PlusCircle, X, RefreshCw, Printer, Edit2, Trash2, Filter
 } from 'lucide-react';
 import Swal from 'sweetalert2';
-import { jsPDF } from 'jspdf';
-import JsBarcode from 'jsbarcode';
+import { useNavigate } from 'react-router-dom';
 
 type InventoryTab = 'TELEPHONES' | 'STOCK' | 'MASTER' | 'CATEGORIES' | 'LOCATIONS';
 
@@ -23,6 +22,7 @@ const Inventory: React.FC = () => {
   const [activeTab, setActiveTab] = useState<InventoryTab>('TELEPHONES');
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const navigate = useNavigate();
   
   // Filters
   const [phoneStateFilter, setPhoneStateFilter] = useState<string>('Disponible');
@@ -54,14 +54,12 @@ const Inventory: React.FC = () => {
 
   useEffect(() => {
     loadData();
-    // Cargar catálogos auxiliares al montar
     InventoryService.getCategorias().then(data => setCategories(data || []));
     InventoryService.getUbicaciones().then(data => setLocations(data || []));
     InventoryService.getProveedores().then(data => setProviders(data || []));
     InventoryService.getAccesoriosMaster().then(data => setMaster(data || []));
   }, [activeTab]);
 
-  // Extract brands when phones change
   useEffect(() => {
     if (phones.length > 0) {
       const brands = Array.from(new Set(phones.map(p => p.marca))).sort();
@@ -69,7 +67,6 @@ const Inventory: React.FC = () => {
     }
   }, [phones]);
 
-  // Filter models when Brand changes in form
   useEffect(() => {
     if (phoneForm.marca && !manualBrandMode) {
       const models = phones
@@ -110,18 +107,13 @@ const Inventory: React.FC = () => {
   const openNewModal = () => {
     setIsEditing(false);
     setCurrentId(null);
-    
-    // Reset Forms
     setPhoneForm({ fecha: new Date().toISOString().split('T')[0] });
     setStockForm({ fecha: new Date().toISOString().split('T')[0] });
     setMasterForm({});
     setCatForm({});
     setLocForm({});
-    
-    // Reset Logic UI
     setManualBrandMode(false);
     setManualModelMode(false);
-    
     setShowModal(true);
   };
 
@@ -130,7 +122,6 @@ const Inventory: React.FC = () => {
     setCurrentId(item.codigo || item.codInventario || item.codAccesorio || item.codCategoria || item.idUbicacion);
     
     if (activeTab === 'TELEPHONES') {
-      // Nota: item.codProveedor debe venir del backend con alias correcto
       setPhoneForm({ ...item, fecha: item.fecha ? item.fecha.split('T')[0] : '' });
       setManualBrandMode(true); 
       setManualModelMode(true);
@@ -147,7 +138,6 @@ const Inventory: React.FC = () => {
     e.preventDefault();
     try {
       if (activeTab === 'TELEPHONES') {
-        // Validaciones Teléfono
         if (!phoneForm.marca || phoneForm.marca === 'NEW') return Swal.fire('Error', 'Ingrese una marca válida', 'warning');
         if (!phoneForm.modelo || phoneForm.modelo === 'NEW') return Swal.fire('Error', 'Ingrese un modelo válido', 'warning');
         if (!phoneForm.imei1) return Swal.fire('Error', 'IMEI 1 es obligatorio', 'warning');
@@ -213,103 +203,13 @@ const Inventory: React.FC = () => {
     }
   };
 
-  // Función Auxiliar: Rotar imagen en canvas
-  const createRotatedBarcode = (code: string): string => {
-      const canvas = document.createElement('canvas');
-      // Generar primero horizontalmente
-      JsBarcode(canvas, code, { 
-          format: "CODE128", 
-          displayValue: false, 
-          margin: 0,
-          width: 4, // GROSOR DE LINEAS (Aumentar si se quiere más bold en la imagen fuente)
-          height: 120, 
-          fontSize: 0
+  const goToDesigner = (code: string, description: string) => {
+      navigate('/label-designer', {
+          state: {
+              itemCode: code,
+              itemDesc: description
+          }
       });
-
-      const w = canvas.width;
-      const h = canvas.height;
-
-      // Crear canvas destino (invertido)
-      const rotatedCanvas = document.createElement('canvas');
-      rotatedCanvas.width = h;
-      rotatedCanvas.height = w;
-      const ctx = rotatedCanvas.getContext('2d');
-      
-      if (ctx) {
-          ctx.translate(h / 2, w / 2);
-          ctx.rotate(90 * Math.PI / 180); // Rotar 90 grados
-          ctx.drawImage(canvas, -w / 2, -h / 2);
-      }
-      
-      return rotatedCanvas.toDataURL("image/png");
-  };
-
-  // =====================================================================
-  //  MODIFICAR AQUÍ: LÓGICA DE IMPRESIÓN Y COORDENADAS
-  // =====================================================================
-  const handlePrintBarcode = (code: string, description: string) => {
-    try {
-      // 1. CONFIGURACIÓN DEL PAPEL
-      const PAGE_WIDTH = 50;  
-      const PAGE_HEIGHT = 80; 
-      // CENTRO HORIZONTAL (Para alinear a la izquierda/derecha de la etiqueta visual)
-      const CENTER_Y = PAGE_HEIGHT / 2; 
-
-      // 2. CONFIGURACIÓN VISUAL DEL CÓDIGO DE BARRAS
-      const BARCODE_THICKNESS = 25; // Grosor visual del bloque de barras (ancho en PDF)
-      const BARCODE_LENGTH = 65;    // Largo visual de las barras (alto en PDF)
-
-      // 3. POSICIONES VERTICALES (Arriba/Abajo)
-      // *IMPORTANTE*: Al rotar 90°, el eje X del PDF controla la posición VERTICAL en la etiqueta física.
-      // - Valor PEQUEÑO (0-10) = Parte SUPERIOR de la etiqueta.
-      // - Valor GRANDE (40-50) = Parte INFERIOR de la etiqueta.
-
-      // -> TÍTULO (Marca/Modelo)
-      // Modifica este valor para subir o bajar el título.
-      // 4 = Muy arriba, 8 = Más abajo.
-      const POS_X_TITULO = 28; 
-
-      // -> CÓDIGO DE BARRAS (Imagen)
-      // Se calcula para que esté centrado entre el título y el SKU.
-      // Puedes sumar o restar números aquí para mover todo el bloque de barras arriba/abajo.
-      const POS_X_BARCODE = (PAGE_WIDTH - BARCODE_THICKNESS) / 1.8; // Aprox 19mm
-
-      // -> SKU (Texto numérico abajo)
-      // Modifica este valor para subir o bajar el código numérico al pie.
-      // 42 = Más arriba, 48 = Muy al borde inferior.
-      const POS_X_SKU = 60; 
-
-      // INICIO PDF
-      const doc = new jsPDF({ orientation: 'p', unit: 'mm', format: [PAGE_WIDTH, PAGE_HEIGHT] });
-      doc.setFont("helvetica", "bold");
-      doc.setTextColor(0, 0, 0);
-
-      // A. GENERAR Y COLOCAR IMAGEN BARRAS
-      // addImage(img, format, X, Y, W, H)
-      // Aquí Y se usa para centrar horizontalmente el largo del código.
-      const barcodeImg = createRotatedBarcode(code);
-      doc.addImage(barcodeImg, 'PNG', POS_X_BARCODE, (PAGE_HEIGHT - BARCODE_LENGTH) / 2, BARCODE_THICKNESS, BARCODE_LENGTH);
-
-      // B. COLOCAR TÍTULO (ROTADO 90 GRADOS)
-      doc.setFontSize(12); 
-      const maxTextWidth = PAGE_HEIGHT - 10; 
-      const splitTitle = doc.splitTextToSize(description.toUpperCase(), maxTextWidth);
-      
-      // text(texto, X, Y, opciones)
-      // - X: Controla posición vertical visual (Arriba/Abajo)
-      // - Y: Controla posición horizontal visual (Izquierda/Derecha)
-      doc.text(splitTitle, POS_X_TITULO, CENTER_Y, { align: "center", angle: 90 });
-
-      // C. COLOCAR SKU (ROTADO 90 GRADOS)
-      doc.setFontSize(14); 
-      doc.setFont("courier", "bold");
-      doc.text(code, POS_X_SKU, CENTER_Y, { align: "center", angle: 90 });
-
-      doc.save(`etiqueta_${code}.pdf`);
-    } catch (err) {
-      console.error(err);
-      Swal.fire('Error', 'No se pudo generar el código de barras', 'error');
-    }
   };
 
   const filteredPhones = phones.filter(p => {
@@ -327,13 +227,15 @@ const Inventory: React.FC = () => {
             <h2 className="text-2xl font-bold text-slate-800">Gestión de Inventario</h2>
             <p className="text-slate-500 text-sm">Administra teléfonos, accesorios y configuraciones</p>
           </div>
-          <button 
-             onClick={openNewModal}
-             className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-lg flex items-center gap-2 font-bold shadow-lg shadow-indigo-600/20 transition-all w-full md:w-auto justify-center"
-          >
-            <PlusCircle size={20} />
-            <span>Nuevo</span>
-          </button>
+          <div className="flex gap-2 w-full md:w-auto">
+            <button 
+                onClick={openNewModal}
+                className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-lg flex items-center gap-2 font-bold shadow-lg shadow-indigo-600/20 transition-all flex-1 justify-center md:flex-initial"
+            >
+                <PlusCircle size={20} />
+                <span>Nuevo</span>
+            </button>
+          </div>
         </div>
 
         <div className="bg-white rounded-t-2xl border-b border-slate-200 px-2 pt-2 flex overflow-x-auto no-scrollbar">
@@ -446,7 +348,7 @@ const Inventory: React.FC = () => {
                       <span className={`text-[10px] px-2 py-1 rounded font-bold uppercase ${p.estado === 'Disponible' ? 'bg-green-100 text-green-700' : 'bg-slate-200 text-slate-600'}`}>{p.estado}</span>
                   </td>
                   <td className="p-4 text-center flex items-center justify-center gap-2">
-                    <button onClick={() => handlePrintBarcode(p.codigo, `${p.marca} ${p.modelo}`)} className="text-slate-500 hover:text-indigo-600" title="Imprimir"><Printer size={16} /></button>
+                    <button onClick={() => goToDesigner(p.codigo, `${p.marca} ${p.modelo}`)} className="text-slate-500 hover:text-indigo-600" title="Diseñar e Imprimir"><Printer size={16} /></button>
                     <button onClick={() => openEditModal(p)} className="text-blue-500 hover:bg-blue-50 p-1.5 rounded"><Edit2 size={16}/></button>
                     <button onClick={() => handleDelete(p.codigo)} className="text-red-500 hover:bg-red-50 p-1.5 rounded"><Trash2 size={16}/></button>
                   </td>
@@ -464,8 +366,7 @@ const Inventory: React.FC = () => {
                   <td className="p-4 text-sm text-right font-bold text-emerald-600">L. {Number(s.precioVenta).toFixed(2)}</td>
                   <td className="p-4 text-xs text-slate-500 truncate max-w-[150px]">{s.nombreUbicacion || s.idubicacion}</td>
                   <td className="p-4 text-center flex items-center justify-center gap-2">
-                    {/* Imprimir: Concatenación correcta Categoría + Descripción */}
-                    <button onClick={() => handlePrintBarcode(s.codInventario, `${s.categoriaAccesorio || ''} ${s.descripcionAccesorio || ''}`)} className="text-slate-500 hover:text-indigo-600" title="Imprimir"><Printer size={16} /></button>
+                    <button onClick={() => goToDesigner(s.codInventario, `${s.categoriaAccesorio || ''} ${s.descripcionAccesorio || ''}`)} className="text-slate-500 hover:text-indigo-600" title="Diseñar e Imprimir"><Printer size={16} /></button>
                     <button onClick={() => openEditModal(s)} className="text-blue-500 hover:bg-blue-50 p-1.5 rounded"><Edit2 size={16}/></button>
                     <button onClick={() => handleDelete(s.codInventario)} className="text-red-500 hover:bg-red-50 p-1.5 rounded"><Trash2 size={16}/></button>
                   </td>
@@ -478,14 +379,13 @@ const Inventory: React.FC = () => {
                   <td className="p-4 text-xs text-slate-500">{m.nombreCategoria || m.codCategoria}</td>
                   <td className="p-4 text-sm font-medium text-slate-800">{m.descripcion}</td>
                   <td className="p-4 text-center flex items-center justify-center gap-2">
-                    <button onClick={() => handlePrintBarcode(m.codAccesorio, `${m.nombreCategoria || ''} ${m.descripcion}`)} className="text-slate-500 hover:text-indigo-600" title="Imprimir"><Printer size={16} /></button>
+                    <button onClick={() => goToDesigner(m.codAccesorio, `${m.nombreCategoria || ''} ${m.descripcion}`)} className="text-slate-500 hover:text-indigo-600" title="Diseñar e Imprimir"><Printer size={16} /></button>
                     <button onClick={() => openEditModal(m)} className="text-blue-500 hover:bg-blue-50 p-1.5 rounded"><Edit2 size={16}/></button>
                     <button onClick={() => handleDelete(m.codAccesorio)} className="text-red-500 hover:bg-red-50 p-1.5 rounded"><Trash2 size={16}/></button>
                   </td>
                 </tr>
               ))}
               
-              {/* Categories & Locations similar to previous code... */}
               {activeTab === 'CATEGORIES' && categories.map(c => (
                 <tr key={c.codCategoria} className="hover:bg-slate-50">
                    <td className="p-4 text-xs font-mono text-slate-500">{c.codCategoria}</td>
@@ -512,7 +412,6 @@ const Inventory: React.FC = () => {
         </div>
       </div>
 
-      {/* MODAL UNIVERSAL */}
       {showModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl p-6 animate-fade-in max-h-[90vh] overflow-y-auto">
@@ -538,7 +437,6 @@ const Inventory: React.FC = () => {
                      </div>
                    </div>
 
-                   {/* Marca Selector inteligente */}
                    <div>
                       <label className="text-xs font-bold text-slate-500 uppercase">Marca</label>
                       {!manualBrandMode ? (
@@ -567,7 +465,6 @@ const Inventory: React.FC = () => {
                       )}
                    </div>
 
-                   {/* Modelo Selector inteligente (depende de marca) */}
                    <div>
                       <label className="text-xs font-bold text-slate-500 uppercase">Modelo</label>
                       {!manualModelMode ? (
