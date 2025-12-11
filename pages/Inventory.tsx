@@ -221,8 +221,8 @@ const Inventory: React.FC = () => {
           format: "CODE128", 
           displayValue: false, 
           margin: 0,
-          width: 4, // AUMENTADO: Grosor de línea 4px para que se vean gruesas
-          height: 100, // Altura original
+          width: 4, // GROSOR DE LINEAS (Aumentar si se quiere más bold en la imagen fuente)
+          height: 120, 
           fontSize: 0
       });
 
@@ -244,49 +244,62 @@ const Inventory: React.FC = () => {
       return rotatedCanvas.toDataURL("image/png");
   };
 
+  // =====================================================================
+  //  MODIFICAR AQUÍ: LÓGICA DE IMPRESIÓN Y COORDENADAS
+  // =====================================================================
   const handlePrintBarcode = (code: string, description: string) => {
     try {
-      // --- CONFIGURACIÓN ETIQUETA ---
+      // 1. CONFIGURACIÓN DEL PAPEL (50mm ancho x 80mm alto)
       const PAGE_WIDTH = 50;  
       const PAGE_HEIGHT = 80; 
-      
+      const CENTER_Y = PAGE_HEIGHT / 2; // 40mm (Centro vertical del papel)
+
+      // 2. CONFIGURACIÓN VISUAL DEL CÓDIGO DE BARRAS
+      // El grosor visual determina cuánto espacio ocupa a lo ancho del papel
+      const BARCODE_VISUAL_WIDTH = 10; // 10mm de grosor total (MÁS FINO VISUALMENTE PARA DEJAR ESPACIO)
+      const BARCODE_VISUAL_HEIGHT = 65; // 65mm de largo (casi todo el alto del papel)
+
+      // 3. POSICIONES X (Horizontal en el papel de 50mm)
+      // Recuerda: Al rotar texto 90°, se lee verticalmente.
+      // X=0 es la izquierda del papel (Arriba de la etiqueta final)
+      // X=50 es la derecha del papel (Abajo de la etiqueta final)
+
+      // -> POSICIÓN TÍTULO (Marca/Modelo)
+      // Si no lo ves, AUMENTA este valor (ej. de 5 a 8) para alejarlo del borde izquierdo.
+      // Si choca con el código, DISMINUYE el valor.
+      const POS_X_TITULO = 6; 
+
+      // -> POSICIÓN CÓDIGO BARRAS
+      // Calculamos para centrarlo aproximadamente
+      const POS_X_BARCODE = (PAGE_WIDTH - BARCODE_VISUAL_WIDTH) / 2; // (50 - 10)/2 = 20
+
+      // -> POSICIÓN SKU (Texto del código)
+      // Si sale oculto, AUMENTA este valor (ej. de 42 a 45) para moverlo hacia la derecha (abajo de etiqueta).
+      const POS_X_SKU = 44; 
+
+      // INICIO PDF
       const doc = new jsPDF({ orientation: 'p', unit: 'mm', format: [PAGE_WIDTH, PAGE_HEIGHT] });
       doc.setFont("helvetica", "bold");
       doc.setTextColor(0, 0, 0);
 
-      // 1. GENERAR CÓDIGO DE BARRAS VERTICAL (Rotado previamente en canvas)
+      // A. GENERAR Y COLOCAR IMAGEN BARRAS
       const barcodeImg = createRotatedBarcode(code);
+      doc.addImage(barcodeImg, 'PNG', POS_X_BARCODE, (PAGE_HEIGHT - BARCODE_VISUAL_HEIGHT) / 2, BARCODE_VISUAL_WIDTH, BARCODE_VISUAL_HEIGHT);
+
+      // B. COLOCAR TÍTULO (ROTADO 90 GRADOS)
+      doc.setFontSize(8); // Tamaño letra título
+      // Dividir texto si es muy largo para que no se salga del alto del papel (80mm)
+      const maxTextWidth = PAGE_HEIGHT - 10; 
+      const splitTitle = doc.splitTextToSize(description.toUpperCase(), maxTextWidth);
       
-      // Dimensiones visuales finales en el PDF
-      const BC_WIDTH_VISUAL = 16; // AUMENTADO: Ancho visual solicitado (14-16mm)
-      const BC_HEIGHT_VISUAL = 60; // Largo del código (Alto en PDF)
-      
-      // Centrar geométricamente en X
-      // Con ancho 50 y barcode 16, el barcode ocupa de X=17 a X=33
-      const bcX = (PAGE_WIDTH - BC_WIDTH_VISUAL) / 2; // (50 - 16) / 2 = 17
-      const bcY = (PAGE_HEIGHT - BC_HEIGHT_VISUAL) / 2; // (80 - 60) / 2 = 10
+      // text(texto, x, y, opciones)
+      // align: 'center' usa 'y' como eje de rotación central.
+      doc.text(splitTitle, POS_X_TITULO, CENTER_Y, { align: "center", angle: 90 });
 
-      // Insertar imagen vertical
-      doc.addImage(barcodeImg, 'PNG', bcX, bcY, BC_WIDTH_VISUAL, BC_HEIGHT_VISUAL);
-
-      // 2. TEXTOS ROTADOS (90 GRADOS)
-      // Y=40 es el centro vertical del papel.
-      const cy = PAGE_HEIGHT / 2;
-
-      // A. TÍTULO (Marca/Modelo) - SOBRE el código de barras
-      // Visualmente Arriba -> Izquierda del PDF
-      // Posición X=5 para asegurar margen izquierdo y no chocar con el barcode que empieza en 17
-      doc.setFontSize(9); // Tamaño legible
-      const maxWidth = PAGE_HEIGHT - 10; 
-      const splitTitle = doc.splitTextToSize(description.toUpperCase(), maxWidth);
-      doc.text(splitTitle, 5, cy, { align: "center", angle: 90 });
-
-      // B. SKU (Código Texto) - DEBAJO del código de barras
-      // Visualmente Abajo -> Derecha del PDF
-      // Posición X=42. El barcode termina en X=33, así que hay espacio suficiente.
-      doc.setFontSize(12); // Un poco más grande y claro
+      // C. COLOCAR SKU (ROTADO 90 GRADOS)
+      doc.setFontSize(11); // Tamaño letra código SKU
       doc.setFont("courier", "bold");
-      doc.text(code, 42, cy, { align: "center", angle: 90 });
+      doc.text(code, POS_X_SKU, CENTER_Y, { align: "center", angle: 90 });
 
       doc.save(`etiqueta_${code}.pdf`);
     } catch (err) {
