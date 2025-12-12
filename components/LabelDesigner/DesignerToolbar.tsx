@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { Type, ScanLine, Shapes, Image as ImageIcon, Table as TableIcon, FileCog, QrCode, Layers } from 'lucide-react';
+import { Type, ScanLine, Shapes, Image as ImageIcon, Table as TableIcon, FileCog, QrCode, Layers, Hand, MousePointer2 } from 'lucide-react';
 import { LabelTemplate } from '../../types';
 
 interface ToolButtonProps {
@@ -28,15 +28,22 @@ interface DesignerToolbarProps {
     onConfigClick: () => void;
     onLayersClick: () => void;
     activePanel: string;
+    tool: 'SELECT' | 'HAND';
+    setTool: (t: 'SELECT' | 'HAND') => void;
 }
 
 const DesignerToolbar: React.FC<DesignerToolbarProps> = ({ 
-    template, addElement, onImageUpload, setShowShapeModal, onConfigClick, onLayersClick, activePanel 
+    template, addElement, onImageUpload, setShowShapeModal, onConfigClick, onLayersClick, activePanel, tool, setTool
 }) => {
     const fileInputRef = React.useRef<HTMLInputElement>(null);
 
     return (
         <aside className="hidden md:flex w-20 bg-white border-r flex-col items-center py-6 gap-4 z-20 shadow-sm overflow-y-auto">
+            <div className="flex flex-col gap-2 w-full px-2 border-b border-slate-100 pb-4">
+                <ToolButton icon={<MousePointer2 size={20}/>} label="Cursor" onClick={() => setTool('SELECT')} active={tool === 'SELECT'} />
+                <ToolButton icon={<Hand size={20}/>} label="Mover" onClick={() => setTool('HAND')} active={tool === 'HAND'} />
+            </div>
+
             <div className="flex flex-col gap-4 w-full px-2">
                 <ToolButton icon={<Type size={20}/>} label="Texto" onClick={() => addElement('TEXT')} />
                 <ToolButton icon={<ScanLine size={20}/>} label="Código" onClick={() => addElement('BARCODE')} />

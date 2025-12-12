@@ -3,8 +3,9 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   ArrowLeft, Save, Undo2, Redo2, Plus, Star, FileCog, Type, ScanLine, Shapes, Settings, ChevronDown, MoreVertical, X, Square, Circle, Minus,
-  Layers, Search, Database, Table, ChevronRight, Key, GripVertical, FileText, Tag, ChevronUp, Image as ImageIcon
+  Layers, Search, Database, Table, ChevronRight, Key, GripVertical, FileText, Tag, ChevronUp, Image as ImageIcon, Hand, Trash2, MousePointer2
 } from 'lucide-react';
+import Swal from 'sweetalert2';
 import { LabelService } from '../services/api';
 import { LabelTemplate } from '../types';
 import { useLabelDesigner } from '../hooks/useLabelDesigner';
@@ -80,6 +81,7 @@ const LabelDesigner: React.FC = () => {
       template, setTemplate,
       selectedId, setSelectedId,
       zoom, setZoom,
+      tool, setTool, pan, setPan,
       history, historyIndex,
       dbSchema,
       loadTemplate, createNew,
@@ -124,6 +126,29 @@ const LabelDesigner: React.FC = () => {
       setView('DESIGNER');
   };
 
+  const handleDeleteTemplate = async (e: React.MouseEvent, id: string) => {
+      e.stopPropagation(); // Prevent opening the design
+      const result = await Swal.fire({
+          title: '¿Eliminar diseño?',
+          text: 'Esta acción no se puede deshacer',
+          icon: 'warning',
+          showCancelButton: true,
+          confirmButtonText: 'Sí, eliminar',
+          confirmButtonColor: '#d33',
+          cancelButtonText: 'Cancelar'
+      });
+
+      if (result.isConfirmed) {
+          try {
+              await LabelService.delete(id);
+              Swal.fire('Eliminado', '', 'success');
+              loadSavedList();
+          } catch (err: any) {
+              Swal.fire('Error', err.message, 'error');
+          }
+      }
+  };
+
   const handleSave = async () => {
       const success = await saveTemplate();
       if(success) loadSavedList();
@@ -147,7 +172,7 @@ const LabelDesigner: React.FC = () => {
     dragItem.current = null; dragOverItem.current = null;
   };
 
-  // Validación
+  // Validación Reactiva
   const hasName = newDesignName.trim().length > 0;
   const hasType = selectedType !== null;
   const isFormValid = hasName && hasType;
@@ -183,9 +208,23 @@ const LabelDesigner: React.FC = () => {
                                           <div className="h-1 bg-slate-200 w-full mt-auto"/>
                                       </div>
                                   )}
-                                  <div className="absolute top-2 right-2">
-                                      {t.isDefault && <Star className="text-amber-400 fill-amber-400" size={16}/>}
+                                  
+                                  {/* Delete Button (Hover) */}
+                                  <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                      <button 
+                                        onClick={(e) => handleDeleteTemplate(e, t.id)}
+                                        className="p-2 bg-red-500 hover:bg-red-600 text-white rounded-full shadow-md transition-all hover:scale-110"
+                                        title="Eliminar"
+                                      >
+                                          <Trash2 size={14}/>
+                                      </button>
                                   </div>
+                                  
+                                  {t.isDefault && (
+                                      <div className="absolute top-2 left-2">
+                                          <Star className="text-amber-400 fill-amber-400" size={16}/>
+                                      </div>
+                                  )}
                               </div>
                               <div className="p-4 border-t border-slate-100">
                                   <h3 className="font-bold text-slate-700 group-hover:text-indigo-600 truncate">{t.name}</h3>
@@ -201,12 +240,11 @@ const LabelDesigner: React.FC = () => {
                   </div>
               </div>
 
-              {/* CREATE MODAL */}
+              {/* CREATE MODAL (Mismo código anterior) */}
               {showCreateModal && (
                   <div className="fixed inset-0 bg-slate-900/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
                       <div className="bg-white rounded-2xl w-full max-w-md p-6 shadow-2xl animate-fade-in">
                           <h3 className="text-xl font-bold text-slate-800 mb-4">Crear Nuevo Diseño</h3>
-                          
                           <div className="mb-6">
                               <input 
                                   className={`w-full p-3 border rounded-xl outline-none focus:ring-2 transition-all ${(!hasName && newDesignName !== '') ? 'border-red-300 focus:ring-red-200' : 'border-slate-200 focus:ring-indigo-500'}`} 
@@ -217,11 +255,10 @@ const LabelDesigner: React.FC = () => {
                               />
                               {!hasName && newDesignName === '' && <p className="text-xs text-slate-400 mt-1 ml-1">* Requerido</p>}
                           </div>
-
                           <div className="grid grid-cols-2 gap-4 mb-6">
                               <button 
                                   onClick={() => setSelectedType('LABEL')} 
-                                  className={`p-4 border-2 rounded-xl transition-all group text-left ${selectedType === 'LABEL' ? 'border-indigo-600 bg-indigo-50' : 'border-slate-100 hover:border-indigo-300'}`}
+                                  className={`p-4 border-2 rounded-xl transition-all group text-left ${selectedType === 'LABEL' ? 'border-indigo-600 bg-indigo-50 shadow-md ring-2 ring-indigo-500/50' : 'border-slate-100 hover:border-indigo-300'}`}
                               >
                                   <Tag className={`${selectedType === 'LABEL' ? 'text-indigo-600' : 'text-slate-400'} mb-2`} size={28}/>
                                   <h4 className="font-bold text-slate-800">Etiqueta</h4>
@@ -229,22 +266,20 @@ const LabelDesigner: React.FC = () => {
                               </button>
                               <button 
                                   onClick={() => setSelectedType('DOCUMENT')} 
-                                  className={`p-4 border-2 rounded-xl transition-all group text-left ${selectedType === 'DOCUMENT' ? 'border-purple-600 bg-purple-50' : 'border-slate-100 hover:border-purple-300'}`}
+                                  className={`p-4 border-2 rounded-xl transition-all group text-left ${selectedType === 'DOCUMENT' ? 'border-purple-600 bg-purple-50 shadow-md ring-2 ring-purple-500/50' : 'border-slate-100 hover:border-purple-300'}`}
                               >
                                   <FileText className={`${selectedType === 'DOCUMENT' ? 'text-purple-600' : 'text-slate-400'} mb-2`} size={28}/>
                                   <h4 className="font-bold text-slate-800">Reporte</h4>
                                   <p className="text-xs text-slate-500 mt-1">Facturas, informes A4 (cm).</p>
                               </button>
                           </div>
-                          
                           <button 
                               onClick={initCreation} 
                               disabled={!isFormValid}
-                              className={`w-full py-3 font-bold rounded-xl shadow-lg transition-all mb-3 ${!isFormValid ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-indigo-600 text-white hover:bg-indigo-700'}`}
+                              className={`w-full py-3 font-bold rounded-xl shadow-lg transition-all mb-3 ${!isFormValid ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-indigo-600 text-white hover:bg-indigo-700 hover:scale-[1.02]'}`}
                           >
                               {isFormValid ? 'CREAR DISEÑO' : (!hasName ? 'Escriba un nombre' : 'Seleccione Tipo')}
                           </button>
-                          
                           <button onClick={() => setShowCreateModal(false)} className="w-full py-3 text-slate-500 font-bold hover:bg-slate-100 rounded-xl">Cancelar</button>
                       </div>
                   </div>
@@ -299,6 +334,8 @@ const LabelDesigner: React.FC = () => {
                 onConfigClick={() => { setSelectedId(null); setActivePanel('PROPERTIES'); }}
                 onLayersClick={() => { setActivePanel('LAYERS'); }}
                 activePanel={activePanel}
+                tool={tool}
+                setTool={setTool}
             />
 
             <DesignerCanvas 
@@ -308,6 +345,8 @@ const LabelDesigner: React.FC = () => {
                 setZoom={setZoom}
                 setSelectedId={(id) => { setSelectedId(id); setActivePanel('PROPERTIES'); if(id && window.innerWidth < 768) setIsMobilePropOpen(true); }}
                 onPointerDown={handlePointerDown}
+                tool={tool}
+                pan={pan}
             />
 
             <aside className="hidden md:flex w-80 bg-white border-l z-20 shadow-xl flex-col">
@@ -348,8 +387,14 @@ const LabelDesigner: React.FC = () => {
         </div>
 
         {/* --- MOBILE UI --- */}
-        {/* Same as before */}
+        
+        {/* MOBILE BOTTOM TOOLBAR */}
         <div className="md:hidden bg-white border-t px-4 py-3 flex justify-between items-center z-40 pb-safe shrink-0">
+            {/* Mobile Tool Switcher */}
+            <button onClick={() => setTool(tool === 'SELECT' ? 'HAND' : 'SELECT')} className={`p-3 rounded-lg ${tool === 'HAND' ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-50 text-slate-600'}`}>
+                {tool === 'HAND' ? <Hand size={20}/> : <MousePointer2 size={20}/>}
+            </button>
+            <div className="w-px h-8 bg-slate-200 mx-1"/>
             <button onClick={() => addElement('TEXT')} className="p-3 bg-slate-50 rounded-lg text-slate-600"><Type size={20}/></button>
             <button onClick={() => addElement('BARCODE')} className="p-3 bg-slate-50 rounded-lg text-slate-600"><ScanLine size={20}/></button>
             <button onClick={() => setShowShapeModal(true)} className="p-3 bg-slate-50 rounded-lg text-slate-600"><Shapes size={20}/></button>
@@ -366,7 +411,7 @@ const LabelDesigner: React.FC = () => {
             </button>
         </div>
 
-        {/* MOBILE SLIDE-UP PANEL */}
+        {/* MOBILE SLIDE-UP PANEL (Mismo código anterior) */}
         <div className={`md:hidden fixed inset-x-0 bottom-0 bg-white rounded-t-3xl shadow-[0_-10px_40px_rgba(0,0,0,0.2)] z-50 transition-transform duration-300 transform flex flex-col max-h-[70vh] border-t border-slate-100 ${isMobilePropOpen ? 'translate-y-0' : 'translate-y-full'}`}>
             <div className="flex justify-between items-center px-4 pt-3 pb-2 border-b border-slate-50 cursor-pointer" onClick={() => setIsMobilePropOpen(false)}>
                 <div className="w-8"/> 
@@ -400,8 +445,7 @@ const LabelDesigner: React.FC = () => {
             </div>
         </div>
 
-        {/* --- MODALS --- */}
-        {/* Same as before */}
+        {/* --- MODALS (Mismo código anterior) --- */}
         {showVarModal && (
             <div className="fixed inset-0 bg-slate-900/60 z-[60] flex items-center justify-center p-4 backdrop-blur-sm animate-fade-in">
                 <div className="bg-white rounded-2xl w-full max-w-lg h-[80vh] shadow-2xl flex flex-col overflow-hidden">

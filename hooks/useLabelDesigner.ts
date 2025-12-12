@@ -38,17 +38,22 @@ export const useLabelDesigner = () => {
     const [dbSchema, setDbSchema] = useState<Record<string, SchemaTable>>({});
     const [clipboard, setClipboard] = useState<LabelElement | null>(null);
     
+    // Tools & Navigation
+    const [tool, setTool] = useState<'SELECT' | 'HAND'>('SELECT');
+    const [pan, setPan] = useState({ x: 0, y: 0 });
+    
     // Derived State for Unit Scale
     const scaleFactor = template.type === 'DOCUMENT' ? CM_TO_PX : MM_TO_PX;
     const unitLabel = template.type === 'DOCUMENT' ? 'cm' : 'mm';
 
     // Interaction State
     const [interaction, setInteraction] = useState<{
-        mode: 'NONE' | 'MOVE' | 'RESIZE' | 'ROTATE';
+        mode: 'NONE' | 'MOVE' | 'RESIZE' | 'ROTATE' | 'PANNING';
         startPos: { x: number, y: number };
         elementStart: { x: number, y: number, w: number, h: number, r: number };
+        panStart: { x: number, y: number };
         handle?: string; 
-    }>({ mode: 'NONE', startPos: {x:0, y:0}, elementStart: {x:0, y:0, w:0, h:0, r:0} });
+    }>({ mode: 'NONE', startPos: {x:0, y:0}, elementStart: {x:0, y:0, w:0, h:0, r:0}, panStart: {x:0, y:0} });
 
     // --- INITIALIZATION ---
     const loadTemplate = (tpl: LabelTemplate) => {
@@ -57,6 +62,8 @@ export const useLabelDesigner = () => {
         setHistoryIndex(-1);
         // Adjust zoom based on document type for better UX
         setZoom(tpl.type === 'DOCUMENT' ? 0.8 : 2.5);
+        setPan({ x: 0, y: 0 });
+        setTool('SELECT');
     };
 
     const createNew = (type: 'LABEL' | 'DOCUMENT', name: string) => {
@@ -73,6 +80,8 @@ export const useLabelDesigner = () => {
         setHistory([]);
         setHistoryIndex(-1);
         setZoom(type === 'DOCUMENT' ? 0.8 : 2.5);
+        setPan({ x: 0, y: 0 });
+        setTool('SELECT');
     };
 
     const fetchDbSchema = async () => {
@@ -156,6 +165,7 @@ export const useLabelDesigner = () => {
         const newElements = [...template.elements, newEl];
         updateTemplate({ elements: newElements });
         setSelectedId(newEl.id);
+        setTool('SELECT'); // Switch to select mode after adding
     };
 
     const deleteSelected = () => {
@@ -220,6 +230,11 @@ export const useLabelDesigner = () => {
             if (selectedId) deleteSelected();
             return;
         }
+        
+        // Panning with Spacebar? Optional but common
+        if (e.code === 'Space' && tool !== 'HAND') {
+             // Logic could go here to temp switch to hand
+        }
 
         if (selectedId && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
             e.preventDefault();
@@ -257,28 +272,61 @@ export const useLabelDesigner = () => {
     };
 
     // --- INTERACTION LOGIC (CANVAS) ---
-    const handlePointerDown = (e: React.MouseEvent | React.TouchEvent, id: string, mode: 'MOVE'|'RESIZE'|'ROTATE', handle?: string) => {
+    const handlePointerDown = (e: React.MouseEvent | React.TouchEvent, id: string | null, mode: 'MOVE'|'RESIZE'|'ROTATE'|'PANNING', handle?: string) => {
         e.stopPropagation();
-        const el = template.elements.find(x => x.id === id);
-        if (!el) return;
         
-        setSelectedId(id);
         const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
         const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
 
-        setInteraction({
-            mode,
-            startPos: { x: clientX, y: clientY },
-            elementStart: { x: el.x, y: el.y, w: el.width, h: el.height, r: el.rotation },
-            handle
-        });
+        // If Tool is HAND, overwrite interaction to PANNING regardless of target
+        if (tool === 'HAND') {
+            setInteraction({
+                mode: 'PANNING',
+                startPos: { x: clientX, y: clientY },
+                elementStart: { x:0, y:0, w:0, h:0, r:0 },
+                panStart: { x: pan.x, y: pan.y }
+            });
+            return;
+        }
+
+        if (id) {
+            const el = template.elements.find(x => x.id === id);
+            if (!el) return;
+            
+            setSelectedId(id);
+            setInteraction({
+                mode,
+                startPos: { x: clientX, y: clientY },
+                elementStart: { x: el.x, y: el.y, w: el.width, h: el.height, r: el.rotation },
+                panStart: { x: 0, y: 0 },
+                handle
+            });
+        } else {
+            // Clicked on empty canvas -> Pan if HAND or just deselect
+            // HAND tool is handled above.
+            setSelectedId(null);
+        }
     };
 
     const handlePointerMove = (e: React.MouseEvent | React.TouchEvent) => {
-        if (interaction.mode === 'NONE' || !selectedId) return;
+        if (interaction.mode === 'NONE') return;
         
         const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
         const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+        
+        if (interaction.mode === 'PANNING') {
+            e.preventDefault(); // Prevent scroll on touch
+            const deltaX = clientX - interaction.startPos.x;
+            const deltaY = clientY - interaction.startPos.y;
+            setPan({
+                x: interaction.panStart.x + deltaX,
+                y: interaction.panStart.y + deltaY
+            });
+            return;
+        }
+
+        if (!selectedId) return;
+
         const deltaX = (clientX - interaction.startPos.x) / (scaleFactor * zoom);
         const deltaY = (clientY - interaction.startPos.y) / (scaleFactor * zoom);
         
@@ -298,16 +346,17 @@ export const useLabelDesigner = () => {
     };
 
     const handlePointerUp = () => {
-        if (interaction.mode !== 'NONE') {
+        if (interaction.mode !== 'NONE' && interaction.mode !== 'PANNING') {
             addToHistory(template);
-            setInteraction({ ...interaction, mode: 'NONE' });
         }
+        setInteraction({ ...interaction, mode: 'NONE' });
     };
 
     return {
         template, setTemplate,
         selectedId, setSelectedId,
         zoom, setZoom,
+        tool, setTool, pan, setPan,
         history, historyIndex,
         dbSchema,
         loadTemplate, createNew,
