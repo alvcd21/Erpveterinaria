@@ -163,17 +163,27 @@ const CashRegister: React.FC = () => {
       doc.setFont('helvetica', 'bold');
       doc.text("RESUMEN FINANCIERO", 14, 40);
       
+      // Safe Numbers logic to prevent NaN
+      const mInicial = Number(resumen.montoInicial) || 0;
+      const tVentas = Number(resumen.totalVentas) || 0;
+      const tGastos = Number(resumen.TotalGastos) || 0;
+      const mFinal = Number(resumen.montoFinal) || 0;
+      const ganancia = Number(resumen.ganancia) || 0;
+      const sTigo = Number(resumen.saldoTigoFinal) || 0;
+      const sClaro = Number(resumen.saldoClaroFinal) || 0;
+
       const summaryData = [
-          ['Monto Inicial', `L. ${Number(resumen.montoInicial || 0).toFixed(2)}`],
-          ['(+) Total Ingresos', `L. ${Number(resumen.totalVentas || 0).toFixed(2)}`],
-          ['(-) Total Gastos', `L. ${Number(resumen.TotalGastos || 0).toFixed(2)}`],
-          ['(=) Efectivo Calculado', `L. ${Number(resumen.montoFinal || 0).toFixed(2)}`]
+          ['Monto Inicial', `L. ${mInicial.toFixed(2)}`],
+          ['(+) Total Ingresos', `L. ${tVentas.toFixed(2)}`],
+          ['(-) Total Gastos', `L. ${tGastos.toFixed(2)}`],
+          ['(=) Efectivo Calculado', `L. ${mFinal.toFixed(2)}`]
       ];
       
       if(isAdmin) {
-          summaryData.push(['Ganancia Estimada', `L. ${Number(resumen.ganancia || 0).toFixed(2)}`]);
+          summaryData.push(['Ganancia Estimada', `L. ${ganancia.toFixed(2)}`]);
       }
 
+      // Tabla Izquierda (Resumen)
       // @ts-ignore
       doc.autoTable({
           startY: 45,
@@ -182,31 +192,31 @@ const CashRegister: React.FC = () => {
           theme: 'grid',
           headStyles: { fillColor: [79, 70, 229], textColor: 255, fontStyle: 'bold' },
           columnStyles: { 0: { fontStyle: 'bold' }, 1: { halign: 'right' } },
-          margin: { right: 110 } // Left side table
+          margin: { right: 110 } 
       });
       
       // Capturar posición Y de la tabla izquierda
       const yAfterSummary = (doc as any).lastAutoTable.finalY;
 
-      // SALDOS SECTION (Right Side)
+      // Tabla Derecha (Saldos)
       // @ts-ignore
       doc.autoTable({
           startY: 45,
           head: [['Plataforma', 'Saldo Final']],
           body: [
-              ['TIGO', `L. ${Number(resumen.saldoTigoFinal || 0).toFixed(2)}`],
-              ['CLARO', `L. ${Number(resumen.saldoClaroFinal || 0).toFixed(2)}`]
+              ['TIGO', `L. ${sTigo.toFixed(2)}`],
+              ['CLARO', `L. ${sClaro.toFixed(2)}`]
           ],
           theme: 'grid',
-          headStyles: { fillColor: [15, 23, 42], textColor: 255 }, // Darker header
+          headStyles: { fillColor: [15, 23, 42], textColor: 255 },
           columnStyles: { 1: { halign: 'right', textColor: [0, 100, 0], fontStyle: 'bold' } },
-          margin: { left: 110 } // Right side table
+          margin: { left: 110 } 
       });
       
       // Capturar posición Y de la tabla derecha
       const yAfterSaldos = (doc as any).lastAutoTable.finalY;
 
-      // Determinar la posición más baja de ambas tablas para empezar la siguiente sección sin solapamiento
+      // FIX: Determinar la posición más baja de ambas tablas para empezar la siguiente sección sin solapamiento
       let finalY = Math.max(yAfterSummary, yAfterSaldos) + 15;
 
       // DETAILED INCOMES
@@ -217,8 +227,8 @@ const CashRegister: React.FC = () => {
       const incomeRows = ingresosList.map(i => {
           const time = i.fechaCreacion ? new Date(i.fechaCreacion).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : '-';
           return isAdmin 
-            ? [time, i.descripcion, `L. ${Number(i.costo).toFixed(2)}`, `L. ${Number(i.monto).toFixed(2)}`]
-            : [time, i.descripcion, `L. ${Number(i.monto).toFixed(2)}`];
+            ? [time, i.descripcion, `L. ${(Number(i.costo)||0).toFixed(2)}`, `L. ${(Number(i.monto)||0).toFixed(2)}`]
+            : [time, i.descripcion, `L. ${(Number(i.monto)||0).toFixed(2)}`];
       });
 
       // @ts-ignore
@@ -234,6 +244,7 @@ const CashRegister: React.FC = () => {
           }
       });
 
+      // Update finalY after Incomes Table
       finalY = (doc as any).lastAutoTable.finalY + 10;
 
       // DETAILED EXPENSES
@@ -242,7 +253,7 @@ const CashRegister: React.FC = () => {
       
       const expenseRows = egresosList.map(e => {
           const time = e.fechaCreacion ? new Date(e.fechaCreacion).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : '-';
-          return [time, e.descripcion, `L. ${Number(e.monto).toFixed(2)}`];
+          return [time, e.descripcion, `L. ${(Number(e.monto)||0).toFixed(2)}`];
       });
 
       // @ts-ignore
@@ -286,17 +297,26 @@ const CashRegister: React.FC = () => {
          const { resumen } = response;
          const isAdmin = user?.rol === 'Administrador' || hasPermission('VER_ADMIN');
 
+         // Safe numbers for display
+         const mFinal = Number(resumen.montoFinal) || 0;
+         const mInicial = Number(resumen.montoInicial) || 0;
+         const tVentas = Number(resumen.totalVentas) || 0;
+         const tGastos = Number(resumen.TotalGastos) || 0;
+         const ganancia = Number(resumen.ganancia) || 0;
+         const sTigo = Number(resumen.saldoTigoFinal) || 0;
+         const sClaro = Number(resumen.saldoClaroFinal) || 0;
+
          // Construir HTML del resumen
          let htmlContent = `
             <div class="text-left space-y-2 text-sm">
                 <div class="bg-slate-50 p-3 rounded border border-slate-200 mb-3">
-                    <p class="flex justify-between"><span>Efectivo Inicial:</span> <strong>L. ${Number(resumen.montoInicial || 0).toFixed(2)}</strong></p>
-                    <p class="flex justify-between text-emerald-600"><span>(+) Total Ingresos:</span> <strong>L. ${Number(resumen.totalVentas || 0).toFixed(2)}</strong></p>
-                    <p class="flex justify-between text-red-600"><span>(-) Total Gastos:</span> <strong>L. ${Number(resumen.TotalGastos || 0).toFixed(2)}</strong></p>
+                    <p class="flex justify-between"><span>Efectivo Inicial:</span> <strong>L. ${mInicial.toFixed(2)}</strong></p>
+                    <p class="flex justify-between text-emerald-600"><span>(+) Total Ingresos:</span> <strong>L. ${tVentas.toFixed(2)}</strong></p>
+                    <p class="flex justify-between text-red-600"><span>(-) Total Gastos:</span> <strong>L. ${tGastos.toFixed(2)}</strong></p>
                 </div>
                 <div class="flex justify-between items-center text-lg font-bold border-t pt-2">
                     <span>Efectivo Esperado en Caja:</span>
-                    <span class="text-indigo-600">L. ${Number(resumen.montoFinal || 0).toFixed(2)}</span>
+                    <span class="text-indigo-600">L. ${mFinal.toFixed(2)}</span>
                 </div>
          `;
 
@@ -304,7 +324,7 @@ const CashRegister: React.FC = () => {
              htmlContent += `
                 <div class="flex justify-between items-center text-sm font-bold text-slate-500 mt-1">
                     <span>Ganancia Estimada:</span>
-                    <span class="text-slate-800">L. ${Number(resumen.ganancia || 0).toFixed(2)}</span>
+                    <span class="text-slate-800">L. ${ganancia.toFixed(2)}</span>
                 </div>
              `;
          }
@@ -314,11 +334,11 @@ const CashRegister: React.FC = () => {
                 <div class="grid grid-cols-2 gap-2 text-xs text-center">
                     <div class="bg-blue-50 p-2 rounded">
                         <p class="font-bold text-blue-800">Saldo TIGO</p>
-                        <p>L. ${Number(resumen.saldoTigoFinal || 0).toFixed(2)}</p>
+                        <p>L. ${sTigo.toFixed(2)}</p>
                     </div>
                     <div class="bg-red-50 p-2 rounded">
                         <p class="font-bold text-red-800">Saldo CLARO</p>
-                        <p>L. ${Number(resumen.saldoClaroFinal || 0).toFixed(2)}</p>
+                        <p>L. ${sClaro.toFixed(2)}</p>
                     </div>
                 </div>
             </div>

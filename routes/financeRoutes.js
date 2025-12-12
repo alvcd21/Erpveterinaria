@@ -61,7 +61,6 @@ router.get('/arqueo/:id/details', authenticateToken, async (req, res) => {
         const { id } = req.params;
         
         // 1. Info General
-        // IMPORTANTE: Extraemos fechas como string para evitar desplazamiento UTC
         const arqueoRes = await pool.query(`
             SELECT 
                 a.idArqueo as "idArqueo",
@@ -83,14 +82,11 @@ router.get('/arqueo/:id/details', authenticateToken, async (req, res) => {
         }
 
         const arqueo = arqueoRes.rows[0];
-        // Aseguramos que usamos los strings exactos recuperados de BD
         const fechaInicioStr = arqueo.fechaApertura;
-        // Si no ha cerrado, usamos la hora actual del servidor
         const fechaFinStr = arqueo.fechaCierre || getLocalTimestamp(); 
         const targetCaja = arqueo.idCaja;
 
         // 2. Movimientos
-        // Usamos ::timestamp para convertir el string a fecha en SQL sin añadir zonas horarias
         const ingresos = await pool.query(`
             SELECT idIngreso as "idIngreso", descripcion, monto, costo, fechaCreacion as "fechaCreacion"
             FROM ingresos 
@@ -232,14 +228,13 @@ router.post('/arqueo/close', authenticateToken, async (req, res) => {
      const { idArqueo } = req.body;
      const { idCaja } = req.user;
      const localTimestamp = getLocalTimestamp();
-     // Extraemos fecha actual para buscar saldos (YYYY-MM-DD)
      const todayDate = localTimestamp.split(' ')[0];
 
      await client.query('BEGIN');
 
      await updateArqueoBalance(idCaja, client);
      
-     // FIXED: Added aliases to columns to ensure correct camelCase in JSON response (avoiding NaN in frontend)
+     // FIXED: Usamos alias con comillas para forzar Case Sensitive en JSON response
      const finalData = await client.query(`
         SELECT 
             montoInicial as "montoInicial", 
