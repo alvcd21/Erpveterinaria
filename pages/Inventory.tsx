@@ -83,6 +83,10 @@ const Inventory: React.FC = () => {
 
   const printLabel = async (type: 'TELEPHONE' | 'ACCESSORY', data: any) => {
       try {
+          console.log("--- INICIO IMPRESIÓN ETIQUETA ---");
+          console.log("TIPO:", type);
+          console.log("DATA RECIBIDA DEL ROW:", data);
+
           const templates = await LabelService.getAll();
           
           // 1. Buscar Plantilla
@@ -94,16 +98,20 @@ const Inventory: React.FC = () => {
               return Swal.fire('Sin Plantilla', `No hay plantilla predeterminada para ${type === 'TELEPHONE' ? 'TELÉFONOS' : 'ACCESORIOS'}.`, 'warning');
           }
 
-          // 2. Construcción Robusta de Datos (Mapeo Inteligente y Limpieza)
+          // 2. Construcción Robusta de Datos (Sanitization)
+          // Helper to force simple type or empty string. NEVER return object.
+          const sanitizeValue = (val: any) => {
+              if (val === null || val === undefined) return '';
+              if (typeof val === 'object') return ''; // CRITICAL: Stop [object Object]
+              return String(val);
+          };
+
           let contextData: any = {};
           
           if (type === 'TELEPHONE') {
               contextData = {
-                  // Nivel Raíz
                   ...data,
                   precioVenta: `L. ${Number(data.precioVenta || 0).toFixed(2)}`,
-                  
-                  // Nivel Estructurado
                   telefonos: {
                       ...data,
                       precioVenta: `L. ${Number(data.precioVenta || 0).toFixed(2)}`,
@@ -111,43 +119,49 @@ const Inventory: React.FC = () => {
                   }
               };
           } else {
-              // ACCESORIOS: Forzar conversión a string y evitar objetos
-              const rawDesc = data.descripcionAccesorio || data.descripcion || '';
-              const rawCat = data.categoriaAccesorio || data.categoria || data.nombreCategoria || '';
-              const rawCode = data.codInventario || data.codAccesorio || '';
-              const rawPrice = `L. ${Number(data.precioVenta || 0).toFixed(2)}`;
+              // ACCESORIOS - Lógica Defensiva
+              // Primero intentamos sacar los valores planos del objeto data
+              let desc = sanitizeValue(data.descripcionAccesorio);
+              if(!desc) desc = sanitizeValue(data.descripcion);
+              
+              let cat = sanitizeValue(data.categoriaAccesorio);
+              if(!cat) cat = sanitizeValue(data.categoria);
+              if(!cat) cat = sanitizeValue(data.nombreCategoria);
 
-              // Asegurar que sean strings planos
-              const description = typeof rawDesc === 'object' ? '' : String(rawDesc);
-              const category = typeof rawCat === 'object' ? '' : String(rawCat);
-              const code = typeof rawCode === 'object' ? '' : String(rawCode);
+              let code = sanitizeValue(data.codInventario);
+              if(!code) code = sanitizeValue(data.codAccesorio);
+
+              const price = `L. ${Number(data.precioVenta || 0).toFixed(2)}`;
+
+              console.log("Valores Extraídos:", { desc, cat, code, price });
 
               contextData = {
-                  // Nivel Raíz (Fallbacks para {{variable}})
-                  ...data,
-                  descripcion: description,
-                  nombre: description,
+                  // Nivel Raíz (Plano)
+                  ...data, // Copiamos todo, pero sobrescribimos con versiones saneadas
+                  descripcion: desc,
+                  nombre: desc,
                   codigo: code,
-                  precio: rawPrice,
-                  categoria: category,
+                  precio: price,
+                  categoria: cat,
                   
-                  // Nivel Estructurado (para {{tabla.variable}})
+                  // Objetos anidados simulados (Saneados)
                   inventario: {
-                      ...data,
                       codInventario: code,
-                      descripcion: description,
-                      categoria: category,
-                      cantidad: String(data.cantidad || 0),
-                      precioVenta: rawPrice,
+                      descripcion: desc,
+                      categoria: cat,
+                      cantidad: sanitizeValue(data.cantidad),
+                      precioVenta: price,
                   },
                   accesorios: { 
-                      codAccesorio: data.codAccesorio ? String(data.codAccesorio) : code,
-                      descripcion: description, 
-                      nombreCategoria: category,
-                      categoria: category
+                      codAccesorio: code,
+                      descripcion: desc, 
+                      nombreCategoria: cat,
+                      categoria: cat
                   }
               };
           }
+
+          console.log("CONTEXTO FINAL PARA PDF:", contextData);
 
           // 3. Generación PDF
           const scale = tpl.type === 'DOCUMENT' ? 10 : 1;
@@ -157,36 +171,32 @@ const Inventory: React.FC = () => {
           
           const doc = new jsPDF({ orientation, unit: 'mm', format: [docWidth, docHeight] });
 
-          // Helper para obtener valor anidado seguro
           const getValue = (path: string, obj: any) => {
               try {
                   const result = path.split('.').reduce((prev, curr) => prev ? prev[curr] : null, obj);
-                  // CRITICO: Si es un objeto, devolver vacío para evitar [object Object]
-                  if (typeof result === 'object' && result !== null) return '';
-                  return result;
-              } catch (e) { return null; }
+                  return sanitizeValue(result); // Sanitizamos al salir también
+              } catch (e) { return ''; }
           };
 
           tpl.elements.forEach(el => {
               let content = el.content || '';
               
-              // Reemplazo de Variables
               const matches = content.match(/{{(.*?)}}/g);
               if (matches) {
                   matches.forEach(match => {
                       const key = match.replace(/{{|}}/g, '').trim(); 
-                      
-                      // Estrategia de Búsqueda de Valor:
-                      // 1. Búsqueda exacta
+                      console.log(`Procesando variable: ${key}`);
+
                       let val = getValue(key, contextData);
                       
-                      // 2. Búsqueda inteligente (Fallbacks)
-                      if (val === null || val === undefined || val === '') {
+                      // Estrategia de Fallback si devuelve vacío
+                      if (!val) {
                           if (key.includes('.')) {
                               const cleanKey = key.split('.')[1];
                               val = getValue(cleanKey, contextData);
                           } else {
                               if (type === 'ACCESSORY') {
+                                  // Probar rutas alternativas comunes
                                   val = getValue(`inventario.${key}`, contextData) || getValue(`accesorios.${key}`, contextData);
                               } else {
                                   val = getValue(`telefonos.${key}`, contextData);
@@ -194,8 +204,8 @@ const Inventory: React.FC = () => {
                           }
                       }
                       
-                      // Reemplazo final seguro
-                      content = content.replace(match, (val !== null && val !== undefined) ? String(val) : '');
+                      console.log(`   -> Valor encontrado: "${val}"`);
+                      content = content.replace(match, val);
                   });
               }
 
@@ -221,13 +231,11 @@ const Inventory: React.FC = () => {
               } else if (el.type === 'BARCODE') {
                   try {
                       const canvas = document.createElement('canvas');
-                      // Limpiar contenido del código de barras
                       let codeContent = content.replace(/\s/g, '').trim();
                       
-                      // Fallback final si la variable de código falló
-                      if (!codeContent || codeContent === '') {
-                          if (type === 'TELEPHONE') codeContent = String(data.imei1 || data.codigo || '0000');
-                          else codeContent = String(data.codInventario || data.codAccesorio || '0000');
+                      if (!codeContent) {
+                          codeContent = sanitizeValue(type === 'TELEPHONE' ? data.imei1 || data.codigo : data.codInventario);
+                          if(!codeContent) codeContent = "000000";
                       }
 
                       JsBarcode(canvas, codeContent, {
@@ -264,7 +272,7 @@ const Inventory: React.FC = () => {
       }
   };
 
-  // ... (Resto del código del componente se mantiene igual)
+  // ... (Resto del código del componente se mantiene igual, lógica de modales, etc.)
   const openNewModal = () => {
     setIsEditing(false);
     setCurrentId(null);

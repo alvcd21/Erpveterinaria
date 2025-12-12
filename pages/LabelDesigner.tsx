@@ -109,10 +109,13 @@ const LabelDesigner: React.FC = () => {
   };
 
   const initCreation = () => {
+      console.log('Intentando crear diseño:', { selectedType, newDesignName });
       if(!newDesignName || newDesignName.trim() === '' || !selectedType) return;
+      
       createNew(selectedType, newDesignName);
       setShowCreateModal(false);
       setView('DESIGNER');
+      // Reset states
       setNewDesignName('');
       setSelectedType(null);
   };
@@ -144,6 +147,9 @@ const LabelDesigner: React.FC = () => {
     }
     dragItem.current = null; dragOverItem.current = null;
   };
+
+  // Validación del Formulario de Creación
+  const isFormValid = (selectedType !== null) && (newDesignName.trim().length > 0);
 
   // --- VIEWS ---
 
@@ -203,12 +209,15 @@ const LabelDesigner: React.FC = () => {
                               className="w-full p-3 border border-slate-200 rounded-xl mb-6 outline-none focus:ring-2 focus:ring-indigo-500" 
                               placeholder="Nombre del diseño..."
                               value={newDesignName}
-                              onChange={e => setNewDesignName(e.target.value)}
+                              onChange={e => {
+                                  setNewDesignName(e.target.value);
+                                  console.log('Nombre diseño:', e.target.value);
+                              }}
                               autoFocus
                           />
                           <div className="grid grid-cols-2 gap-4 mb-6">
                               <button 
-                                  onClick={() => setSelectedType('LABEL')} 
+                                  onClick={() => { setSelectedType('LABEL'); console.log('Seleccionado: LABEL'); }} 
                                   className={`p-4 border-2 rounded-xl transition-all group text-left ${selectedType === 'LABEL' ? 'border-indigo-600 bg-indigo-50' : 'border-slate-100 hover:border-indigo-300'}`}
                               >
                                   <Tag className={`${selectedType === 'LABEL' ? 'text-indigo-600' : 'text-slate-400'} mb-2`} size={28}/>
@@ -216,7 +225,7 @@ const LabelDesigner: React.FC = () => {
                                   <p className="text-xs text-slate-500 mt-1">Códigos de barra, precios (mm).</p>
                               </button>
                               <button 
-                                  onClick={() => setSelectedType('DOCUMENT')} 
+                                  onClick={() => { setSelectedType('DOCUMENT'); console.log('Seleccionado: DOCUMENT'); }} 
                                   className={`p-4 border-2 rounded-xl transition-all group text-left ${selectedType === 'DOCUMENT' ? 'border-purple-600 bg-purple-50' : 'border-slate-100 hover:border-purple-300'}`}
                               >
                                   <FileText className={`${selectedType === 'DOCUMENT' ? 'text-purple-600' : 'text-slate-400'} mb-2`} size={28}/>
@@ -224,13 +233,15 @@ const LabelDesigner: React.FC = () => {
                                   <p className="text-xs text-slate-500 mt-1">Facturas, informes A4 (cm).</p>
                               </button>
                           </div>
+                          
                           <button 
                               onClick={initCreation} 
-                              disabled={!selectedType || newDesignName.trim() === ''}
-                              className={`w-full py-3 font-bold rounded-xl shadow-lg transition-all mb-3 ${(!selectedType || newDesignName.trim() === '') ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-indigo-600 text-white hover:bg-indigo-700'}`}
+                              disabled={!isFormValid}
+                              className={`w-full py-3 font-bold rounded-xl shadow-lg transition-all mb-3 ${!isFormValid ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-indigo-600 text-white hover:bg-indigo-700'}`}
                           >
                               CREAR DISEÑO
                           </button>
+                          
                           <button onClick={() => setShowCreateModal(false)} className="w-full py-3 text-slate-500 font-bold hover:bg-slate-100 rounded-xl">Cancelar</button>
                       </div>
                   </div>
