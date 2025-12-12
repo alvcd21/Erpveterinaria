@@ -30,7 +30,7 @@ router.get('/productos/unificados', authenticateToken, async (req, res) => {
                 i.idubicacion as ubicacion
             FROM inventario i
             JOIN accesorios a ON i.codAccesorio = a.codAccesorio
-            WHERE i.cantidad > 0 AND i.estado = 'Disponible'
+            WHERE i.cantidad > 0 AND (i.estado = 'Disponible' OR i.estado = 'Activo')
         `;
         const result = await pool.query(query);
         res.json(result.rows);

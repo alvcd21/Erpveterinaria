@@ -466,9 +466,11 @@ const Inventory: React.FC = () => {
 
       if (activeTab === 'TELEPHONES') {
           const filtered = phones.filter(p => {
-              const matchesSearch = p.marca.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                                    p.modelo.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                                    p.imei1.includes(searchTerm);
+              const term = searchTerm.toLowerCase();
+              const matchesSearch = p.marca.toLowerCase().includes(term) || 
+                                    p.modelo.toLowerCase().includes(term) ||
+                                    p.imei1.toLowerCase().includes(term) ||
+                                    p.codigo.toLowerCase().includes(term); // Buscar por ID/Codigo
               const matchesStatus = statusFilter === 'ALL' || p.estado === statusFilter;
               return matchesSearch && matchesStatus;
           });
@@ -507,10 +509,11 @@ const Inventory: React.FC = () => {
       }
 
       if (activeTab === 'STOCK') {
-        const filtered = stock.filter(s => 
-            s.descripcionAccesorio?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            s.codInventario.toLowerCase().includes(searchTerm.toLowerCase())
-        );
+        const filtered = stock.filter(s => {
+            const term = searchTerm.toLowerCase();
+            return s.descripcionAccesorio?.toLowerCase().includes(term) ||
+                   s.codInventario.toLowerCase().includes(term); // Buscar por codInventario
+        });
         return (
             <table className="w-full text-left">
                 <thead className="bg-slate-50 text-xs font-bold text-slate-500 uppercase sticky top-0">

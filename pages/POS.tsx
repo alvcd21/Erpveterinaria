@@ -349,9 +349,11 @@ const POS: React.FC = () => {
   };
 
   const filteredProducts = products.filter(p => {
-    const matchesSearch = p.nombre.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                          p.codigo.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                          (p.imei && p.imei.includes(searchTerm));
+    const term = searchTerm.toLowerCase();
+    const matchesSearch = p.nombre.toLowerCase().includes(term) || 
+                          p.codigo.toLowerCase().includes(term) ||
+                          p.id.toLowerCase().includes(term) || // Include ID (codInventario/codTelefono)
+                          (p.imei && p.imei.toLowerCase().includes(term));
     const matchesCategory = selectedCategory === 'ALL' || p.tipo === selectedCategory;
     return matchesSearch && matchesCategory;
   });
