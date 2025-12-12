@@ -1,15 +1,17 @@
-
 import React, { useState, useEffect } from 'react';
-import { InventoryService, LabelService } from '../services/api';
+import { InventoryService } from '../services/api';
 import { 
-  Telefono, Inventario, Accesorio, Categoria, Ubicacion, Proveedor, EstadoGeneral, LabelElement 
+  Telefono, 
+  Inventario, 
+  Accesorio, 
+  Categoria, 
+  Ubicacion, 
+  Proveedor 
 } from '../types';
 import { 
-  Search, Smartphone, Headphones, Box, MapPin, Tag, PlusCircle, X, RefreshCw, Printer, Edit2, Trash2, Filter
+  Search, PlusCircle, Package, Smartphone, Layers, MapPin, Tag, Edit2, Trash2, X, RefreshCw, Box
 } from 'lucide-react';
 import Swal from 'sweetalert2';
-import { jsPDF } from 'jspdf';
-import JsBarcode from 'jsbarcode';
 
 type InventoryTab = 'TELEPHONES' | 'STOCK' | 'MASTER' | 'CATEGORIES' | 'LOCATIONS';
 
@@ -17,12 +19,8 @@ const Inventory: React.FC = () => {
   const [activeTab, setActiveTab] = useState<InventoryTab>('TELEPHONES');
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
-  
-  const [phoneStateFilter, setPhoneStateFilter] = useState<string>('Disponible');
-  const [showModal, setShowModal] = useState(false);
-  const [isEditing, setIsEditing] = useState(false);
-  const [currentId, setCurrentId] = useState<string | null>(null);
 
+  // Data Arrays
   const [phones, setPhones] = useState<Telefono[]>([]);
   const [stock, setStock] = useState<Inventario[]>([]);
   const [master, setMaster] = useState<Accesorio[]>([]);
@@ -30,50 +28,57 @@ const Inventory: React.FC = () => {
   const [locations, setLocations] = useState<Ubicacion[]>([]);
   const [providers, setProviders] = useState<Proveedor[]>([]);
 
-  // Forms...
-  const [phoneForm, setPhoneForm] = useState<Partial<Telefono>>({});
-  const [stockForm, setStockForm] = useState<Partial<Inventario>>({});
+  // Modal State
+  const [showModal, setShowModal] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [currentId, setCurrentId] = useState<string | null>(null);
+
+  // Forms
+  const [phoneForm, setPhoneForm] = useState<Partial<Telefono>>({ estado: 'Disponible' });
+  const [stockForm, setStockForm] = useState<Partial<Inventario>>({ estado: 'Activo' });
   const [masterForm, setMasterForm] = useState<Partial<Accesorio>>({});
   const [catForm, setCatForm] = useState<Partial<Categoria>>({});
-  const [locForm, setLocForm] = useState<Partial<Ubicacion>>({});
-
-  const [uniqueBrands, setUniqueBrands] = useState<string[]>([]);
-  const [availableModels, setAvailableModels] = useState<string[]>([]);
-  const [manualBrandMode, setManualBrandMode] = useState(false);
-  const [manualModelMode, setManualModelMode] = useState(false);
+  const [locForm, setLocForm] = useState<Partial<Ubicacion>>({ estado: 'Activo' });
 
   useEffect(() => {
     loadData();
-    InventoryService.getCategorias().then(data => setCategories(data || []));
-    InventoryService.getUbicaciones().then(data => setLocations(data || []));
-    InventoryService.getProveedores().then(data => setProviders(data || []));
-    InventoryService.getAccesoriosMaster().then(data => setMaster(data || []));
+    loadDependencies();
   }, [activeTab]);
 
-  useEffect(() => {
-    if (phones.length > 0) {
-      const brands = Array.from(new Set(phones.map(p => p.marca))).sort();
-      setUniqueBrands(brands);
-    }
-  }, [phones]);
-
-  useEffect(() => {
-    if (phoneForm.marca && !manualBrandMode) {
-      const models = phones.filter(p => p.marca === phoneForm.marca).map(p => p.modelo);
-      setAvailableModels(Array.from(new Set(models)).sort());
-    } else {
-      setAvailableModels([]);
-    }
-  }, [phoneForm.marca, manualBrandMode, phones]);
+  const loadDependencies = async () => {
+      try {
+          const [provs, cats, locs] = await Promise.all([
+              InventoryService.getProveedores(),
+              InventoryService.getCategorias(),
+              InventoryService.getUbicaciones()
+          ]);
+          setProviders(provs || []);
+          setCategories(cats || []);
+          setLocations(locs || []);
+      } catch (error) {
+          console.error("Error loading dependencies", error);
+      }
+  };
 
   const loadData = async () => {
     setLoading(true);
     try {
-      if (activeTab === 'TELEPHONES') setPhones((await InventoryService.getTelefonos()) || []);
-      else if (activeTab === 'STOCK') setStock((await InventoryService.getStockAccesorios()) || []);
-      else if (activeTab === 'MASTER') setMaster((await InventoryService.getAccesoriosMaster()) || []);
-      else if (activeTab === 'CATEGORIES') setCategories((await InventoryService.getCategorias()) || []);
-      else if (activeTab === 'LOCATIONS') setLocations((await InventoryService.getUbicaciones()) || []);
+      if (activeTab === 'TELEPHONES') {
+          const data = await InventoryService.getTelefonos();
+          setPhones(data || []);
+      } else if (activeTab === 'STOCK') {
+          const data = await InventoryService.getStockAccesorios();
+          setStock(data || []);
+      } else if (activeTab === 'MASTER') {
+          const data = await InventoryService.getAccesoriosMaster();
+          setMaster(data || []);
+      } else if (activeTab === 'CATEGORIES') {
+          const data = await InventoryService.getCategorias();
+          setCategories(data || []);
+      } else if (activeTab === 'LOCATIONS') {
+          const data = await InventoryService.getUbicaciones();
+          setLocations(data || []);
+      }
     } catch (error) {
       console.error(error);
     } finally {
@@ -81,279 +86,64 @@ const Inventory: React.FC = () => {
     }
   };
 
-  const printLabel = async (type: 'TELEPHONE' | 'ACCESSORY', data: any) => {
-      try {
-          console.log("--- INICIO IMPRESIÓN ETIQUETA ---");
-          const templates = await LabelService.getAll();
-          const targetCategory = type === 'TELEPHONE' ? 'TELEPHONE' : 'ACCESSORY';
-          let tpl = templates.find(t => t.isDefault && t.category === targetCategory);
-          if (!tpl) tpl = templates.find(t => t.isDefault && t.category === 'GENERAL');
-          
-          if (!tpl) return Swal.fire('Sin Plantilla', `No hay plantilla predeterminada para ${type === 'TELEPHONE' ? 'TELÉFONOS' : 'ACCESORIOS'}.`, 'warning');
+  const openModal = (item?: any) => {
+      setIsEditing(!!item);
+      setCurrentId(item ? (item.codigo || item.codInventario || item.codAccesorio || item.codCategoria || item.idUbicacion) : null);
 
-          const sanitizeValue = (val: any) => {
-              if (val === null || val === undefined) return '';
-              if (typeof val === 'object') return ''; 
-              return String(val);
-          };
-
-          // --- Hydration ---
-          let contextData: any = {};
-          if (type === 'TELEPHONE') {
-              const prov = providers.find(p => p.codProveedor === data.codProveedor) || ({} as Proveedor);
-              const loc = locations.find(l => l.idUbicacion === data.idubicacion) || ({} as Ubicacion);
-              contextData = {
-                  ...data, 
-                  precioVenta: `L. ${Number(data.precioVenta || 0).toFixed(2)}`,
-                  telefonos: {
-                      ...data,
-                      precioVenta: `L. ${Number(data.precioVenta || 0).toFixed(2)}`,
-                      precioCompra: `L. ${Number(data.precioCompra || 0).toFixed(2)}`,
-                      fecha: data.fecha ? String(data.fecha).split('T')[0] : '',
-                      ubicacion: { ...loc },
-                      proveedores: { ...prov }
-                  }
-              };
-          } else {
-              const precioFormatted = `L. ${Number(data.precioVenta || 0).toFixed(2)}`;
-              const masterItem = master.find(m => m.codAccesorio === data.codAccesorio) || ({} as Accesorio);
-              const categoryItem = categories.find(c => c.codCategoria === masterItem.codCategoria) || ({} as Categoria);
-              const prov = providers.find(p => p.codProveedor === data.codProveedor) || ({} as Proveedor);
-              const loc = locations.find(l => l.idUbicacion === data.idubicacion) || ({} as Ubicacion);
-              const catName = categoryItem.tipo || data.categoriaAccesorio || '';
-              const desc = masterItem.descripcion || data.descripcionAccesorio || data.descripcion;
-
-              contextData = {
-                  ...data, 
-                  descripcion: desc,
-                  precio: precioFormatted,
-                  categoria: catName,
-                  inventario: {
-                      ...data,
-                      codInventario: data.codInventario,
-                      cantidad: String(data.cantidad),
-                      precioVenta: precioFormatted,
-                      precioCompra: `L. ${Number(data.precioCompra || 0).toFixed(2)}`,
-                      fecha: data.fecha ? String(data.fecha).split('T')[0] : '',
-                      accesorios: {
-                          ...masterItem,
-                          descripcion: desc,
-                          categoria: { ...categoryItem }
-                      },
-                      ubicacion: { ...loc },
-                      proveedores: { ...prov }
-                  }
-              };
-          }
-
-          // --- Variable Helper ---
-          const getValue = (path: string, obj: any) => {
-              try {
-                  const keys = path.split('.');
-                  let current = obj;
-                  for (const key of keys) {
-                      if (current === null || current === undefined) return '';
-                      let foundKey = Object.keys(current).find(k => k.toLowerCase() === key.toLowerCase());
-                      if (foundKey) current = current[foundKey];
-                      else {
-                          if (current[key] !== undefined) current = current[key]; 
-                          else return ''; 
-                      }
-                  }
-                  return sanitizeValue(current);
-              } catch (e) { return ''; }
-          };
-
-          // --- PRE-PROCESAMIENTO ---
-          const scale = tpl.type === 'DOCUMENT' ? 10 : 1;
-          const originalWidth = tpl.width * scale;
-          const originalHeight = tpl.height * scale;
-          
-          // Clonamos y procesamos variables
-          let processElements: LabelElement[] = JSON.parse(JSON.stringify(tpl.elements));
-          processElements.forEach(el => {
-              if (el.content && el.content.includes('{{')) {
-                  el.content = el.content.replace(/{{(.*?)}}/g, (match, key) => {
-                      key = key.trim();
-                      let val = getValue(key, contextData);
-                      if (!val && key.includes('.')) {
-                          const cleanKey = key.split('.').pop(); 
-                          if (cleanKey) {
-                              if(contextData.inventario?.accesorios?.[cleanKey]) val = sanitizeValue(contextData.inventario.accesorios[cleanKey]);
-                              else if(contextData[cleanKey]) val = sanitizeValue(contextData[cleanKey]);
-                          }
-                      }
-                      return val || '';
-                  });
-              }
-          });
-
-          // --- ALGORITMO: STRETCH WITH OVERFLOW & DYNAMIC HEIGHT ---
-          // 1. Usar un documento temporal para calcular alturas de texto reales
-          const tempDoc = new jsPDF();
-          processElements.sort((a, b) => a.y - b.y);
-
-          let maxBottomY = originalHeight;
-
-          for (let i = 0; i < processElements.length; i++) {
-              let el = processElements[i];
-              
-              if (el.type === 'TEXT' && el.isStretchWithOverflow && el.isMultiline) {
-                  tempDoc.setFontSize(el.fontSize || 10);
-                  tempDoc.setFont(el.fontFamily || 'helvetica', el.fontWeight || 'normal');
-                  
-                  const textLines = tempDoc.splitTextToSize(el.content, el.width * scale);
-                  const ptToMm = 0.352778;
-                  const lineHeightFactor = el.lineHeight || 1.15;
-                  const singleLineHeight = (el.fontSize || 10) * ptToMm * lineHeightFactor;
-                  
-                  const actualHeight = textLines.length * singleLineHeight;
-                  // Convertimos la altura de diseño (base) a unidades reales (scale) para comparar
-                  const designHeight = el.height * scale;
-                  
-                  if (actualHeight > designHeight) {
-                      const diff = actualHeight - designHeight;
-                      // diff está en mm (o cm si scale=10).
-                      const diffBase = diff / scale; // diff en unidades base para actualizar coordenadas base
-                      
-                      // Actualizar altura del elemento actual
-                      el.height = actualHeight / scale; // Guardar en unidades base
-                      
-                      // Borde inferior original en unidades base
-                      const bottomEdgeBase = el.y + (designHeight / scale); 
-
-                      // Desplazar elementos inferiores
-                      for (let j = 0; j < processElements.length; j++) {
-                          if (i === j) continue;
-                          const other = processElements[j];
-                          // Usar un pequeño margen de error para comparaciones float
-                          if (other.y >= bottomEdgeBase - 0.01) {
-                              other.y += diffBase;
-                          }
-                      }
-                  }
-              }
-              
-              // Calcular el punto más bajo actual (en mm reales)
-              const currentBottom = (el.y * scale) + (el.height * scale);
-              if (currentBottom > maxBottomY) {
-                  maxBottomY = currentBottom;
-              }
-          }
-
-          // --- CREACIÓN DEL DOCUMENTO FINAL ---
-          // Si el contenido se estiró más allá del diseño original, ajustamos el alto del PDF
-          const finalDocHeight = Math.max(originalHeight, maxBottomY + (2 * scale)); // + margen pequeño
-          const orientation = originalWidth > finalDocHeight ? 'l' : 'p';
-          
-          const doc = new jsPDF({ 
-              orientation, 
-              unit: 'mm', 
-              format: [originalWidth, finalDocHeight] 
-          });
-
-          // --- RENDERIZADO FINAL ---
-          processElements.forEach(el => {
-              const elX = el.x * scale;
-              const elY = el.y * scale;
-              const elW = el.width * scale;
-              const elH = el.height * scale;
-
-              if (el.type === 'TEXT') {
-                  doc.setFontSize(el.fontSize || 10);
-                  doc.setFont(el.fontFamily || 'helvetica', el.fontWeight || 'normal');
-                  doc.setTextColor(el.color || '#000000');
-                  
-                  const options: any = { angle: el.rotation || 0 };
-                  if (el.textAlign) options.align = el.textAlign;
-                  
-                  if (el.isMultiline) {
-                      options.maxWidth = elW;
-                      let x = elX;
-                      if (el.textAlign === 'center') x += elW / 2;
-                      if (el.textAlign === 'right') x += elW;
-                      
-                      const ptToMm = 0.352778;
-                      const offsetY = (el.fontSize || 10) * ptToMm; 
-                      
-                      doc.text(el.content, x, elY + offsetY, options);
-                  } else {
-                      let x = elX;
-                      if (el.textAlign === 'center') x += elW / 2;
-                      if (el.textAlign === 'right') x += elW;
-                      doc.text(el.content, x, elY + (elH/1.5), options);
-                  }
-
-              } else if (el.type === 'BARCODE') {
-                  try {
-                      const canvas = document.createElement('canvas');
-                      let codeContent = el.content.replace(/\s/g, '').trim();
-                      if (!codeContent) codeContent = "000000";
-
-                      JsBarcode(canvas, codeContent, {
-                          format: (el.barcodeFormat as any) || "CODE128",
-                          displayValue: el.displayValue,
-                          margin: 0,
-                          width: 2, height: 50, fontSize: 20
-                      });
-                      const imgData = canvas.toDataURL("image/png");
-                      doc.addImage(imgData, 'PNG', elX, elY, elW, elH, undefined, 'FAST', el.rotation);
-                  } catch (e) { console.error("Error barcode", e); }
-              } else if (el.type === 'SHAPE') {
-                  doc.setDrawColor(el.stroke || '#000000');
-                  doc.setLineWidth(el.strokeWidth || 0.1);
-                  if (el.fill && el.fill !== 'transparent') doc.setFillColor(el.fill);
-                  
-                  const style = (el.fill && el.fill !== 'transparent') ? 'FD' : 'S';
-
-                  if (el.shapeType === 'CIRCLE') {
-                      doc.ellipse(elX + elW/2, elY + elH/2, elW/2, elH/2, style);
-                  } else if (el.shapeType === 'LINE') {
-                      doc.line(elX, elY + elH/2, elX + elW, elY + elH/2);
-                  } else {
-                      doc.rect(elX, elY, elW, elH, style);
-                  }
-              }
-          });
-
-          doc.save(`${type}_${Date.now()}.pdf`);
-
-      } catch (err: any) {
-          console.error(err);
-          Swal.fire('Error', 'Falló la generación del PDF', 'error');
+      if (activeTab === 'TELEPHONES') {
+          setPhoneForm(item || { estado: 'Disponible', fecha: new Date().toISOString().split('T')[0] });
+      } else if (activeTab === 'STOCK') {
+          setStockForm(item || { estado: 'Activo', fecha: new Date().toISOString().split('T')[0] });
+      } else if (activeTab === 'MASTER') {
+          setMasterForm(item || {});
+      } else if (activeTab === 'CATEGORIES') {
+          setCatForm(item || {});
+      } else if (activeTab === 'LOCATIONS') {
+          setLocForm(item || { estado: 'Activo' });
       }
-  };
-
-  const openNewModal = () => {
-    setIsEditing(false);
-    setCurrentId(null);
-    setPhoneForm({ fecha: new Date().toISOString().split('T')[0] });
-    setStockForm({ fecha: new Date().toISOString().split('T')[0] });
-    setMasterForm({});
-    setCatForm({});
-    setLocForm({});
-    setManualBrandMode(false);
-    setManualModelMode(false);
-    setShowModal(true);
-  };
-
-  const openEditModal = (item: any) => {
-    setIsEditing(true);
-    setCurrentId(item.codigo || item.codInventario || item.codAccesorio || item.codCategoria || item.idUbicacion);
-    if (activeTab === 'TELEPHONES') {
-      setPhoneForm({ ...item, fecha: item.fecha ? String(item.fecha).split('T')[0] : '' });
-      setManualBrandMode(true); 
-      setManualModelMode(true);
-    }
-    else if (activeTab === 'STOCK') setStockForm({ ...item, fecha: item.fecha ? String(item.fecha).split('T')[0] : '' });
-    else if (activeTab === 'MASTER') setMasterForm({ ...item });
-    else if (activeTab === 'CATEGORIES') setCatForm({ ...item });
-    else if (activeTab === 'LOCATIONS') setLocForm({ ...item });
-    setShowModal(true);
+      setShowModal(true);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // --- VALIDACIÓN DE DUPLICADOS ---
+    if (!isEditing) {
+        if (activeTab === 'TELEPHONES') {
+            // Validar IMEI único
+            const imeiExists = phones.some(p => p.imei1 === phoneForm.imei1);
+            if (imeiExists) {
+                return Swal.fire({
+                    title: 'IMEI Duplicado',
+                    text: `El IMEI ${phoneForm.imei1} ya se encuentra registrado en el sistema.`,
+                    icon: 'warning'
+                });
+            }
+        } else if (activeTab === 'STOCK') {
+            // Validar Combinación Producto + Ubicación
+            const stockExists = stock.some(s => 
+                s.codAccesorio === stockForm.codAccesorio && 
+                s.idubicacion === stockForm.idubicacion
+            );
+            
+            if (stockExists) {
+                return Swal.fire({
+                    title: 'Producto ya en Inventario',
+                    text: 'Este accesorio ya existe en la ubicación seleccionada. Por favor, busque el registro existente y edite la cantidad (sumar) en lugar de crear uno nuevo.',
+                    icon: 'warning'
+                });
+            }
+        } else if (activeTab === 'MASTER') {
+            // Validar Nombre/Descripción para evitar maestros duplicados
+            const masterExists = master.some(m => 
+                m.descripcion.toLowerCase().trim() === masterForm.descripcion?.toLowerCase().trim()
+            );
+            if (masterExists) {
+                return Swal.fire('Duplicado', 'Ya existe un producto maestro con esta descripción.', 'warning');
+            }
+        }
+    }
+
     try {
       if (activeTab === 'TELEPHONES') {
         if(isEditing) await InventoryService.updateTelefono(currentId!, phoneForm);
@@ -378,469 +168,409 @@ const Inventory: React.FC = () => {
   };
 
   const handleDelete = async (id: string) => {
-    const result = await Swal.fire({ title: '¿Estás seguro?', icon: 'warning', showCancelButton: true, confirmButtonColor: '#d33', confirmButtonText: 'Sí, eliminar' });
-    if (result.isConfirmed) {
-      try {
-        if (activeTab === 'TELEPHONES') await InventoryService.deleteTelefono(id);
-        else if (activeTab === 'STOCK') await InventoryService.deleteStock(id);
-        else if (activeTab === 'MASTER') await InventoryService.deleteAccesorioMaster(id);
-        else if (activeTab === 'CATEGORIES') await InventoryService.deleteCategoria(id);
-        else if (activeTab === 'LOCATIONS') await InventoryService.deleteUbicacion(id);
-        Swal.fire('Eliminado', 'Registro eliminado.', 'success');
-        loadData();
-      } catch (error: any) { Swal.fire('Error', error.message, 'error'); }
-    }
+      const result = await Swal.fire({
+          title: '¿Eliminar registro?',
+          text: "Esta acción no se puede deshacer.",
+          icon: 'warning',
+          showCancelButton: true,
+          confirmButtonColor: '#d33',
+          confirmButtonText: 'Sí, eliminar'
+      });
+
+      if (result.isConfirmed) {
+          try {
+            if (activeTab === 'TELEPHONES') await InventoryService.deleteTelefono(id);
+            else if (activeTab === 'STOCK') await InventoryService.deleteStock(id);
+            else if (activeTab === 'MASTER') await InventoryService.deleteAccesorioMaster(id);
+            else if (activeTab === 'CATEGORIES') await InventoryService.deleteCategoria(id);
+            else if (activeTab === 'LOCATIONS') await InventoryService.deleteUbicacion(id);
+            
+            Swal.fire('Eliminado', 'Registro eliminado.', 'success');
+            loadData();
+          } catch (error: any) {
+             Swal.fire('Error', error.message, 'error');
+          }
+      }
   };
 
-  const filteredPhones = phones.filter(p => {
-      const matchSearch = JSON.stringify(p).toLowerCase().includes(searchTerm.toLowerCase());
-      const matchState = phoneStateFilter === 'TODOS' ? true : p.estado === phoneStateFilter;
-      return matchSearch && matchState;
-  });
+  const renderContent = () => {
+      if (loading) return <div className="p-8 text-center text-slate-500">Cargando datos...</div>;
+
+      if (activeTab === 'TELEPHONES') {
+          const filtered = phones.filter(p => 
+              p.marca.toLowerCase().includes(searchTerm.toLowerCase()) || 
+              p.modelo.toLowerCase().includes(searchTerm.toLowerCase()) ||
+              p.imei1.includes(searchTerm)
+          );
+          return (
+              <table className="w-full text-left">
+                  <thead className="bg-slate-50 text-xs font-bold text-slate-500 uppercase sticky top-0">
+                      <tr>
+                          <th className="p-3">Código</th>
+                          <th className="p-3">Marca/Modelo</th>
+                          <th className="p-3">IMEI</th>
+                          <th className="p-3">Precio Venta</th>
+                          <th className="p-3">Ubicación</th>
+                          <th className="p-3">Estado</th>
+                          <th className="p-3 text-right">Acciones</th>
+                      </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                      {filtered.map(p => (
+                          <tr key={p.codigo} className="hover:bg-slate-50 text-sm">
+                              <td className="p-3 font-mono text-slate-500">{p.codigo}</td>
+                              <td className="p-3 font-bold text-slate-700">{p.marca} {p.modelo}</td>
+                              <td className="p-3 font-mono">{p.imei1}</td>
+                              <td className="p-3 font-bold text-emerald-600">L. {Number(p.precioVenta).toFixed(2)}</td>
+                              <td className="p-3 text-xs">{p.nombreUbicacion || p.idubicacion}</td>
+                              <td className="p-3"><span className={`px-2 py-1 rounded-full text-xs font-bold ${p.estado === 'Disponible' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>{p.estado}</span></td>
+                              <td className="p-3 text-right">
+                                  <button onClick={() => openModal(p)} className="text-blue-500 hover:bg-blue-50 p-1.5 rounded mr-1"><Edit2 size={16}/></button>
+                                  <button onClick={() => handleDelete(p.codigo)} className="text-red-500 hover:bg-red-50 p-1.5 rounded"><Trash2 size={16}/></button>
+                              </td>
+                          </tr>
+                      ))}
+                  </tbody>
+              </table>
+          );
+      }
+
+      if (activeTab === 'STOCK') {
+        const filtered = stock.filter(s => 
+            s.descripcionAccesorio?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            s.codInventario.toLowerCase().includes(searchTerm.toLowerCase())
+        );
+        return (
+            <table className="w-full text-left">
+                <thead className="bg-slate-50 text-xs font-bold text-slate-500 uppercase sticky top-0">
+                    <tr>
+                        <th className="p-3">SKU</th>
+                        <th className="p-3">Descripción</th>
+                        <th className="p-3">Categoría</th>
+                        <th className="p-3 text-center">Cant.</th>
+                        <th className="p-3 text-right">P. Venta</th>
+                        <th className="p-3">Ubicación</th>
+                        <th className="p-3 text-right">Acciones</th>
+                    </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                    {filtered.map(s => (
+                        <tr key={s.codInventario} className="hover:bg-slate-50 text-sm">
+                            <td className="p-3 font-mono text-slate-500 text-xs">{s.codInventario}</td>
+                            <td className="p-3 font-bold text-slate-700">{s.descripcionAccesorio}</td>
+                            <td className="p-3 text-xs">{s.categoriaAccesorio}</td>
+                            <td className="p-3 text-center font-bold bg-slate-50">{s.cantidad}</td>
+                            <td className="p-3 text-right font-bold text-emerald-600">L. {Number(s.precioVenta).toFixed(2)}</td>
+                            <td className="p-3 text-xs">{s.nombreUbicacion || s.idubicacion}</td>
+                            <td className="p-3 text-right">
+                                <button onClick={() => openModal(s)} className="text-blue-500 hover:bg-blue-50 p-1.5 rounded mr-1"><Edit2 size={16}/></button>
+                                <button onClick={() => handleDelete(s.codInventario)} className="text-red-500 hover:bg-red-50 p-1.5 rounded"><Trash2 size={16}/></button>
+                            </td>
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
+        );
+      }
+
+      if (activeTab === 'MASTER') {
+          return (
+            <table className="w-full text-left">
+                <thead className="bg-slate-50 text-xs font-bold text-slate-500 uppercase sticky top-0">
+                    <tr>
+                        <th className="p-3">ID</th>
+                        <th className="p-3">Descripción</th>
+                        <th className="p-3">Categoría</th>
+                        <th className="p-3 text-right">Acciones</th>
+                    </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                    {master.filter(m => m.descripcion.toLowerCase().includes(searchTerm.toLowerCase())).map(m => (
+                        <tr key={m.codAccesorio} className="hover:bg-slate-50 text-sm">
+                            <td className="p-3 font-mono text-slate-500 text-xs">{m.codAccesorio}</td>
+                            <td className="p-3 font-bold text-slate-700">{m.descripcion}</td>
+                            <td className="p-3">{m.nombreCategoria || m.codCategoria}</td>
+                            <td className="p-3 text-right">
+                                <button onClick={() => openModal(m)} className="text-blue-500 hover:bg-blue-50 p-1.5 rounded mr-1"><Edit2 size={16}/></button>
+                                <button onClick={() => handleDelete(m.codAccesorio)} className="text-red-500 hover:bg-red-50 p-1.5 rounded"><Trash2 size={16}/></button>
+                            </td>
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
+          );
+      }
+
+      if (activeTab === 'CATEGORIES') {
+          return (
+             <div className="p-4 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                 {categories.map(c => (
+                     <div key={c.codCategoria} className="bg-white border border-slate-200 rounded-xl p-4 flex justify-between items-center shadow-sm">
+                         <div>
+                             <p className="font-bold text-slate-700">{c.tipo}</p>
+                             <p className="text-xs text-slate-400 font-mono">{c.codCategoria}</p>
+                         </div>
+                         <div className="flex gap-1">
+                            <button onClick={() => openModal(c)} className="text-blue-500 hover:bg-blue-50 p-1.5 rounded"><Edit2 size={16}/></button>
+                            <button onClick={() => handleDelete(c.codCategoria)} className="text-red-500 hover:bg-red-50 p-1.5 rounded"><Trash2 size={16}/></button>
+                         </div>
+                     </div>
+                 ))}
+             </div>
+          );
+      }
+
+      if (activeTab === 'LOCATIONS') {
+          return (
+             <div className="p-4 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                 {locations.map(l => (
+                     <div key={l.idUbicacion} className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm relative overflow-hidden group">
+                         <div className={`absolute left-0 top-0 bottom-0 w-1 ${l.estado === 'Activo' ? 'bg-green-500' : 'bg-red-500'}`}/>
+                         <div className="pl-3">
+                             <div className="flex justify-between items-start">
+                                 <div>
+                                    <h4 className="font-bold text-slate-800">{l.nombre}</h4>
+                                    <p className="text-xs text-slate-500">{l.descripcion}</p>
+                                 </div>
+                                 <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <button onClick={() => openModal(l)} className="text-blue-500 hover:bg-blue-50 p-1.5 rounded"><Edit2 size={16}/></button>
+                                    <button onClick={() => handleDelete(l.idUbicacion)} className="text-red-500 hover:bg-red-50 p-1.5 rounded"><Trash2 size={16}/></button>
+                                 </div>
+                             </div>
+                             <div className="mt-3 flex gap-2 text-xs">
+                                 <span className="bg-slate-100 px-2 py-1 rounded text-slate-600 font-mono">Estante: {l.estante}</span>
+                                 <span className="bg-slate-100 px-2 py-1 rounded text-slate-600 font-mono">Nivel: {l.nivel}</span>
+                             </div>
+                         </div>
+                     </div>
+                 ))}
+             </div>
+          );
+      }
+  };
 
   return (
     <div className="space-y-6 h-full flex flex-col">
-      {/* HEADER & TABS */}
-      <div>
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-6 gap-4">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
           <div>
-            <h2 className="text-2xl font-bold text-slate-800">Gestión de Inventario</h2>
-            <p className="text-slate-500 text-sm">Administra teléfonos, accesorios y configuraciones</p>
+            <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
+                <Package className="text-indigo-600"/> Gestión de Inventario
+            </h2>
+            <p className="text-slate-500 text-sm">Control de teléfonos, accesorios y configuraciones.</p>
           </div>
-          <div className="flex gap-2 w-full md:w-auto">
-            <button 
-                onClick={openNewModal}
-                className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-lg flex items-center gap-2 font-bold shadow-lg shadow-indigo-600/20 transition-all flex-1 justify-center md:flex-initial"
-            >
-                <PlusCircle size={20} />
-                <span>Nuevo</span>
-            </button>
-          </div>
-        </div>
+          <button 
+             onClick={() => openModal()} 
+             className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-lg flex items-center gap-2 font-bold shadow-lg shadow-indigo-600/20 transition-all"
+          >
+             <PlusCircle size={20}/>
+             <span>Nuevo Registro</span>
+          </button>
+      </div>
 
-        <div className="bg-white rounded-t-2xl border-b border-slate-200 px-2 pt-2 flex overflow-x-auto no-scrollbar">
+      <div className="flex gap-2 overflow-x-auto no-scrollbar pb-2">
           {[
-            { id: 'TELEPHONES', label: 'Teléfonos', icon: <Smartphone size={18}/> },
-            { id: 'STOCK', label: 'Stock Accesorios', icon: <Box size={18}/> },
-            { id: 'MASTER', label: 'Accesorios', icon: <Headphones size={18}/> },
-            { id: 'CATEGORIES', label: 'Categorías', icon: <Tag size={18}/> },
-            { id: 'LOCATIONS', label: 'Ubicaciones', icon: <MapPin size={18}/> },
+              { id: 'TELEPHONES', label: 'Teléfonos', icon: <Smartphone size={18}/> },
+              { id: 'STOCK', label: 'Stock Accesorios', icon: <Box size={18}/> },
+              { id: 'MASTER', label: 'Catálogo Maestro', icon: <Layers size={18}/> },
+              { id: 'CATEGORIES', label: 'Categorías', icon: <Tag size={18}/> },
+              { id: 'LOCATIONS', label: 'Ubicaciones', icon: <MapPin size={18}/> },
           ].map(tab => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id as InventoryTab)}
-              className={`flex items-center gap-2 px-4 md:px-6 py-4 border-b-2 font-medium text-sm whitespace-nowrap transition-colors flex-shrink-0 ${
-                activeTab === tab.id 
-                  ? 'border-indigo-600 text-indigo-600 bg-indigo-50/50' 
-                  : 'border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50'
-              }`}
-            >
-              {tab.icon} {tab.label}
-            </button>
+              <button 
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id as InventoryTab)}
+                className={`px-4 py-2 rounded-xl font-bold text-sm flex items-center gap-2 transition-all whitespace-nowrap
+                   ${activeTab === tab.id ? 'bg-white text-indigo-600 shadow-sm border border-indigo-100' : 'text-slate-500 hover:bg-white hover:text-slate-700'}`}
+              >
+                  {tab.icon} {tab.label}
+              </button>
           ))}
-        </div>
-        
-        {/* SEARCH BAR & FILTERS */}
-        <div className="bg-white border-x border-b border-slate-200 p-3 flex flex-col md:flex-row gap-3 rounded-b-xl mb-4">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-            <input 
-              type="text" 
-              placeholder="Buscar..." 
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 bg-slate-100 border-none rounded-lg text-sm focus:ring-2 focus:ring-indigo-500/20"
-            />
-          </div>
-          
-          {activeTab === 'TELEPHONES' && (
-              <div className="flex items-center gap-2 bg-slate-100 rounded-lg px-3 py-1">
-                  <Filter size={16} className="text-slate-400"/>
-                  <select 
-                    value={phoneStateFilter} 
-                    onChange={e => setPhoneStateFilter(e.target.value)}
-                    className="bg-transparent text-sm border-none focus:ring-0 text-slate-700 font-medium"
-                  >
-                      <option value="Disponible">Disponibles</option>
-                      <option value="Vendido">Vendidos</option>
-                      <option value="TODOS">Todos</option>
-                  </select>
-              </div>
+      </div>
+
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col flex-1">
+          {(activeTab === 'TELEPHONES' || activeTab === 'STOCK' || activeTab === 'MASTER') && (
+            <div className="p-4 border-b border-slate-100 flex gap-4 bg-slate-50">
+                <div className="relative flex-1 max-w-md">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                    <input 
+                    type="text" 
+                    placeholder="Buscar..." 
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500/20 outline-none"
+                    />
+                </div>
+                <button onClick={loadData} className="p-2 text-slate-500 hover:bg-slate-200 rounded-lg border border-slate-200 bg-white">
+                    <RefreshCw size={20} />
+                </button>
+            </div>
           )}
 
-          <button onClick={loadData} className="p-2 text-slate-500 hover:bg-slate-100 rounded-lg">
-            <RefreshCw size={20} />
-          </button>
-        </div>
+          <div className="flex-1 overflow-auto">
+              {renderContent()}
+          </div>
       </div>
 
-      {/* CONTENT TABLE */}
-      <div className="flex-1 bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden relative">
-        <div className="overflow-x-auto h-full">
-          <table className="w-full text-left border-collapse min-w-[800px] md:min-w-full">
-            <thead className="bg-slate-50 border-b border-slate-200 sticky top-0 z-10">
-              <tr>
-                {activeTab === 'TELEPHONES' && (
-                  <>
-                    <th className="p-4 text-xs font-bold text-slate-500 uppercase">COD</th>
-                    <th className="p-4 text-xs font-bold text-slate-500 uppercase">IMEI</th>
-                    <th className="p-4 text-xs font-bold text-slate-500 uppercase">Marca/Modelo</th>
-                    <th className="p-4 text-xs font-bold text-slate-500 uppercase text-right">Precio V.</th>
-                    <th className="p-4 text-xs font-bold text-slate-500 uppercase text-center">Estado</th>
-                    <th className="p-4 text-xs font-bold text-slate-500 uppercase text-center">Acciones</th>
-                  </>
-                )}
-                {activeTab === 'STOCK' && (
-                  <>
-                    <th className="p-4 text-xs font-bold text-slate-500 uppercase">COD</th>
-                    <th className="p-4 text-xs font-bold text-slate-500 uppercase">Descripción</th>
-                    <th className="p-4 text-xs font-bold text-slate-500 uppercase text-center">Cant.</th>
-                    <th className="p-4 text-xs font-bold text-slate-500 uppercase text-right">Precio V.</th>
-                    <th className="p-4 text-xs font-bold text-slate-500 uppercase">Ubicación</th>
-                    <th className="p-4 text-xs font-bold text-slate-500 uppercase text-center">Acciones</th>
-                  </>
-                )}
-                 {activeTab === 'MASTER' && (
-                  <>
-                    <th className="p-4 text-xs font-bold text-slate-500 uppercase">Cod</th>
-                    <th className="p-4 text-xs font-bold text-slate-500 uppercase">Categoría</th>
-                    <th className="p-4 text-xs font-bold text-slate-500 uppercase">Descripción</th>
-                    <th className="p-4 text-xs font-bold text-slate-500 uppercase text-center">Acciones</th>
-                  </>
-                )}
-                 {(activeTab === 'CATEGORIES' || activeTab === 'LOCATIONS') && (
-                  <>
-                     <th className="p-4 text-xs font-bold text-slate-500 uppercase">ID</th>
-                     <th className="p-4 text-xs font-bold text-slate-500 uppercase">Nombre/Tipo</th>
-                     <th className="p-4 text-xs font-bold text-slate-500 uppercase text-center">Acciones</th>
-                  </>
-                 )}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {activeTab === 'TELEPHONES' && filteredPhones.map(p => (
-                <tr key={p.codigo} className="hover:bg-slate-50">
-                  <td className="p-4 text-xs font-mono text-slate-500">{p.codigo}</td>
-                  <td className="p-4 text-xs font-mono text-slate-600 font-bold">{p.imei1}</td>
-                  <td className="p-4 text-sm font-medium text-slate-800">{p.marca} {p.modelo}</td>
-                  <td className="p-4 text-sm text-right font-bold text-emerald-600">L. {Number(p.precioVenta).toFixed(2)}</td>
-                  <td className="p-4 text-center">
-                      <span className={`text-[10px] px-2 py-1 rounded font-bold uppercase ${p.estado === 'Disponible' ? 'bg-green-100 text-green-700' : 'bg-slate-200 text-slate-600'}`}>{p.estado}</span>
-                  </td>
-                  <td className="p-4 text-center flex items-center justify-center gap-2">
-                    <button 
-                        onClick={() => printLabel('TELEPHONE', p)}
-                        className="text-slate-500 hover:text-indigo-600" 
-                        title="Imprimir Etiqueta"
-                    ><Printer size={16} /></button>
-                    <button onClick={() => openEditModal(p)} className="text-blue-500 hover:bg-blue-50 p-1.5 rounded"><Edit2 size={16}/></button>
-                    <button onClick={() => handleDelete(p.codigo)} className="text-red-500 hover:bg-red-50 p-1.5 rounded"><Trash2 size={16}/></button>
-                  </td>
-                </tr>
-              ))}
-              
-              {activeTab === 'STOCK' && stock.filter(s => JSON.stringify(s).toLowerCase().includes(searchTerm.toLowerCase())).map(s => (
-                <tr key={s.codInventario} className="hover:bg-slate-50">
-                  <td className="p-4 text-xs font-mono text-slate-500">{s.codInventario}</td>
-                  <td className="p-4 text-sm font-medium text-slate-800">
-                      <span className="text-xs text-slate-500 uppercase font-bold mr-1">{s.categoriaAccesorio}</span>
-                      {s.descripcionAccesorio || s.codAccesorio}
-                  </td>
-                  <td className="p-4 text-center"><span className={`px-2 py-1 rounded text-xs font-bold ${s.cantidad < 3 ? 'bg-amber-100 text-amber-600' : 'bg-green-100 text-green-600'}`}>{s.cantidad}</span></td>
-                  <td className="p-4 text-sm text-right font-bold text-emerald-600">L. {Number(s.precioVenta).toFixed(2)}</td>
-                  <td className="p-4 text-xs text-slate-500 truncate max-w-[150px]">{s.nombreUbicacion || s.idubicacion}</td>
-                  <td className="p-4 text-center flex items-center justify-center gap-2">
-                    <button 
-                        onClick={() => printLabel('ACCESSORY', s)}
-                        className="text-slate-500 hover:text-indigo-600" 
-                        title="Imprimir Etiqueta"
-                    ><Printer size={16} /></button>
-                    <button onClick={() => openEditModal(s)} className="text-blue-500 hover:bg-blue-50 p-1.5 rounded"><Edit2 size={16}/></button>
-                    <button onClick={() => handleDelete(s.codInventario)} className="text-red-500 hover:bg-red-50 p-1.5 rounded"><Trash2 size={16}/></button>
-                  </td>
-                </tr>
-              ))}
-
-              {/* ... Rest of tabs ... */}
-              {activeTab === 'MASTER' && master.filter(m => JSON.stringify(m).toLowerCase().includes(searchTerm.toLowerCase())).map(m => (
-                <tr key={m.codAccesorio} className="hover:bg-slate-50">
-                  <td className="p-4 text-xs font-mono text-slate-500">{m.codAccesorio}</td>
-                  <td className="p-4 text-xs text-slate-500">{m.nombreCategoria || m.codCategoria}</td>
-                  <td className="p-4 text-sm font-medium text-slate-800">{m.descripcion}</td>
-                  <td className="p-4 text-center flex items-center justify-center gap-2">
-                    <button onClick={() => openEditModal(m)} className="text-blue-500 hover:bg-blue-50 p-1.5 rounded"><Edit2 size={16}/></button>
-                    <button onClick={() => handleDelete(m.codAccesorio)} className="text-red-500 hover:bg-red-50 p-1.5 rounded"><Trash2 size={16}/></button>
-                  </td>
-                </tr>
-              ))}
-              
-              {activeTab === 'CATEGORIES' && categories.map(c => (
-                <tr key={c.codCategoria} className="hover:bg-slate-50">
-                   <td className="p-4 text-xs font-mono text-slate-500">{c.codCategoria}</td>
-                   <td className="p-4 text-sm font-bold text-slate-700">{c.tipo}</td>
-                   <td className="p-4 text-center flex items-center justify-center gap-2">
-                      <button onClick={() => openEditModal(c)} className="text-blue-500 hover:bg-blue-50 p-1.5 rounded"><Edit2 size={16}/></button>
-                      <button onClick={() => handleDelete(c.codCategoria)} className="text-red-500 hover:bg-red-50 p-1.5 rounded"><Trash2 size={16}/></button>
-                   </td>
-                </tr>
-              ))}
-              
-              {activeTab === 'LOCATIONS' && locations.map(l => (
-                <tr key={l.idUbicacion} className="hover:bg-slate-50">
-                   <td className="p-4 text-xs font-mono text-slate-500">{l.idUbicacion}</td>
-                   <td className="p-4 text-sm font-bold text-slate-700">{l.nombre} <span className="text-xs font-normal text-slate-400">({l.estante}-{l.nivel})</span></td>
-                   <td className="p-4 text-center flex items-center justify-center gap-2">
-                      <button onClick={() => openEditModal(l)} className="text-blue-500 hover:bg-blue-50 p-1.5 rounded"><Edit2 size={16}/></button>
-                      <button onClick={() => handleDelete(l.idUbicacion)} className="text-red-500 hover:bg-red-50 p-1.5 rounded"><Trash2 size={16}/></button>
-                   </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* Modal */}
       {showModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl p-6 animate-fade-in max-h-[90vh] overflow-y-auto">
-            {/* Modal Content */}
-            <div className="flex justify-between items-center mb-6 border-b border-slate-100 pb-4">
-              <h3 className="text-xl font-bold text-slate-800">
-                {isEditing ? 'Editar' : 'Nuevo'}
-              </h3>
-              <button onClick={() => setShowModal(false)} className="text-slate-400 hover:text-red-500"><X size={24}/></button>
-            </div>
-            
-            <form onSubmit={handleSubmit} className="space-y-4">
-               {/* Forms Logic */}
-               {activeTab === 'TELEPHONES' && (
-                 <>
-                   <div className="grid grid-cols-2 gap-4">
-                     <div>
-                       <label className="text-xs font-bold text-slate-500 uppercase">IMEI 1</label>
-                       <input className="w-full p-2.5 border rounded-lg mt-1" value={phoneForm.imei1 || ''} onChange={e => setPhoneForm({...phoneForm, imei1: e.target.value})} required placeholder="Principal"/>
-                     </div>
-                     <div>
-                       <label className="text-xs font-bold text-slate-500 uppercase">IMEI 2 (Opcional)</label>
-                       <input className="w-full p-2.5 border rounded-lg mt-1" value={phoneForm.imei2 || ''} onChange={e => setPhoneForm({...phoneForm, imei2: e.target.value})} placeholder="Secundario"/>
-                     </div>
-                   </div>
-
-                   <div>
-                      <label className="text-xs font-bold text-slate-500 uppercase">Marca</label>
-                      {!manualBrandMode ? (
-                        <select 
-                          className="w-full p-2.5 border rounded-lg mt-1 bg-white"
-                          value={phoneForm.marca || ''} 
-                          onChange={(e) => {
-                             if(e.target.value === 'NEW') {
-                               setManualBrandMode(true);
-                               setPhoneForm({...phoneForm, marca: ''});
-                             } else {
-                               setPhoneForm({...phoneForm, marca: e.target.value});
-                             }
-                          }}
-                          required
-                        >
-                          <option value="">Seleccionar Marca...</option>
-                          {uniqueBrands.map(b => <option key={b} value={b}>{b}</option>)}
-                          <option value="NEW" className="font-bold text-indigo-600">+ NUEVA MARCA...</option>
-                        </select>
-                      ) : (
-                        <div className="flex gap-2">
-                           <input autoFocus className="w-full p-2.5 border-2 border-indigo-200 rounded-lg mt-1" placeholder="Escriba la marca..." value={phoneForm.marca || ''} onChange={e => setPhoneForm({...phoneForm, marca: e.target.value})} required />
-                           <button type="button" onClick={() => setManualBrandMode(false)} className="mt-1 p-2 bg-slate-100 rounded text-slate-500"><X size={16}/></button>
+          <div className="bg-white rounded-2xl w-full max-w-2xl shadow-2xl p-6 animate-fade-in max-h-[90vh] overflow-y-auto">
+             <div className="flex justify-between items-center mb-6 border-b border-slate-100 pb-4">
+                <h3 className="text-xl font-bold text-slate-800">
+                    {isEditing ? 'Editar' : 'Nuevo'} {activeTab === 'TELEPHONES' ? 'Teléfono' : activeTab === 'STOCK' ? 'Item Inventario' : activeTab === 'MASTER' ? 'Producto Maestro' : activeTab === 'CATEGORIES' ? 'Categoría' : 'Ubicación'}
+                </h3>
+                <button onClick={() => setShowModal(false)} className="text-slate-400 hover:text-red-500"><X size={24}/></button>
+             </div>
+             
+             <form onSubmit={handleSubmit} className="space-y-4">
+                
+                {/* FORMULARIO TELEFONOS */}
+                {activeTab === 'TELEPHONES' && (
+                    <>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <label className="text-xs font-bold text-slate-500 uppercase">Marca</label>
+                                <input required className="w-full p-2.5 bg-slate-50 border rounded-lg mt-1" value={phoneForm.marca || ''} onChange={e => setPhoneForm({...phoneForm, marca: e.target.value})} />
+                            </div>
+                            <div>
+                                <label className="text-xs font-bold text-slate-500 uppercase">Modelo</label>
+                                <input required className="w-full p-2.5 bg-slate-50 border rounded-lg mt-1" value={phoneForm.modelo || ''} onChange={e => setPhoneForm({...phoneForm, modelo: e.target.value})} />
+                            </div>
                         </div>
-                      )}
-                   </div>
-
-                   <div>
-                      <label className="text-xs font-bold text-slate-500 uppercase">Modelo</label>
-                      {!manualModelMode ? (
-                        <select 
-                          className="w-full p-2.5 border rounded-lg mt-1 bg-white disabled:bg-slate-100"
-                          value={phoneForm.modelo || ''} 
-                          disabled={!phoneForm.marca || manualBrandMode}
-                          onChange={(e) => {
-                             if(e.target.value === 'NEW') {
-                               setManualModelMode(true);
-                               setPhoneForm({...phoneForm, modelo: ''});
-                             } else {
-                               setPhoneForm({...phoneForm, modelo: e.target.value});
-                             }
-                          }}
-                          required
-                        >
-                          <option value="">Seleccionar Modelo...</option>
-                          {availableModels.map(m => <option key={m} value={m}>{m}</option>)}
-                          <option value="NEW" className="font-bold text-indigo-600">+ NUEVO MODELO...</option>
-                        </select>
-                      ) : (
-                         <div className="flex gap-2">
-                           <input autoFocus className="w-full p-2.5 border-2 border-indigo-200 rounded-lg mt-1" placeholder="Escriba el modelo..." value={phoneForm.modelo || ''} onChange={e => setPhoneForm({...phoneForm, modelo: e.target.value})} required />
-                           <button type="button" onClick={() => setManualModelMode(false)} className="mt-1 p-2 bg-slate-100 rounded text-slate-500"><X size={16}/></button>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <label className="text-xs font-bold text-slate-500 uppercase">IMEI 1</label>
+                                <input required className="w-full p-2.5 bg-slate-50 border rounded-lg mt-1" value={phoneForm.imei1 || ''} onChange={e => setPhoneForm({...phoneForm, imei1: e.target.value})} placeholder="Requerido" />
+                            </div>
+                            <div>
+                                <label className="text-xs font-bold text-slate-500 uppercase">IMEI 2 (Opcional)</label>
+                                <input className="w-full p-2.5 bg-slate-50 border rounded-lg mt-1" value={phoneForm.imei2 || ''} onChange={e => setPhoneForm({...phoneForm, imei2: e.target.value})} />
+                            </div>
                         </div>
-                      )}
-                   </div>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <label className="text-xs font-bold text-slate-500 uppercase">Precio Compra</label>
+                                <input required type="number" className="w-full p-2.5 bg-slate-50 border rounded-lg mt-1" value={phoneForm.precioCompra || ''} onChange={e => setPhoneForm({...phoneForm, precioCompra: Number(e.target.value)})} />
+                            </div>
+                            <div>
+                                <label className="text-xs font-bold text-slate-500 uppercase">Precio Venta</label>
+                                <input required type="number" className="w-full p-2.5 bg-slate-50 border rounded-lg mt-1 font-bold text-emerald-600" value={phoneForm.precioVenta || ''} onChange={e => setPhoneForm({...phoneForm, precioVenta: Number(e.target.value)})} />
+                            </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                             <div>
+                                <label className="text-xs font-bold text-slate-500 uppercase">Proveedor</label>
+                                <select required className="w-full p-2.5 bg-slate-50 border rounded-lg mt-1" value={phoneForm.codProveedor || ''} onChange={e => setPhoneForm({...phoneForm, codProveedor: e.target.value})}>
+                                    <option value="">-- Seleccionar --</option>
+                                    {providers.map(p => <option key={p.codProveedor} value={p.codProveedor}>{p.nombre}</option>)}
+                                </select>
+                            </div>
+                            <div>
+                                <label className="text-xs font-bold text-slate-500 uppercase">Ubicación</label>
+                                <select required className="w-full p-2.5 bg-slate-50 border rounded-lg mt-1" value={phoneForm.idubicacion || ''} onChange={e => setPhoneForm({...phoneForm, idubicacion: e.target.value})}>
+                                    <option value="">-- Seleccionar --</option>
+                                    {locations.map(l => <option key={l.idUbicacion} value={l.idUbicacion}>{l.nombre}</option>)}
+                                </select>
+                            </div>
+                        </div>
+                    </>
+                )}
 
-                   <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label className="text-xs font-bold text-slate-500 uppercase">Precio Compra</label>
-                        <input type="number" className="w-full p-2.5 border rounded-lg mt-1" value={phoneForm.precioCompra || ''} onChange={e => setPhoneForm({...phoneForm, precioCompra: Number(e.target.value)})} required/>
-                      </div>
-                      <div>
-                         <label className="text-xs font-bold text-slate-500 uppercase">Precio Venta</label>
-                         <input type="number" className="w-full p-2.5 border rounded-lg mt-1 font-bold text-emerald-600" value={phoneForm.precioVenta || ''} onChange={e => setPhoneForm({...phoneForm, precioVenta: Number(e.target.value)})} required/>
-                      </div>
-                   </div>
+                {/* FORMULARIO STOCK ACCESORIOS */}
+                {activeTab === 'STOCK' && (
+                    <>
+                        <div>
+                             <label className="text-xs font-bold text-slate-500 uppercase">Producto Maestro</label>
+                             <select required disabled={isEditing} className="w-full p-2.5 bg-slate-50 border rounded-lg mt-1 disabled:bg-slate-200" value={stockForm.codAccesorio || ''} onChange={e => setStockForm({...stockForm, codAccesorio: e.target.value})}>
+                                <option value="">-- Seleccionar Accesorio --</option>
+                                {master.map(m => <option key={m.codAccesorio} value={m.codAccesorio}>{m.descripcion}</option>)}
+                             </select>
+                        </div>
+                        <div className="grid grid-cols-3 gap-4">
+                            <div>
+                                <label className="text-xs font-bold text-slate-500 uppercase">Cantidad</label>
+                                <input required type="number" className="w-full p-2.5 bg-slate-50 border rounded-lg mt-1 font-bold" value={stockForm.cantidad || ''} onChange={e => setStockForm({...stockForm, cantidad: Number(e.target.value)})} />
+                            </div>
+                            <div>
+                                <label className="text-xs font-bold text-slate-500 uppercase">P. Compra</label>
+                                <input required type="number" className="w-full p-2.5 bg-slate-50 border rounded-lg mt-1" value={stockForm.precioCompra || ''} onChange={e => setStockForm({...stockForm, precioCompra: Number(e.target.value)})} />
+                            </div>
+                            <div>
+                                <label className="text-xs font-bold text-slate-500 uppercase">P. Venta</label>
+                                <input required type="number" className="w-full p-2.5 bg-slate-50 border rounded-lg mt-1 font-bold text-emerald-600" value={stockForm.precioVenta || ''} onChange={e => setStockForm({...stockForm, precioVenta: Number(e.target.value)})} />
+                            </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                             <div>
+                                <label className="text-xs font-bold text-slate-500 uppercase">Proveedor</label>
+                                <select required className="w-full p-2.5 bg-slate-50 border rounded-lg mt-1" value={stockForm.codProveedor || ''} onChange={e => setStockForm({...stockForm, codProveedor: e.target.value})}>
+                                    <option value="">-- Seleccionar --</option>
+                                    {providers.map(p => <option key={p.codProveedor} value={p.codProveedor}>{p.nombre}</option>)}
+                                </select>
+                            </div>
+                            <div>
+                                <label className="text-xs font-bold text-slate-500 uppercase">Ubicación</label>
+                                <select required className="w-full p-2.5 bg-slate-50 border rounded-lg mt-1" value={stockForm.idubicacion || ''} onChange={e => setStockForm({...stockForm, idubicacion: e.target.value})}>
+                                    <option value="">-- Seleccionar --</option>
+                                    {locations.map(l => <option key={l.idUbicacion} value={l.idUbicacion}>{l.nombre}</option>)}
+                                </select>
+                            </div>
+                        </div>
+                    </>
+                )}
 
-                   <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label className="text-xs font-bold text-slate-500 uppercase">Fecha Compra</label>
-                        <input type="date" className="w-full p-2.5 border rounded-lg mt-1" value={phoneForm.fecha || ''} onChange={e => setPhoneForm({...phoneForm, fecha: e.target.value})} required/>
-                      </div>
-                      <div>
-                        <label className="text-xs font-bold text-slate-500 uppercase">Ubicación</label>
-                        <select className="w-full p-2.5 border rounded-lg mt-1" value={phoneForm.idubicacion || ''} onChange={e => setPhoneForm({...phoneForm, idubicacion: e.target.value})} required>
-                            <option value="">Seleccionar...</option>
-                            {locations.map(l => (
-                                <option key={l.idUbicacion} value={l.idUbicacion}>
-                                    {l.nombre} - Estante {l.estante} (Nivel {l.nivel})
-                                </option>
-                            ))}
-                        </select>
-                      </div>
-                   </div>
-                   
-                   <div>
-                      <label className="text-xs font-bold text-slate-500 uppercase">Proveedor</label>
-                      <select className="w-full p-2.5 border rounded-lg mt-1" value={phoneForm.codProveedor || ''} onChange={e => setPhoneForm({...phoneForm, codProveedor: e.target.value})} required>
-                          <option value="">Seleccionar...</option>
-                          {providers.map(p => <option key={p.codProveedor} value={p.codProveedor}>{p.nombre}</option>)}
-                      </select>
-                   </div>
-                 </>
-               )}
+                {/* FORMULARIO MAESTRO */}
+                {activeTab === 'MASTER' && (
+                    <>
+                        <div>
+                            <label className="text-xs font-bold text-slate-500 uppercase">Descripción</label>
+                            <input required className="w-full p-2.5 bg-slate-50 border rounded-lg mt-1" value={masterForm.descripcion || ''} onChange={e => setMasterForm({...masterForm, descripcion: e.target.value})} placeholder="Ej: Cargador Samsung Tipo C" />
+                        </div>
+                        <div>
+                             <label className="text-xs font-bold text-slate-500 uppercase">Categoría</label>
+                             <select required className="w-full p-2.5 bg-slate-50 border rounded-lg mt-1" value={masterForm.codCategoria || ''} onChange={e => setMasterForm({...masterForm, codCategoria: e.target.value})}>
+                                <option value="">-- Seleccionar --</option>
+                                {categories.map(c => <option key={c.codCategoria} value={c.codCategoria}>{c.tipo}</option>)}
+                             </select>
+                        </div>
+                    </>
+                )}
 
-               {activeTab === 'STOCK' && (
-                 <>
-                   <div>
-                      <label className="text-xs font-bold text-slate-500 uppercase">Accesorio (Maestro)</label>
-                      <select 
-                        disabled={isEditing}
-                        className="w-full p-2.5 border rounded-lg mt-1 disabled:bg-slate-200" 
-                        value={stockForm.codAccesorio || ''} 
-                        onChange={e => setStockForm({...stockForm, codAccesorio: e.target.value})} 
-                        required
-                      >
-                          <option value="">Seleccionar Producto Base...</option>
-                          {master.map(m => <option key={m.codAccesorio} value={m.codAccesorio}>{m.descripcion}</option>)}
-                      </select>
-                   </div>
-                   <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label className="text-xs font-bold text-slate-500 uppercase">Cantidad</label>
-                        <input type="number" className="w-full p-2.5 border rounded-lg mt-1 font-bold" value={stockForm.cantidad || ''} onChange={e => setStockForm({...stockForm, cantidad: Number(e.target.value)})} required/>
-                      </div>
-                      <div>
-                         <label className="text-xs font-bold text-slate-500 uppercase">Ubicación</label>
-                         <select className="w-full p-2.5 border rounded-lg mt-1" value={stockForm.idubicacion || ''} onChange={e => setStockForm({...stockForm, idubicacion: e.target.value})} required>
-                            <option value="">Seleccionar...</option>
-                            {locations.map(l => (
-                                <option key={l.idUbicacion} value={l.idUbicacion}>
-                                    {l.nombre} - Estante {l.estante} (Nivel {l.nivel})
-                                </option>
-                            ))}
-                        </select>
-                      </div>
-                   </div>
-                   <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label className="text-xs font-bold text-slate-500 uppercase">Precio Compra</label>
-                        <input type="number" className="w-full p-2.5 border rounded-lg mt-1" value={stockForm.precioCompra || ''} onChange={e => setStockForm({...stockForm, precioCompra: Number(e.target.value)})} required/>
-                      </div>
-                      <div>
-                         <label className="text-xs font-bold text-slate-500 uppercase">Precio Venta</label>
-                         <input type="number" className="w-full p-2.5 border rounded-lg mt-1 font-bold text-emerald-600" value={stockForm.precioVenta || ''} onChange={e => setStockForm({...stockForm, precioVenta: Number(e.target.value)})} required/>
-                      </div>
-                   </div>
-                   <div>
-                      <label className="text-xs font-bold text-slate-500 uppercase">Proveedor</label>
-                      <select className="w-full p-2.5 border rounded-lg mt-1" value={stockForm.codProveedor || ''} onChange={e => setStockForm({...stockForm, codProveedor: e.target.value})} required>
-                          <option value="">Seleccionar...</option>
-                          {providers.map(p => <option key={p.codProveedor} value={p.codProveedor}>{p.nombre}</option>)}
-                      </select>
-                   </div>
-                   <div>
-                      <label className="text-xs font-bold text-slate-500 uppercase">Estado</label>
-                      <select className="w-full p-2.5 border rounded-lg mt-1" value={stockForm.estado || 'Disponible'} onChange={e => setStockForm({...stockForm, estado: e.target.value as EstadoGeneral})}>
-                          <option value="Disponible">Disponible</option>
-                          <option value="Inactivo">Inactivo</option>
-                      </select>
-                   </div>
-                 </>
-               )}
+                {/* FORMULARIO CATEGORIAS */}
+                {activeTab === 'CATEGORIES' && (
+                     <div>
+                        <label className="text-xs font-bold text-slate-500 uppercase">Nombre Categoría</label>
+                        <input required className="w-full p-2.5 bg-slate-50 border rounded-lg mt-1" value={catForm.tipo || ''} onChange={e => setCatForm({...catForm, tipo: e.target.value})} />
+                    </div>
+                )}
 
-               {/* ... Other forms (Master, Categories, Locations) ... */}
-               {activeTab === 'MASTER' && (
-                 <>
-                   <div>
-                      <label className="text-xs font-bold text-slate-500 uppercase">Categoría</label>
-                      <select className="w-full p-2.5 border rounded-lg mt-1" value={masterForm.codCategoria || ''} onChange={e => setMasterForm({...masterForm, codCategoria: e.target.value})} required>
-                          <option value="">Seleccionar...</option>
-                          {categories.map(c => <option key={c.codCategoria} value={c.codCategoria}>{c.tipo}</option>)}
-                      </select>
-                   </div>
-                   <div>
-                      <label className="text-xs font-bold text-slate-500 uppercase">Descripción / Nombre Producto</label>
-                      <input className="w-full p-2.5 border rounded-lg mt-1" value={masterForm.descripcion || ''} onChange={e => setMasterForm({...masterForm, descripcion: e.target.value})} required placeholder="Ej: Funda Silicona iPhone 13"/>
-                   </div>
-                 </>
-               )}
+                {/* FORMULARIO UBICACIONES */}
+                {activeTab === 'LOCATIONS' && (
+                    <>
+                         <div>
+                            <label className="text-xs font-bold text-slate-500 uppercase">Nombre</label>
+                            <input required className="w-full p-2.5 bg-slate-50 border rounded-lg mt-1" value={locForm.nombre || ''} onChange={e => setLocForm({...locForm, nombre: e.target.value})} placeholder="Ej: Estante A1" />
+                        </div>
+                        <div>
+                            <label className="text-xs font-bold text-slate-500 uppercase">Descripción</label>
+                            <input required className="w-full p-2.5 bg-slate-50 border rounded-lg mt-1" value={locForm.descripcion || ''} onChange={e => setLocForm({...locForm, descripcion: e.target.value})} />
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <label className="text-xs font-bold text-slate-500 uppercase">Estante</label>
+                                <input className="w-full p-2.5 bg-slate-50 border rounded-lg mt-1" value={locForm.estante || ''} onChange={e => setLocForm({...locForm, estante: e.target.value})} />
+                            </div>
+                            <div>
+                                <label className="text-xs font-bold text-slate-500 uppercase">Nivel</label>
+                                <input className="w-full p-2.5 bg-slate-50 border rounded-lg mt-1" value={locForm.nivel || ''} onChange={e => setLocForm({...locForm, nivel: e.target.value})} />
+                            </div>
+                        </div>
+                    </>
+                )}
 
-               {activeTab === 'CATEGORIES' && (
-                 <div>
-                    <label className="text-xs font-bold text-slate-500 uppercase">Nombre Categoría</label>
-                    <input className="w-full p-2.5 border rounded-lg mt-1" value={catForm.tipo || ''} onChange={e => setCatForm({...catForm, tipo: e.target.value})} required placeholder="Ej: Fundas, Cargadores..."/>
-                 </div>
-               )}
-
-               {activeTab === 'LOCATIONS' && (
-                 <>
-                   <div>
-                      <label className="text-xs font-bold text-slate-500 uppercase">Nombre Ubicación</label>
-                      <input className="w-full p-2.5 border rounded-lg mt-1" value={locForm.nombre || ''} onChange={e => setLocForm({...locForm, nombre: e.target.value})} required placeholder="Ej: Vitrina Principal"/>
-                   </div>
-                   <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label className="text-xs font-bold text-slate-500 uppercase">Estante</label>
-                        <input className="w-full p-2.5 border rounded-lg mt-1" value={locForm.estante || ''} onChange={e => setLocForm({...locForm, estante: e.target.value})} required placeholder="A1"/>
-                      </div>
-                      <div>
-                        <label className="text-xs font-bold text-slate-500 uppercase">Nivel</label>
-                        <input className="w-full p-2.5 border rounded-lg mt-1" value={locForm.nivel || ''} onChange={e => setLocForm({...locForm, nivel: e.target.value})} required placeholder="1"/>
-                      </div>
-                   </div>
-                   <div>
-                      <label className="text-xs font-bold text-slate-500 uppercase">Descripción</label>
-                      <input className="w-full p-2.5 border rounded-lg mt-1" value={locForm.descripcion || ''} onChange={e => setLocForm({...locForm, descripcion: e.target.value})} required placeholder="Detalle..."/>
-                   </div>
-                   <div>
-                      <label className="text-xs font-bold text-slate-500 uppercase">Estado</label>
-                      <select className="w-full p-2.5 border rounded-lg mt-1" value={locForm.estado || 'Activo'} onChange={e => setLocForm({...locForm, estado: e.target.value as EstadoGeneral})}>
-                          <option value="Activo">Activo</option>
-                          <option value="Inactivo">Inactivo</option>
-                      </select>
-                   </div>
-                 </>
-               )}
-               
-               <div className="pt-4 flex gap-3">
-                 <button type="button" onClick={() => setShowModal(false)} className="flex-1 px-4 py-3 bg-slate-100 font-bold rounded-xl text-slate-600 hover:bg-slate-200">Cancelar</button>
-                 <button type="submit" className="flex-1 px-4 py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 shadow-lg">Guardar</button>
-               </div>
-            </form>
+                <div className="pt-4 flex gap-3">
+                    <button type="button" onClick={() => setShowModal(false)} className="flex-1 px-4 py-3 bg-slate-100 text-slate-600 font-bold rounded-xl hover:bg-slate-200">Cancelar</button>
+                    <button type="submit" className="flex-1 px-4 py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 shadow-lg shadow-indigo-600/20">{isEditing ? 'Actualizar' : 'Guardar'}</button>
+                </div>
+             </form>
           </div>
         </div>
       )}

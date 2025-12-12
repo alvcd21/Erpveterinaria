@@ -4,6 +4,9 @@ const router = express.Router();
 const { pool, generateNextId, handleDbError, updateArqueoBalance } = require('../config/db');
 const { authenticateToken } = require('../middleware/auth');
 
+// SQL para obtener hora local (Honduras UTC-6)
+const LOCAL_TIMESTAMP = "(NOW() AT TIME ZONE 'UTC' AT TIME ZONE 'America/Tegucigalpa')";
+
 // --- CLIENTES ---
 router.get('/clientes', authenticateToken, async (req, res) => {
     try {
@@ -15,7 +18,7 @@ router.get('/clientes', authenticateToken, async (req, res) => {
 router.post('/clientes', authenticateToken, async (req, res) => {
     try {
         const { identidad, nombre, apellido, direccion, telefono, correo } = req.body;
-        await pool.query('INSERT INTO clientes (identidad, nombre, apellido, direccion, telefono, correo, fechaCreacion) VALUES ($1,$2,$3,$4,$5,$6, NOW())',
+        await pool.query(`INSERT INTO clientes (identidad, nombre, apellido, direccion, telefono, correo, fechaCreacion) VALUES ($1,$2,$3,$4,$5,$6, ${LOCAL_TIMESTAMP})`,
             [identidad, nombre, apellido, direccion, telefono, correo]);
         res.status(201).json({ message: 'Cliente creado' });
     } catch(e) { handleDbError(res, e); }
@@ -105,9 +108,6 @@ router.post('/ventas', authenticateToken, async (req, res) => {
 
     // 2. Calcular Costo Total de la Venta (Pre-calculo para Ingreso)
     let totalCostoVenta = 0;
-    // Necesitamos iterar para calcular costos antes de insertar, 
-    // pero para eficiencia, lo haremos dentro del bucle de inserción si actualizamos el ingreso al final,
-    // O hacemos un bucle previo. Haremos bucle previo de costos para insertar Ingreso primero y tener el ID.
     for (const item of detalles) {
         if (item.tipoProducto === 'TELEFONO') {
             const telRes = await client.query("SELECT precioCompra FROM telefonos WHERE codigo = $1", [item.idTelefono]);
@@ -118,23 +118,26 @@ router.post('/ventas', authenticateToken, async (req, res) => {
         }
     }
 
-    // 3. Registrar INGRESO (Dinero en caja) - Primero para obtener el ID
+    // 3. Registrar INGRESO (Dinero en caja) 
+    // CORRECCIÓN ZONA HORARIA
     const idIngreso = await generateNextId('ingresos', 'idIngreso', 'INGR', client);
     await client.query(
       `INSERT INTO ingresos (idIngreso, idCaja, descripcion, monto, costo, fechaCreacion, estado) 
-       VALUES ($1, $2, $3, $4, $5, NOW(), 'Venta POS')`,
+       VALUES ($1, $2, $3, $4, $5, ${LOCAL_TIMESTAMP}, 'Venta POS')`,
       [idIngreso, idCaja, `Venta Factura #${codVenta}`, total, totalCostoVenta]
     );
 
     // 4. Registrar VENTA (Cabecera)
+    // CORRECCIÓN ZONA HORARIA: Si no viene fecha, usar LOCAL_TIMESTAMP
+    const fechaVenta = fecha ? `'${fecha}'` : LOCAL_TIMESTAMP;
+    
     await client.query(
       `INSERT INTO ventas (
           codVenta, fecha, codVendedor, identidadCliente, total, estado, 
           tipoCompra, isv, descuento, codUsuario
-       ) VALUES ($1, $2, $3, $4, $5, 'Completada', $6, $7, $8, $3)`,
+       ) VALUES ($1, ${fechaVenta}, $2, $3, $4, 'Completada', $5, $6, $7, $2)`,
       [
           codVenta, 
-          fecha || 'NOW()', 
           codUsuario, 
           identidadCliente, 
           total, 
@@ -145,7 +148,6 @@ router.post('/ventas', authenticateToken, async (req, res) => {
     );
 
     // 5. Registrar DETALLES y Actualizar Inventario
-    // Cambio de prefijo a PROD como solicitado
     const startIdStr = await generateNextId('detalleventa', 'codDetalleVenta', 'PROD', client);
     let currentDetailIdNum = parseInt(startIdStr.split('-')[1]);
 
@@ -157,28 +159,20 @@ router.post('/ventas', authenticateToken, async (req, res) => {
       let idTelefono = null;
 
       if (item.tipoProducto === 'TELEFONO') {
-        // Lógica Teléfono
         idTelefono = item.idTelefono;
-        idAccesorio = null; // NULL si es teléfono
-        
+        idAccesorio = null; 
         await client.query("UPDATE telefonos SET estado = 'Vendido' WHERE codigo = $1", [idTelefono]);
 
       } else if (item.tipoProducto === 'ACCESORIO') {
-        // Lógica Accesorio
-        idTelefono = null; // NULL si es accesorio
-        
-        // El frontend manda idInventario, buscamos el codAccesorio maestro
+        idTelefono = null; 
         const invRes = await client.query('SELECT codAccesorio FROM inventario WHERE codInventario = $1', [item.idInventario]);
         if(invRes.rows.length > 0) {
             idAccesorio = invRes.rows[0].codaccesorio;
         } else {
-            // Fallback si no encuentra (raro)
             idAccesorio = item.idInventario; 
         }
-        
         await client.query("UPDATE inventario SET cantidad = cantidad - $1 WHERE codInventario = $2", [item.cantidad, item.idInventario]);
       } else {
-        // Servicios u otros (no especificado en prompt pero por seguridad)
         idTelefono = null;
         idAccesorio = null;
       }
@@ -215,7 +209,7 @@ router.put('/ventas/:id', authenticateToken, async (req, res) => {
         if (ventaRes.rows.length === 0) throw new Error("Venta no encontrada");
         if (ventaRes.rows[0].estado === 'Anulada') throw new Error("No se puede editar una venta anulada");
 
-        // 1. Obtener ID Ingreso original para mantener la trazabilidad
+        // 1. Obtener ID Ingreso original
         const existingDetails = await client.query('SELECT idIngreso, idTelefono, idAccesorio, cantidad FROM detalleventa WHERE idVenta = $1', [codVenta]);
         let originalIdIngreso = null;
         if (existingDetails.rows.length > 0) {
@@ -227,7 +221,6 @@ router.put('/ventas/:id', authenticateToken, async (req, res) => {
             if (det.idtelefono) {
                 await client.query("UPDATE telefonos SET estado = 'Disponible' WHERE codigo = $1", [det.idtelefono]);
             } else if (det.idaccesorio) {
-                // Intentar devolver al inventario más reciente de ese accesorio (Lógica Best Effort)
                 const stockRes = await client.query("SELECT codInventario FROM inventario WHERE codAccesorio = $1 ORDER BY fecha DESC LIMIT 1", [det.idaccesorio]);
                 if (stockRes.rows.length > 0) {
                      await client.query("UPDATE inventario SET cantidad = cantidad + $1 WHERE codInventario = $2", [det.cantidad, stockRes.rows[0].codinventario]);
@@ -327,7 +320,6 @@ router.get('/ventas/:id/detalles', authenticateToken, async (req, res) => {
         const mapped = await Promise.all(result.rows.map(async (row) => {
              let idInventario = null;
              if (row.tipoProducto === 'ACCESORIO') {
-                 // Intentar encontrar el lote de inventario más probable
                  const inv = await pool.query('SELECT codInventario FROM inventario WHERE codAccesorio = $1 ORDER BY fecha DESC LIMIT 1', [row.accesorioId]);
                  if(inv.rows.length > 0) idInventario = inv.rows[0].codinventario;
              }
@@ -376,8 +368,9 @@ router.put('/ventas/:id/anular', authenticateToken, async (req, res) => {
 
         // Registrar Egreso por devolución
         const idegresos = await generateNextId('egresos', 'idegresos', 'EGRE', client);
+        // CORRECCIÓN ZONA HORARIA
         await client.query(
-            `INSERT INTO egresos (idegresos, idCaja, descripcion, monto, fechaCreacion, estado) VALUES ($1, $2, $3, $4, NOW(), 'Anulación Venta')`,
+            `INSERT INTO egresos (idegresos, idCaja, descripcion, monto, fechaCreacion, estado) VALUES ($1, $2, $3, $4, ${LOCAL_TIMESTAMP}, 'Anulación Venta')`,
             [idegresos, idCaja, `Devolución/Anulación Fac #${codVenta}`, totalDevolver]
         );
 

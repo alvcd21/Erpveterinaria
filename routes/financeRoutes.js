@@ -4,6 +4,9 @@ const router = express.Router();
 const { pool, generateNextId, handleDbError, updateArqueoBalance } = require('../config/db');
 const { authenticateToken } = require('../middleware/auth');
 
+// SQL para obtener hora local (Honduras UTC-6) en lugar de UTC del servidor
+const LOCAL_TIMESTAMP = "(NOW() AT TIME ZONE 'UTC' AT TIME ZONE 'America/Tegucigalpa')";
+
 // Middleware interno para validar caja abierta
 const validateOpenBox = async (idCaja, res) => {
     const result = await pool.query(`SELECT idArqueo FROM arqueo WHERE idCaja = $1 AND estado = 'Activo'`, [idCaja]);
@@ -20,6 +23,15 @@ router.get('/arqueo/active', authenticateToken, async (req, res) => {
   try {
     const { idCaja } = req.user;
     
+    // --- SOLUCIÓN 1: FORZAR ACTUALIZACIÓN DE SALDO AL ABRIR PAGINA ---
+    // Esto recalcula (Inicial + Ingresos - Egresos) cada vez que consultas la caja
+    try {
+        await updateArqueoBalance(idCaja, client);
+    } catch (balanceErr) {
+        console.error("Error recalculando balance al vuelo:", balanceErr);
+    }
+    // ------------------------------------------------------------------
+
     // 1. Buscar arqueo activo
     const result = await client.query(
       `SELECT idArqueo as "idArqueo", idCaja as "idCaja", idUsuario as "idUsuario", 
@@ -48,7 +60,7 @@ router.get('/arqueo/active', authenticateToken, async (req, res) => {
              
              await client.query(`
                 UPDATE arqueo 
-                SET estado = 'Cerrada', fechaCierre = NOW()
+                SET estado = 'Cerrada', fechaCierre = ${LOCAL_TIMESTAMP}
                 WHERE idArqueo = $1
              `, [idArqueo]);
 
@@ -73,15 +85,16 @@ router.post('/arqueo/open', authenticateToken, async (req, res) => {
 
     const check = await client.query(`SELECT * FROM arqueo WHERE idCaja = $1 AND estado = 'Activo'`, [idCaja]);
     if (check.rows.length > 0) {
-        await client.query(`UPDATE arqueo SET estado = 'Cerrada', fechaCierre = NOW() WHERE idArqueo = $1`, [check.rows[0].idarqueo]);
+        await client.query(`UPDATE arqueo SET estado = 'Cerrada', fechaCierre = ${LOCAL_TIMESTAMP} WHERE idArqueo = $1`, [check.rows[0].idarqueo]);
     }
 
     await client.query('BEGIN');
     const idArqueo = await generateNextId('arqueo', 'idArqueo', 'ARQ', client);
     
+    // CORRECCIÓN ZONA HORARIA: Usar LOCAL_TIMESTAMP en lugar de NOW()
     await client.query(
       `INSERT INTO arqueo (idArqueo, idCaja, idUsuario, fechaApertura, montoInicial, montoFinal, estado)
-       VALUES ($1, $2, $3, NOW(), $4, $4, 'Activo')`,
+       VALUES ($1, $2, $3, ${LOCAL_TIMESTAMP}, $4, $4, 'Activo')`,
       [idArqueo, idCaja, codUsuario, montoInicial]
     );
 
@@ -119,7 +132,7 @@ router.post('/arqueo/close', authenticateToken, async (req, res) => {
 
      await client.query(`
         UPDATE arqueo 
-        SET estado = 'Cerrada', fechaCierre = NOW()
+        SET estado = 'Cerrada', fechaCierre = ${LOCAL_TIMESTAMP}
         WHERE idArqueo = $1
      `, [idArqueo]);
 
@@ -145,20 +158,13 @@ router.get('/ingresos', authenticateToken, async (req, res) => {
     const params = [queryCaja];
 
     if (fecha) {
-        // Usamos TO_CHAR para comparar la cadena de fecha exacta y evitar offset UTC
         query += ` AND TO_CHAR(fechaCreacion, 'YYYY-MM-DD') = $2`;
         params.push(fecha);
-    } else {
-        // Si no hay fecha, traemos TODO (o puedes poner un límite)
-        // query += ` AND fechaCreacion::date = CURRENT_DATE`; 
-        // Si quieres por defecto HOY:
-        // query += ` AND TO_CHAR(fechaCreacion, 'YYYY-MM-DD') = TO_CHAR(NOW(), 'YYYY-MM-DD')`;
     }
 
     query += ` ORDER BY fechaCreacion DESC`;
 
     const result = await pool.query(query, params);
-    console.log(`Ingresos encontrados: ${result.rows.length}`);
     res.json(result.rows);
   } catch(err) { handleDbError(res, err); }
 });
@@ -172,8 +178,9 @@ router.post('/ingresos', authenticateToken, async (req, res) => {
 
     const idIngreso = await generateNextId('ingresos', 'idIngreso', 'INGR');
     
+    // CORRECCIÓN ZONA HORARIA
     await pool.query(
-        `INSERT INTO ingresos (idIngreso, idCaja, descripcion, monto, costo, fechaCreacion, estado) VALUES ($1, $2, $3, $4, $5, NOW(), 'Registrado')`,
+        `INSERT INTO ingresos (idIngreso, idCaja, descripcion, monto, costo, fechaCreacion, estado) VALUES ($1, $2, $3, $4, $5, ${LOCAL_TIMESTAMP}, 'Registrado')`,
         [idIngreso, idCaja, descripcion, monto, costo || 0]
     );
     
@@ -234,7 +241,6 @@ router.get('/egresos', authenticateToken, async (req, res) => {
     query += ` ORDER BY fechaCreacion DESC`;
 
     const result = await pool.query(query, params);
-    console.log(`Egresos encontrados: ${result.rows.length}`);
     res.json(result.rows);
   } catch(err) { handleDbError(res, err); }
 });
@@ -248,8 +254,9 @@ router.post('/egresos', authenticateToken, async (req, res) => {
 
     const idegresos = await generateNextId('egresos', 'idegresos', 'EGRE');
     
+    // CORRECCIÓN ZONA HORARIA
     await pool.query(
-        `INSERT INTO egresos (idegresos, idCaja, descripcion, monto, fechaCreacion, estado) VALUES ($1, $2, $3, $4, NOW(), 'Registrado')`,
+        `INSERT INTO egresos (idegresos, idCaja, descripcion, monto, fechaCreacion, estado) VALUES ($1, $2, $3, $4, ${LOCAL_TIMESTAMP}, 'Registrado')`,
         [idegresos, idCaja, descripcion, monto]
     );
     
@@ -324,9 +331,10 @@ router.post('/saldos/buy', authenticateToken, async (req, res) => {
         await client.query('BEGIN');
 
         const idegresos = await generateNextId('egresos', 'idegresos', 'EGRE', client);
+        // CORRECCIÓN ZONA HORARIA
         await client.query(
             `INSERT INTO egresos (idegresos, idCaja, descripcion, monto, fechaCreacion, estado) 
-             VALUES ($1, $2, $3, $4, NOW(), 'Registrado')`,
+             VALUES ($1, $2, $3, $4, ${LOCAL_TIMESTAMP}, 'Registrado')`,
             [idegresos, idCaja, `COMPRA SALDO ${red}`, montoPagado]
         );
 
@@ -364,8 +372,9 @@ router.post('/recargas', authenticateToken, async (req, res) => {
     await client.query('BEGIN');
 
     const idIngreso = await generateNextId('ingresos', 'idIngreso', 'INGR', client);
+    // CORRECCIÓN ZONA HORARIA
     await client.query(
-      `INSERT INTO ingresos (idIngreso, idCaja, descripcion, monto, costo, fechaCreacion, estado) VALUES ($1, $2, $3, $4, $5, NOW(), 'Registrado')`,
+      `INSERT INTO ingresos (idIngreso, idCaja, descripcion, monto, costo, fechaCreacion, estado) VALUES ($1, $2, $3, $4, $5, ${LOCAL_TIMESTAMP}, 'Registrado')`,
       [idIngreso, idCaja, `RECARGA ${red}: ${descripcion}`, precioCobrado, precioPagado]
     );
 
