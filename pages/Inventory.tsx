@@ -151,7 +151,7 @@ const Inventory: React.FC = () => {
 
   const handlePrintLabel = async (item: any, type: 'TELEFONO' | 'STOCK') => {
       try {
-          // 1. Obtener la plantilla predeterminada correcta
+          // 1. Obtener la plantilla
           const category = type === 'TELEFONO' ? 'TELEPHONE' : 'ACCESSORY';
           const template = await LabelService.getDefault(category);
 
@@ -159,14 +159,13 @@ const Inventory: React.FC = () => {
               return Swal.fire('Sin Plantilla', `No hay una etiqueta predeterminada para ${category}. Ve al Diseñador de Etiquetas y configura una.`, 'warning');
           }
 
-          // 2. Construir Contexto de Datos Estructurado (Mapeo de DB Plana a Jerarquía de Objetos)
-          // ESTO ES CLAVE: Reconstruimos la profundidad para que {{inventario.accesorios.categoria.tipo}} funcione
+          // 2. Construir Contexto de Datos Estructurado
           let dataContext: any = {};
 
           if (type === 'TELEFONO') {
               dataContext = {
                   telefonos: {
-                      ...item, // Propiedades planas base
+                      ...item,
                       codigo: item.codigo,
                       imei1: item.imei1,
                       imei2: item.imei2,
@@ -185,25 +184,19 @@ const Inventory: React.FC = () => {
                   }
               };
           } else {
-              // STOCK ACCESORIOS
-              // La API devuelve: categoriaAccesorio, descripcionAccesorio, etc.
-              // El diseñador pide: inventario.accesorios.categoria.tipo
               dataContext = {
                   inventario: {
                       ...item,
                       codInventario: item.codInventario,
-                      // Normalizamos para soportar ambos casings
                       codinventario: item.codInventario, 
                       cantidad: item.cantidad,
                       precioVenta: item.precioVenta,
                       estado: item.estado,
-                      
-                      // ANIDACIÓN MANUAL PARA SOPORTAR RELACIONES
                       accesorios: {
                           codAccesorio: item.codAccesorio,
-                          descripcion: item.descripcionAccesorio, // Mapeo de la columna plana JOIN
+                          descripcion: item.descripcionAccesorio,
                           categoria: {
-                              tipo: item.categoriaAccesorio // Mapeo de la columna plana JOIN
+                              tipo: item.categoriaAccesorio
                           }
                       },
                       ubicacion: {
@@ -217,28 +210,77 @@ const Inventory: React.FC = () => {
               };
           }
 
-          // 3. Configurar PDF
-          const doc = new jsPDF({
-              orientation: template.width > template.height ? 'landscape' : 'portrait',
-              unit: 'mm',
-              format: [template.width, template.height]
+          // --- LOGICA DE DESBORDAMIENTO (STRETCH WITH OVERFLOW) ---
+          
+          // Instancia temporal para calcular alturas de texto
+          const scratchDoc = new jsPDF(); 
+          let totalShiftY = 0; // Cuánto se ha desplazado el layout hacia abajo
+
+          // Ordenar elementos por posición Y para procesarlos de arriba a abajo
+          // Esto asegura que si un elemento crece, empuje a los que están abajo
+          const sortedElements = [...template.elements].sort((a, b) => a.y - b.y);
+
+          const layoutElements = sortedElements.map(el => {
+              // Aplicar el desplazamiento acumulado hasta el momento a la posición Y
+              let finalY = el.y + totalShiftY;
+              let finalHeight = el.height;
+              let finalContent = el.content;
+
+              if (el.type === 'TEXT') {
+                  // Reemplazar variables antes de medir
+                  finalContent = replaceVariables(el.content, dataContext);
+                  
+                  if (el.isStretchWithOverflow) {
+                      const fontSize = el.fontSize || 10;
+                      // Configurar fuente en dummy doc para medición precisa
+                      if(el.fontFamily?.includes('Courier')) scratchDoc.setFont('courier', el.fontWeight);
+                      else if(el.fontFamily?.includes('Times')) scratchDoc.setFont('times', el.fontWeight);
+                      else scratchDoc.setFont('helvetica', el.fontWeight);
+                      
+                      scratchDoc.setFontSize(fontSize);
+
+                      // jsPDF divide el texto en líneas según el ancho disponible
+                      const lines = scratchDoc.splitTextToSize(finalContent, el.width);
+                      
+                      // Calcular altura real: líneas * factor de altura de línea (aprox 1.15) conversion pt->mm (0.3527)
+                      const lineHeightMm = fontSize * 0.3527 * 1.15;
+                      const actualHeight = lines.length * lineHeightMm;
+
+                      // Si la altura real es mayor que la definida en diseño
+                      if (actualHeight > el.height) {
+                          const growth = actualHeight - el.height;
+                          finalHeight = actualHeight; // El elemento crece
+                          totalShiftY += growth; // Acumulamos el crecimiento para empujar elementos siguientes
+                      }
+                  }
+              } else if (el.type === 'BARCODE') {
+                   finalContent = replaceVariables(el.content, dataContext);
+              }
+
+              return { ...el, y: finalY, height: finalHeight, computedContent: finalContent };
           });
 
-          // 4. Renderizar Elementos
-          for (const el of template.elements) {
+          // Aumentar el tamaño total del PDF con el desplazamiento acumulado
+          const finalPdfHeight = template.height + totalShiftY;
+
+          // 3. Configurar PDF FINAL con el nuevo tamaño
+          const doc = new jsPDF({
+              orientation: template.width > finalPdfHeight ? 'landscape' : 'portrait',
+              unit: 'mm',
+              format: [template.width, finalPdfHeight]
+          });
+
+          // 4. Renderizar Elementos Calculados
+          for (const el of layoutElements) {
               if (el.type === 'TEXT') {
-                  const finalContent = replaceVariables(el.content, dataContext);
-                  
                   doc.setFontSize(el.fontSize || 10);
                   
-                  // Fuente
                   if(el.fontFamily?.includes('Courier')) doc.setFont('courier', el.fontWeight);
                   else if(el.fontFamily?.includes('Times')) doc.setFont('times', el.fontWeight);
                   else doc.setFont('helvetica', el.fontWeight);
                   
                   doc.setTextColor(el.color || '#000000');
                   
-                  // Alineación y posición
                   const opts: any = { baseline: 'top' };
                   let x = el.x;
                   if (el.textAlign === 'center') {
@@ -249,7 +291,6 @@ const Inventory: React.FC = () => {
                       opts.align = 'right';
                   }
                   
-                  // Manejo de Multilínea (maxWidth)
                   if (el.isMultiline) {
                       opts.maxWidth = el.width;
                   }
@@ -258,31 +299,28 @@ const Inventory: React.FC = () => {
                       opts.angle = el.rotation;
                   }
 
-                  doc.text(finalContent, x, el.y, opts);
+                  doc.text(el.computedContent || '', x, el.y, opts);
               } 
               else if (el.type === 'BARCODE') {
-                  // Obtener el valor del código (puede ser una variable)
-                  const codeValue = replaceVariables(el.content, dataContext);
+                  const codeValue = el.computedContent;
                   
                   if (codeValue) {
                       const canvas = document.createElement('canvas');
                       try {
-                          // ALTA RESOLUCIÓN: Escala 4x para evitar pixelado
-                          const scaleFactor = 4; 
+                          const scaleFactor = 4; // Alta resolución
                           
                           JsBarcode(canvas, codeValue, {
                               format: (el.barcodeFormat as any) || "CODE128",
-                              displayValue: el.displayValue, // Mostrar texto abajo
-                              text: codeValue, // Asegurar que el texto sea el valor
-                              fontSize: 14 * scaleFactor, // Escalar fuente para que se vea nítida al reducir
+                              displayValue: el.displayValue,
+                              text: codeValue,
+                              fontSize: 14 * scaleFactor,
                               textMargin: 2 * scaleFactor,
                               margin: 0,
-                              width: 2 * scaleFactor,     // Barras más anchas
-                              height: 50 * scaleFactor    // Altura base alta
+                              width: 2 * scaleFactor,
+                              height: 50 * scaleFactor
                           });
                           
                           const imgData = canvas.toDataURL("image/png");
-                          // jsPDF escala la imagen de alta res al tamaño definido en mm
                           doc.addImage(imgData, 'PNG', el.x, el.y, el.width, el.height);
                       } catch(e) { console.error("Barcode Error", e); }
                   }
@@ -340,10 +378,22 @@ const Inventory: React.FC = () => {
             if (imeiExists) {
                 return Swal.fire({ title: 'IMEI Duplicado', text: `El IMEI ${phoneForm.imei1} ya existe.`, icon: 'warning' });
             }
-        } else if (activeTab === 'STOCK') {
-            const stockExists = stock.some(s => s.codAccesorio === stockForm.codAccesorio && s.idubicacion === stockForm.idubicacion);
+        } 
+        // --- NUEVA VALIDACIÓN: DUPLICADOS EN STOCK ---
+        else if (activeTab === 'STOCK') {
+            // Verificar si ya existe este accesorio en esta ubicación específica
+            // (Se asume que codProveedor también es parte de la unicidad o se puede omitir si es irrelevante)
+            const stockExists = stock.some(s => 
+                s.codAccesorio === stockForm.codAccesorio && 
+                s.idubicacion === stockForm.idubicacion
+            );
+            
             if (stockExists) {
-                return Swal.fire({ title: 'Producto ya en Inventario', text: 'Edite la cantidad existente.', icon: 'warning' });
+                return Swal.fire({ 
+                    title: 'Producto ya en Inventario', 
+                    text: 'Este accesorio ya existe en la ubicación seleccionada. Por favor, edite el registro existente para agregar más cantidad.', 
+                    icon: 'error' 
+                });
             }
         }
     }
