@@ -40,11 +40,12 @@ const AdminCashDashboard: React.FC = () => {
     loadData();
   }, []);
 
-  // Efecto para calcular totales cuando cambian los detalles
+  // Efecto para calcular totales cuando cambian los detalles o el monto inicial
   useEffect(() => {
       if (sessionDetails) {
           const ingresos = sessionDetails.ingresos.reduce((acc, curr) => acc + Number(curr.monto || 0), 0);
           const egresos = sessionDetails.egresos.reduce((acc, curr) => acc + Number(curr.monto || 0), 0);
+          // Usamos el monto inicial que viene del detalle actualizado, o el del box seleccionado si no ha cargado
           const inicial = Number(sessionDetails.arqueo.montoInicial || 0);
           
           setLocalTotals({
@@ -108,11 +109,26 @@ const AdminCashDashboard: React.FC = () => {
   const handleUpdateInitial = async () => {
       if(!selectedBox?.idArqueo) return;
       try {
+          // 1. Actualizar en Servidor
           await CashService.updateInitialAmount(selectedBox.idArqueo, Number(newMontoInicial));
-          Swal.fire('Actualizado', 'Monto inicial corregido.', 'success');
-          // Reload details
-          openManager(selectedBox);
-          loadData(); // Refresh main list
+          
+          // 2. Refrescar Detalles (Backend recalcula)
+          const updatedDetails = await CashService.getSessionDetails(selectedBox.idArqueo);
+          setSessionDetails(updatedDetails);
+
+          // 3. Actualizar estado local del Box seleccionado para reflejar cambios en UI
+          const updatedBox = {
+              ...selectedBox,
+              montoInicial: Number(updatedDetails.arqueo.montoInicial),
+              montoFinal: Number(updatedDetails.arqueo.montoFinal), // Backend devuelve calculado
+              ganancia: Number(updatedDetails.arqueo.ganancia)
+          };
+          setSelectedBox(updatedBox);
+          
+          Swal.fire('Actualizado', `Nuevo saldo calculado: L. ${Number(updatedDetails.arqueo.montoFinal).toFixed(2)}`, 'success');
+          
+          // 4. Refrescar lista general en fondo
+          loadData(); 
       } catch(e:any) { Swal.fire('Error', e.message, 'error'); }
   };
 
@@ -126,7 +142,7 @@ const AdminCashDashboard: React.FC = () => {
   };
 
   const saveEdit = async () => {
-      if(!editingItem.type) return;
+      if(!editingItem.type || !selectedBox) return;
       try {
           if(editingItem.type === 'INGRESO') {
               await CashService.updateIngreso(editingItem.id, {
@@ -141,18 +157,23 @@ const AdminCashDashboard: React.FC = () => {
               });
           }
           setEditingItem({id:'', type: null});
-          if(selectedBox) openManager(selectedBox);
+          
+          // Refrescar datos
+          openManager(selectedBox);
           loadData();
       } catch(e:any) { Swal.fire('Error', e.message, 'error'); }
   };
 
   const deleteTransaction = async (id: string, type: 'INGRESO' | 'EGRESO') => {
+      if(!selectedBox) return;
       const result = await Swal.fire({ title: '¿Eliminar transacción?', text: 'Esto afectará el cuadre de caja.', icon: 'warning', showCancelButton: true, confirmButtonText: 'Sí, eliminar' });
       if(result.isConfirmed) {
           try {
               if(type === 'INGRESO') await CashService.deleteIngreso(id);
               else await CashService.deleteEgreso(id);
-              if(selectedBox) openManager(selectedBox);
+              
+              // Refrescar datos
+              openManager(selectedBox);
               loadData();
           } catch(e:any) { Swal.fire('Error', e.message, 'error'); }
       }
@@ -248,10 +269,10 @@ const AdminCashDashboard: React.FC = () => {
                                <Settings size={18}/> Configuración
                            </button>
                            
-                           <div className="mt-auto bg-indigo-900 rounded-xl p-4 text-white">
+                           <div className="mt-auto bg-indigo-900 rounded-xl p-4 text-white shadow-lg">
                                <p className="text-xs text-indigo-300 uppercase font-bold mb-1">Efectivo Calculado</p>
-                               <p className="text-2xl font-bold">L. {localTotals.finalCalculado.toFixed(2)}</p>
-                               <div className="mt-2 text-xs opacity-70 flex justify-between">
+                               <p className="text-2xl font-bold tracking-tight">L. {localTotals.finalCalculado.toFixed(2)}</p>
+                               <div className="mt-3 text-[10px] opacity-70 flex justify-between border-t border-indigo-700/50 pt-2">
                                    <span>Ini: {Number(sessionDetails.arqueo.montoInicial).toFixed(0)}</span>
                                    <span>Ing: {localTotals.totalIngresos.toFixed(0)}</span>
                                    <span>Egr: {localTotals.totalEgresos.toFixed(0)}</span>
@@ -273,7 +294,7 @@ const AdminCashDashboard: React.FC = () => {
                                            <thead className="bg-slate-50 text-slate-500 text-xs uppercase"><tr><th className="p-3">Hora</th><th className="p-3">Descripción</th><th className="p-3">Monto</th><th className="p-3 text-right">Acción</th></tr></thead>
                                            <tbody>
                                                {sessionDetails.ingresos.map(ing => (
-                                                   <tr key={ing.idIngreso} className="border-b hover:bg-slate-50">
+                                                   <tr key={ing.idIngreso} className="border-b hover:bg-slate-50 group">
                                                        <td className="p-3 text-xs text-slate-400 font-mono">{ing.fechaCreacion ? new Date(ing.fechaCreacion).toLocaleString() : '-'}</td>
                                                        <td className="p-3">
                                                            {editingItem.id === ing.idIngreso ? (
@@ -292,9 +313,9 @@ const AdminCashDashboard: React.FC = () => {
                                                                    <button onClick={() => setEditingItem({id:'', type:null})} className="bg-slate-100 text-slate-600 p-1.5 rounded hover:bg-slate-200"><X size={14}/></button>
                                                                </div>
                                                            ) : (
-                                                               <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                                   <button onClick={() => startEdit(ing, 'INGRESO')} className="text-blue-500 p-1 hover:bg-blue-50 rounded"><Edit2 size={14}/></button>
-                                                                   <button onClick={() => deleteTransaction(ing.idIngreso, 'INGRESO')} className="text-red-500 p-1 hover:bg-red-50 rounded"><Trash2 size={14}/></button>
+                                                               <div className="flex justify-end gap-1">
+                                                                   <button onClick={() => startEdit(ing, 'INGRESO')} className="text-slate-400 hover:text-blue-500 p-1 rounded hover:bg-blue-50 transition-colors"><Edit2 size={16}/></button>
+                                                                   <button onClick={() => deleteTransaction(ing.idIngreso, 'INGRESO')} className="text-slate-400 hover:text-red-500 p-1 rounded hover:bg-red-50 transition-colors"><Trash2 size={16}/></button>
                                                                </div>
                                                            )}
                                                        </td>
@@ -332,9 +353,9 @@ const AdminCashDashboard: React.FC = () => {
                                                                    <button onClick={() => setEditingItem({id:'', type:null})} className="bg-slate-100 text-slate-600 p-1.5 rounded hover:bg-slate-200"><X size={14}/></button>
                                                                </div>
                                                            ) : (
-                                                               <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                                   <button onClick={() => startEdit(egr, 'EGRESO')} className="text-blue-500 p-1 hover:bg-blue-50 rounded"><Edit2 size={14}/></button>
-                                                                   <button onClick={() => deleteTransaction(egr.idegresos, 'EGRESO')} className="text-red-500 p-1 hover:bg-red-50 rounded"><Trash2 size={14}/></button>
+                                                               <div className="flex justify-end gap-1">
+                                                                   <button onClick={() => startEdit(egr, 'EGRESO')} className="text-slate-400 hover:text-blue-500 p-1 rounded hover:bg-blue-50 transition-colors"><Edit2 size={16}/></button>
+                                                                   <button onClick={() => deleteTransaction(egr.idegresos, 'EGRESO')} className="text-slate-400 hover:text-red-500 p-1 rounded hover:bg-red-50 transition-colors"><Trash2 size={16}/></button>
                                                                </div>
                                                            )}
                                                        </td>

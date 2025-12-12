@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { InventoryService } from '../services/api';
 import { 
   Telefono, 
@@ -48,6 +48,23 @@ const Inventory: React.FC = () => {
     loadData();
     loadDependencies();
   }, [activeTab]);
+
+  // --- LOGICA PARA COMBOBOX INTELIGENTE (MARCA/MODELO) ---
+  const uniqueBrands = useMemo(() => {
+      const brands = phones.map(p => p.marca).filter(Boolean); // Obtener todas las marcas
+      return Array.from(new Set(brands)).sort(); // Eliminar duplicados y ordenar
+  }, [phones]);
+
+  const availableModels = useMemo(() => {
+      if (!phoneForm.marca) return [];
+      // Filtrar teléfonos que coincidan con la marca escrita (insensible a mayúsculas)
+      const models = phones
+          .filter(p => p.marca.toLowerCase() === phoneForm.marca?.toLowerCase())
+          .map(p => p.modelo)
+          .filter(Boolean);
+      return Array.from(new Set(models)).sort();
+  }, [phones, phoneForm.marca]);
+  // -------------------------------------------------------
 
   const loadDependencies = async () => {
       try {
@@ -347,7 +364,7 @@ const Inventory: React.FC = () => {
           {[
               { id: 'TELEPHONES', label: 'Teléfonos', icon: <Smartphone size={18}/> },
               { id: 'STOCK', label: 'Stock Accesorios', icon: <Box size={18}/> },
-              { id: 'MASTER', label: 'Catálogo Maestro', icon: <Layers size={18}/> },
+              { id: 'MASTER', label: 'Accesorios', icon: <Layers size={18}/> }, // RENOMBRADO A ACCESORIOS
               { id: 'CATEGORIES', label: 'Categorías', icon: <Tag size={18}/> },
               { id: 'LOCATIONS', label: 'Ubicaciones', icon: <MapPin size={18}/> },
           ].map(tab => (
@@ -411,7 +428,7 @@ const Inventory: React.FC = () => {
              <div className="px-8 py-6 border-b border-slate-100 flex justify-between items-center bg-white sticky top-0 z-10">
                 <div>
                     <h3 className="text-2xl font-bold text-slate-800">
-                        {isEditing ? 'Editar' : 'Nuevo'} {activeTab === 'TELEPHONES' ? 'Teléfono' : activeTab === 'STOCK' ? 'Inventario' : activeTab === 'MASTER' ? 'Maestro' : activeTab === 'CATEGORIES' ? 'Categoría' : 'Ubicación'}
+                        {isEditing ? 'Editar' : 'Nuevo'} {activeTab === 'TELEPHONES' ? 'Teléfono' : activeTab === 'STOCK' ? 'Inventario' : activeTab === 'MASTER' ? 'Accesorio' : activeTab === 'CATEGORIES' ? 'Categoría' : 'Ubicación'}
                     </h3>
                     <p className="text-slate-500 text-sm mt-1">Complete la información requerida</p>
                 </div>
@@ -439,17 +456,42 @@ const Inventory: React.FC = () => {
                             </div>
                         </div>
 
-                        {/* 2. Detalles del Producto */}
+                        {/* 2. Detalles del Producto - MODIFICADO CON DATALIST */}
                         <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
                             <h4 className="text-sm font-bold text-indigo-600 uppercase mb-4 tracking-wider flex items-center gap-2"><Smartphone size={16}/> Dispositivo</h4>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                 <div>
-                                    <label className="text-xs font-bold text-slate-500 uppercase mb-1.5 block">Marca</label>
-                                    <input required className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 outline-none" value={phoneForm.marca || ''} onChange={e => setPhoneForm({...phoneForm, marca: e.target.value})} />
+                                    <label className="text-xs font-bold text-slate-500 uppercase mb-1.5 block">Marca (Seleccionar o Escribir)</label>
+                                    <input 
+                                        required 
+                                        list="brands-list"
+                                        className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 outline-none placeholder:text-slate-400" 
+                                        value={phoneForm.marca || ''} 
+                                        onChange={e => setPhoneForm({...phoneForm, marca: e.target.value, modelo: ''})} 
+                                        placeholder="Ej: Samsung, Apple..."
+                                    />
+                                    <datalist id="brands-list">
+                                        {uniqueBrands.map(brand => (
+                                            <option key={brand} value={brand} />
+                                        ))}
+                                    </datalist>
                                 </div>
                                 <div>
-                                    <label className="text-xs font-bold text-slate-500 uppercase mb-1.5 block">Modelo</label>
-                                    <input required className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 outline-none" value={phoneForm.modelo || ''} onChange={e => setPhoneForm({...phoneForm, modelo: e.target.value})} />
+                                    <label className="text-xs font-bold text-slate-500 uppercase mb-1.5 block">Modelo (Seleccionar o Escribir)</label>
+                                    <input 
+                                        required 
+                                        list="models-list"
+                                        className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 outline-none placeholder:text-slate-400" 
+                                        value={phoneForm.modelo || ''} 
+                                        onChange={e => setPhoneForm({...phoneForm, modelo: e.target.value})} 
+                                        placeholder="Ej: Galaxy S23, iPhone 14..."
+                                        disabled={!phoneForm.marca}
+                                    />
+                                    <datalist id="models-list">
+                                        {availableModels.map(model => (
+                                            <option key={model} value={model} />
+                                        ))}
+                                    </datalist>
                                 </div>
                             </div>
                         </div>
@@ -502,9 +544,19 @@ const Inventory: React.FC = () => {
                             <h4 className="text-sm font-bold text-indigo-600 uppercase mb-4 tracking-wider flex items-center gap-2"><Box size={16}/> Producto</h4>
                             <div>
                                  <label className="text-xs font-bold text-slate-500 uppercase mb-1.5 block">Accesorio (Maestro)</label>
-                                 <select required disabled={isEditing} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 outline-none disabled:bg-slate-100" value={stockForm.codAccesorio || ''} onChange={e => setStockForm({...stockForm, codAccesorio: e.target.value})}>
-                                    <option value="">Seleccionar Accesorio...</option>
-                                    {master.map(m => <option key={m.codAccesorio} value={m.codAccesorio}>{m.descripcion}</option>)}
+                                 <select 
+                                    required 
+                                    disabled={isEditing} 
+                                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 outline-none disabled:bg-slate-100 text-slate-900" 
+                                    value={stockForm.codAccesorio || ''} 
+                                    onChange={e => setStockForm({...stockForm, codAccesorio: e.target.value})}
+                                 >
+                                    <option value="" className="text-slate-500">Seleccionar Accesorio...</option>
+                                    {master.map(m => (
+                                        <option key={m.codAccesorio} value={m.codAccesorio} className="text-slate-900 bg-white">
+                                            {m.descripcion}
+                                        </option>
+                                    ))}
                                  </select>
                             </div>
                         </div>
