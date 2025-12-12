@@ -7,7 +7,6 @@ const pool = new Pool({
 });
 
 // --- HELPER TIMEZONE HONDURAS (ROBUSTO) ---
-// Genera un string de fecha/hora exacta en Honduras independiente del servidor.
 const getLocalTimestamp = () => {
     try {
         const now = new Date();
@@ -25,25 +24,20 @@ const getLocalTimestamp = () => {
         const parts = formatter.formatToParts(now);
         
         const getPart = (type) => parts.find(p => p.type === type).value;
-        
-        // Retorna formato compatible con PostgreSQL: YYYY-MM-DD HH:mm:ss
         return `${getPart('year')}-${getPart('month')}-${getPart('day')} ${getPart('hour')}:${getPart('minute')}:${getPart('second')}`;
     } catch (err) {
         console.error("Error generando fecha local:", err);
-        // Fallback básico restando 6 horas si falla Intl (raro)
         const d = new Date();
         d.setHours(d.getHours() - 6);
         return d.toISOString().replace('T', ' ').substring(0, 19);
     }
 };
 
-// Forzamos la sesión de base de datos a usar la hora de Honduras por si acaso
 pool.on('connect', (client) => {
     client.query("SET TIME ZONE 'America/Tegucigalpa'")
         .catch(err => console.error('Error setting timezone', err));
 });
 
-// Función auxiliar para generar IDs consecutivos (ej: FACT-0001)
 async function generateNextId(table, column, prefix, client = pool) {
   try {
     const query = `
@@ -72,9 +66,10 @@ async function generateNextId(table, column, prefix, client = pool) {
 
 // Función CRÍTICA: Actualizar balance en tiempo real
 async function updateArqueoBalance(idCaja, client = pool) {
-    // console.log(`--- INICIO RECALCULO SALDO CAJA: ${idCaja} ---`);
+    console.log(`[DEBUG] Iniciando recálculo para caja: ${idCaja}`);
     try {
         // 1. Obtener datos de la sesión activa
+        // IMPORTANTE: Usamos alias "idCaja" para asegurar compatibilidad con el resto del código
         const arqRes = await client.query(
             `SELECT idArqueo as "idArqueo", montoInicial as "montoInicial", fechaApertura as "fechaApertura" 
              FROM arqueo 
@@ -83,24 +78,25 @@ async function updateArqueoBalance(idCaja, client = pool) {
         );
         
         if (arqRes.rows.length === 0) {
-            // console.error(`[ERROR] No se pudo actualizar: La Caja ${idCaja} NO tiene una sesión activa.`);
+            console.log(`[DEBUG] Caja ${idCaja} cerrada o sin sesión activa. No se actualiza.`);
             return; 
         }
 
         const { idArqueo, montoInicial, fechaApertura } = arqRes.rows[0];
+        console.log(`[DEBUG] Sesión encontrada: ${idArqueo}. Inicio: ${montoInicial}, Fecha: ${fechaApertura}`);
 
-        // 2. Calcular sumatorias (Ingresos) - CORREGIDO CASTING TIMESTAMP
+        // 2. Calcular sumatorias (Ingresos)
         const ingRes = await client.query(`
             SELECT COALESCE(SUM(monto), 0) as total, COALESCE(SUM(costo), 0) as costo
             FROM ingresos 
-            WHERE idCaja = $1 AND fechaCreacion::timestamp >= $2::timestamp
+            WHERE idCaja = $1 AND fechaCreacion >= $2
         `, [idCaja, fechaApertura]);
 
-        // 3. Calcular sumatorias (Egresos) - CORREGIDO CASTING TIMESTAMP
+        // 3. Calcular sumatorias (Egresos)
         const egrRes = await client.query(`
             SELECT COALESCE(SUM(monto), 0) as total
             FROM egresos 
-            WHERE idCaja = $1 AND fechaCreacion::timestamp >= $2::timestamp
+            WHERE idCaja = $1 AND fechaCreacion >= $2
         `, [idCaja, fechaApertura]);
 
         const totalIngresos = Number(ingRes.rows[0].total);
@@ -108,9 +104,13 @@ async function updateArqueoBalance(idCaja, client = pool) {
         const totalEgresos = Number(egrRes.rows[0].total);
         const baseInicial = Number(montoInicial);
 
+        console.log(`[DEBUG] Calculos -> Ingresos: ${totalIngresos}, Costos: ${totalCostos}, Egresos: ${totalEgresos}`);
+
         // Fórmula: Caja Final = Lo que había al inicio + Lo que entró - Lo que salió
         const montoFinal = (baseInicial + totalIngresos) - totalEgresos;
         const ganancia = totalIngresos - totalCostos;
+
+        console.log(`[DEBUG] Resultado Final -> Caja: ${montoFinal}, Ganancia: ${ganancia}`);
 
         // 3. Impactar en base de datos
         await client.query(`
@@ -131,7 +131,7 @@ async function updateArqueoBalance(idCaja, client = pool) {
 }
 
 const handleDbError = (res, err) => {
-  console.error('DB Error:', err); 
+  console.error('[DB ERROR HANDLER]:', err); 
   if (err.code === '23503') return res.status(409).json({ error: 'No se puede eliminar/crear: Registro relacionado a otra entidad.' });
   if (err.code === '23505') return res.status(409).json({ error: 'El registro ya existe (Duplicado).' });
   res.status(500).json({ error: err.message || 'Error interno del servidor' });

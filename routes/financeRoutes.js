@@ -21,13 +21,18 @@ const validateOpenBox = async (idCaja, res) => {
 // --- ADMIN: STATUS DASHBOARD ---
 router.get('/admin/boxes/status', authenticateToken, async (req, res) => {
     try {
-        // Recalcular saldo de todas las cajas activas antes de mostrar
+        console.log("[DEBUG] Solicitando estado de cajas...");
+        // 1. Obtener cajas activas para recalcular
         const activeBoxes = await pool.query("SELECT idCaja FROM arqueo WHERE estado = 'Activo'");
+        
+        // 2. Recalcular cada una
         for(const box of activeBoxes.rows) {
-            // Usamos idcaja (minúscula) que es como pg devuelve por defecto si no hay alias
-            await updateArqueoBalance(box.idcaja, pool);
+            // Postgres devuelve columnas en minúscula por defecto (idcaja) si no se usan comillas
+            const idCajaReal = box.idCaja || box.idcaja; 
+            if(idCajaReal) await updateArqueoBalance(idCajaReal, pool);
         }
 
+        // 3. Obtener vista general
         const query = `
             SELECT DISTINCT ON (c.idCaja)
                 c.idCaja as "idCaja",
@@ -48,16 +53,18 @@ router.get('/admin/boxes/status', authenticateToken, async (req, res) => {
             ORDER BY c.idCaja, a.fechaApertura DESC
         `;
         const result = await pool.query(query);
+        console.log(`[DEBUG] Cajas encontradas: ${result.rows.length}`);
         res.json(result.rows);
     } catch (err) { handleDbError(res, err); }
 });
 
-// --- ADMIN: DETALLES DE UNA SESIÓN ---
+// --- ADMIN: DETALLES DE UNA SESIÓN (AUDITORÍA) ---
 router.get('/arqueo/:id/details', authenticateToken, async (req, res) => {
     try {
         const { id } = req.params;
+        console.log(`[DEBUG] Solicitando detalles de arqueo ID: ${id}`);
         
-        // 1. Info General (CORREGIDO: Alias explícitos para evitar errores de undefined)
+        // 1. Info General (Alias explícitos son VITALES aquí)
         const arqueoRes = await pool.query(`
             SELECT 
                 a.idArqueo as "idArqueo",
@@ -74,31 +81,37 @@ router.get('/arqueo/:id/details', authenticateToken, async (req, res) => {
             LEFT JOIN usuarios u ON a.idUsuario = u.codUsuario 
             WHERE a.idArqueo = $1`, [id]);
             
-        if(arqueoRes.rows.length === 0) return res.status(404).json({error: 'Arqueo no encontrado'});
+        if(arqueoRes.rows.length === 0) {
+            console.log("[DEBUG] Arqueo no encontrado en DB");
+            return res.status(404).json({error: 'Arqueo no encontrado'});
+        }
 
         const arqueo = arqueoRes.rows[0];
-        const fechaInicio = arqueo.fechaApertura; // Usar el alias camelCase
-        const fechaFin = arqueo.fechaCierre || '2099-12-31 23:59:59'; 
-        const targetCaja = arqueo.idCaja; // Usar el alias camelCase
+        const fechaInicio = arqueo.fechaApertura;
+        const fechaFin = arqueo.fechaCierre || getLocalTimestamp(); // Usar hora actual si no ha cerrado
+        const targetCaja = arqueo.idCaja;
+
+        console.log(`[DEBUG] Buscando movimientos para Caja: ${targetCaja} entre ${fechaInicio} y ${fechaFin}`);
 
         // 2. Movimientos
+        // Usamos fechaCreacion >= fechaInicio para traer todo lo posterior a la apertura
         const ingresos = await pool.query(`
             SELECT idIngreso as "idIngreso", descripcion, monto, costo, fechaCreacion as "fechaCreacion"
             FROM ingresos 
             WHERE idCaja = $1 
-            AND fechaCreacion::timestamp >= $2::timestamp 
-            AND fechaCreacion::timestamp <= $3::timestamp
+            AND fechaCreacion >= $2
             ORDER BY fechaCreacion DESC
-        `, [targetCaja, fechaInicio, fechaFin]);
+        `, [targetCaja, fechaInicio]);
             
         const egresos = await pool.query(`
             SELECT idegresos as "idegresos", descripcion, monto, fechaCreacion as "fechaCreacion"
             FROM egresos 
             WHERE idCaja = $1 
-            AND fechaCreacion::timestamp >= $2::timestamp 
-            AND fechaCreacion::timestamp <= $3::timestamp
+            AND fechaCreacion >= $2
             ORDER BY fechaCreacion DESC
-        `, [targetCaja, fechaInicio, fechaFin]);
+        `, [targetCaja, fechaInicio]);
+
+        console.log(`[DEBUG] Encontrados ${ingresos.rows.length} ingresos y ${egresos.rows.length} egresos.`);
 
         res.json({
             arqueo: arqueo,
@@ -377,7 +390,6 @@ router.delete('/egresos/:id', authenticateToken, async (req, res) => {
 });
 
 // --- SALDOS Y OTROS ---
-// (Se mantienen igual pero asegurando importaciones correctas si fuera necesario)
 router.get('/saldos/today', authenticateToken, async (req, res) => {
   try {
     const { fecha } = req.query; 
