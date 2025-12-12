@@ -4,9 +4,6 @@ const router = express.Router();
 const { pool, generateNextId, handleDbError, updateArqueoBalance } = require('../config/db');
 const { authenticateToken } = require('../middleware/auth');
 
-// SQL para obtener hora local (Honduras UTC-6)
-const LOCAL_TIMESTAMP = "(NOW() AT TIME ZONE 'UTC' AT TIME ZONE 'America/Tegucigalpa')";
-
 // --- CLIENTES ---
 router.get('/clientes', authenticateToken, async (req, res) => {
     try {
@@ -18,7 +15,7 @@ router.get('/clientes', authenticateToken, async (req, res) => {
 router.post('/clientes', authenticateToken, async (req, res) => {
     try {
         const { identidad, nombre, apellido, direccion, telefono, correo } = req.body;
-        await pool.query(`INSERT INTO clientes (identidad, nombre, apellido, direccion, telefono, correo, fechaCreacion) VALUES ($1,$2,$3,$4,$5,$6, ${LOCAL_TIMESTAMP})`,
+        await pool.query(`INSERT INTO clientes (identidad, nombre, apellido, direccion, telefono, correo, fechaCreacion) VALUES ($1,$2,$3,$4,$5,$6, NOW())`,
             [identidad, nombre, apellido, direccion, telefono, correo]);
         res.status(201).json({ message: 'Cliente creado' });
     } catch(e) { handleDbError(res, e); }
@@ -44,7 +41,6 @@ router.delete('/clientes/:id', authenticateToken, async (req, res) => {
 router.get('/ventas/historial', authenticateToken, async (req, res) => {
     try {
         const { fecha } = req.query; // Espera formato YYYY-MM-DD
-        console.log(`GET /ventas/historial - Usuario: ${req.user.codUsuario}, Fecha: ${fecha}`);
         
         let query = `
             SELECT v.codVenta as "codVenta", v.fecha, v.total, v.estado, v.identidadCliente as "identidadCliente",
@@ -56,7 +52,6 @@ router.get('/ventas/historial', authenticateToken, async (req, res) => {
         const params = [req.user.codUsuario];
 
         if (fecha) {
-            // Comparación de cadena estricta para evitar desfases de horario
             query += ` AND TO_CHAR(v.fecha, 'YYYY-MM-DD') = $2`;
             params.push(fecha);
         }
@@ -64,7 +59,6 @@ router.get('/ventas/historial', authenticateToken, async (req, res) => {
         query += ` ORDER BY v.codVenta DESC`;
 
         const result = await pool.query(query, params);
-        console.log(`Ventas encontradas: ${result.rows.length}`);
         res.json(result.rows);
     } catch(e) { handleDbError(res, e); }
 });
@@ -119,17 +113,15 @@ router.post('/ventas', authenticateToken, async (req, res) => {
     }
 
     // 3. Registrar INGRESO (Dinero en caja) 
-    // CORRECCIÓN ZONA HORARIA
     const idIngreso = await generateNextId('ingresos', 'idIngreso', 'INGR', client);
     await client.query(
       `INSERT INTO ingresos (idIngreso, idCaja, descripcion, monto, costo, fechaCreacion, estado) 
-       VALUES ($1, $2, $3, $4, $5, ${LOCAL_TIMESTAMP}, 'Venta POS')`,
+       VALUES ($1, $2, $3, $4, $5, NOW(), 'Venta POS')`,
       [idIngreso, idCaja, `Venta Factura #${codVenta}`, total, totalCostoVenta]
     );
 
     // 4. Registrar VENTA (Cabecera)
-    // CORRECCIÓN ZONA HORARIA: Si no viene fecha, usar LOCAL_TIMESTAMP
-    const fechaVenta = fecha ? `'${fecha}'` : LOCAL_TIMESTAMP;
+    const fechaVenta = fecha ? `'${fecha}'` : 'NOW()';
     
     await client.query(
       `INSERT INTO ventas (
@@ -368,9 +360,8 @@ router.put('/ventas/:id/anular', authenticateToken, async (req, res) => {
 
         // Registrar Egreso por devolución
         const idegresos = await generateNextId('egresos', 'idegresos', 'EGRE', client);
-        // CORRECCIÓN ZONA HORARIA
         await client.query(
-            `INSERT INTO egresos (idegresos, idCaja, descripcion, monto, fechaCreacion, estado) VALUES ($1, $2, $3, $4, ${LOCAL_TIMESTAMP}, 'Anulación Venta')`,
+            `INSERT INTO egresos (idegresos, idCaja, descripcion, monto, fechaCreacion, estado) VALUES ($1, $2, $3, $4, NOW(), 'Anulación Venta')`,
             [idegresos, idCaja, `Devolución/Anulación Fac #${codVenta}`, totalDevolver]
         );
 

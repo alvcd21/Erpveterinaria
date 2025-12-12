@@ -6,6 +6,15 @@ const pool = new Pool({
   ssl: process.env.DB_INTERNAL_URL ? false : { rejectUnauthorized: false }
 });
 
+// --- SOLUCIÓN ROBUSTA TIMEZONE ---
+// Forzamos la sesión de base de datos a usar la hora de Honduras.
+// Esto asegura que NOW(), CURRENT_DATE y los INSERTs tengan la hora correcta
+// sin importar si el servidor físico está en UTC o cualquier otra zona.
+pool.on('connect', (client) => {
+    client.query("SET TIME ZONE 'America/Tegucigalpa'")
+        .catch(err => console.error('Error setting timezone', err));
+});
+
 // Función auxiliar para generar IDs consecutivos (ej: FACT-0001)
 async function generateNextId(table, column, prefix, client = pool) {
   try {
@@ -38,7 +47,6 @@ async function updateArqueoBalance(idCaja, client = pool) {
     console.log(`--- INICIO RECALCULO SALDO CAJA: ${idCaja} ---`);
     try {
         // 1. Obtener datos de la sesión activa
-        // CORRECCION IMPORTANTE: Usamos AS "nombre" con comillas para que Postgres respete las mayúsculas
         const arqRes = await client.query(
             `SELECT idArqueo as "idArqueo", montoInicial as "montoInicial", fechaApertura as "fechaApertura" 
              FROM arqueo 

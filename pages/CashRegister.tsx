@@ -58,7 +58,7 @@ const CashRegister: React.FC = () => {
         loadData();
         loadCatalogos();
     }
-  }, [user]); // Dependencia crítica: user
+  }, [user]);
 
   const loadCatalogos = async () => {
       try {
@@ -70,7 +70,6 @@ const CashRegister: React.FC = () => {
   };
 
   const loadData = async () => {
-    // Si no hay usuario cargado, no intentar cargar datos
     if (!user?.idCaja) return; 
 
     try {
@@ -89,7 +88,9 @@ const CashRegister: React.FC = () => {
         setSaldos([]);
       } else {
         setArqueo(active);
-        // Pasar localDate a todos los servicios para garantizar filtro exacto
+        
+        // CORRECCION: Se restaura el filtro por fecha (localDate) para ver SOLO los datos de HOY.
+        // Esto funciona correctamente ahora que la DB tiene la Zona Horaria configurada.
         const [ing, egr, vts, slds] = await Promise.all([
            CashService.getIngresos(user.idCaja, localDate),
            CashService.getEgresos(user.idCaja, localDate),

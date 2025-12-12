@@ -4,9 +4,6 @@ const router = express.Router();
 const { pool, generateNextId, handleDbError, updateArqueoBalance } = require('../config/db');
 const { authenticateToken } = require('../middleware/auth');
 
-// SQL para obtener hora local (Honduras UTC-6) en lugar de UTC del servidor
-const LOCAL_TIMESTAMP = "(NOW() AT TIME ZONE 'UTC' AT TIME ZONE 'America/Tegucigalpa')";
-
 // Middleware interno para validar caja abierta
 const validateOpenBox = async (idCaja, res) => {
     const result = await pool.query(`SELECT idArqueo FROM arqueo WHERE idCaja = $1 AND estado = 'Activo'`, [idCaja]);
@@ -15,12 +12,6 @@ const validateOpenBox = async (idCaja, res) => {
         return false;
     }
     return true;
-};
-
-// Función auxiliar interna para rutas administrativas (ya que updateArqueoBalance es importado, 
-// usamos esta para lógica específica si es necesario, o llamamos directo a la importada)
-const recalculateBalance = async (idCaja, client) => {
-    await updateArqueoBalance(idCaja, client);
 };
 
 // ==========================================
@@ -182,7 +173,7 @@ router.post('/arqueo/open', authenticateToken, async (req, res) => {
 
     const check = await client.query(`SELECT * FROM arqueo WHERE idCaja = $1 AND estado = 'Activo'`, [idCaja]);
     if (check.rows.length > 0) {
-        await client.query(`UPDATE arqueo SET estado = 'Cerrada', fechaCierre = ${LOCAL_TIMESTAMP} WHERE idArqueo = $1`, [check.rows[0].idarqueo]);
+        await client.query(`UPDATE arqueo SET estado = 'Cerrada', fechaCierre = NOW() WHERE idArqueo = $1`, [check.rows[0].idarqueo]);
     }
 
     await client.query('BEGIN');
@@ -190,7 +181,7 @@ router.post('/arqueo/open', authenticateToken, async (req, res) => {
     
     await client.query(
       `INSERT INTO arqueo (idArqueo, idCaja, idUsuario, fechaApertura, montoInicial, montoFinal, estado)
-       VALUES ($1, $2, $3, ${LOCAL_TIMESTAMP}, $4, $4, 'Activo')`,
+       VALUES ($1, $2, $3, NOW(), $4, $4, 'Activo')`,
       [idArqueo, idCaja, codUsuario, montoInicial]
     );
 
@@ -227,7 +218,7 @@ router.post('/arqueo/close', authenticateToken, async (req, res) => {
 
      await client.query(`
         UPDATE arqueo 
-        SET estado = 'Cerrada', fechaCierre = ${LOCAL_TIMESTAMP}
+        SET estado = 'Cerrada', fechaCierre = NOW()
         WHERE idArqueo = $1
      `, [idArqueo]);
 
@@ -236,7 +227,7 @@ router.post('/arqueo/close', authenticateToken, async (req, res) => {
   } catch(err) { await client.query('ROLLBACK'); handleDbError(res, err); } finally { client.release(); }
 });
 
-// --- INGRESOS (RESTAURADO) ---
+// --- INGRESOS ---
 router.get('/ingresos', authenticateToken, async (req, res) => {
   const { idCaja } = req.user;
   const queryCaja = req.query.idCaja || idCaja;
@@ -272,7 +263,7 @@ router.post('/ingresos', authenticateToken, async (req, res) => {
     const idIngreso = await generateNextId('ingresos', 'idIngreso', 'INGR');
     
     await pool.query(
-        `INSERT INTO ingresos (idIngreso, idCaja, descripcion, monto, costo, fechaCreacion, estado) VALUES ($1, $2, $3, $4, $5, ${LOCAL_TIMESTAMP}, 'Registrado')`,
+        `INSERT INTO ingresos (idIngreso, idCaja, descripcion, monto, costo, fechaCreacion, estado) VALUES ($1, $2, $3, $4, $5, NOW(), 'Registrado')`,
         [idIngreso, idCaja, descripcion, monto, costo || 0]
     );
     
@@ -303,7 +294,7 @@ router.delete('/ingresos/:id', authenticateToken, async (req, res) => {
     } catch(err) { handleDbError(res, err); }
 });
 
-// --- EGRESOS (RESTAURADO) ---
+// --- EGRESOS ---
 router.get('/egresos', authenticateToken, async (req, res) => {
   const { idCaja } = req.user;
   const queryCaja = req.query.idCaja || idCaja;
@@ -339,7 +330,7 @@ router.post('/egresos', authenticateToken, async (req, res) => {
     const idegresos = await generateNextId('egresos', 'idegresos', 'EGRE');
     
     await pool.query(
-        `INSERT INTO egresos (idegresos, idCaja, descripcion, monto, fechaCreacion, estado) VALUES ($1, $2, $3, $4, ${LOCAL_TIMESTAMP}, 'Registrado')`,
+        `INSERT INTO egresos (idegresos, idCaja, descripcion, monto, fechaCreacion, estado) VALUES ($1, $2, $3, $4, NOW(), 'Registrado')`,
         [idegresos, idCaja, descripcion, monto]
     );
     
@@ -368,7 +359,7 @@ router.delete('/egresos/:id', authenticateToken, async (req, res) => {
     } catch(err) { handleDbError(res, err); }
 });
 
-// --- SALDOS, COMPRAS, RECARGAS (RESTAURADO) ---
+// --- SALDOS, COMPRAS, RECARGAS ---
 router.get('/saldos/today', authenticateToken, async (req, res) => {
   try {
     const { fecha } = req.query; 
@@ -403,7 +394,7 @@ router.post('/saldos/buy', authenticateToken, async (req, res) => {
         const idegresos = await generateNextId('egresos', 'idegresos', 'EGRE', client);
         await client.query(
             `INSERT INTO egresos (idegresos, idCaja, descripcion, monto, fechaCreacion, estado) 
-             VALUES ($1, $2, $3, $4, ${LOCAL_TIMESTAMP}, 'Registrado')`,
+             VALUES ($1, $2, $3, $4, NOW(), 'Registrado')`,
             [idegresos, idCaja, `COMPRA SALDO ${red}`, montoPagado]
         );
 
@@ -436,7 +427,7 @@ router.post('/recargas', authenticateToken, async (req, res) => {
 
     const idIngreso = await generateNextId('ingresos', 'idIngreso', 'INGR', client);
     await client.query(
-      `INSERT INTO ingresos (idIngreso, idCaja, descripcion, monto, costo, fechaCreacion, estado) VALUES ($1, $2, $3, $4, $5, ${LOCAL_TIMESTAMP}, 'Registrado')`,
+      `INSERT INTO ingresos (idIngreso, idCaja, descripcion, monto, costo, fechaCreacion, estado) VALUES ($1, $2, $3, $4, $5, NOW(), 'Registrado')`,
       [idIngreso, idCaja, `RECARGA ${red}: ${descripcion}`, precioCobrado, precioPagado]
     );
 
