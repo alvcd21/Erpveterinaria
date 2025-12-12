@@ -4,7 +4,7 @@ import JsBarcode from 'jsbarcode';
 import QRCode from 'qrcode';
 import { RotateCw, ZoomIn, ZoomOut } from 'lucide-react';
 import { LabelTemplate, LabelElement } from '../../types';
-import { MM_TO_PX } from '../../hooks/useLabelDesigner';
+import { useLabelDesigner } from '../../hooks/useLabelDesigner';
 
 interface DesignerCanvasProps {
     template: LabelTemplate;
@@ -15,7 +15,6 @@ interface DesignerCanvasProps {
     onPointerDown: (e: any, id: string, mode: any, handle?: string) => void;
 }
 
-// Helper functions kept outside component to avoid recreation
 const renderBarcode = (el: LabelElement) => {
     const canvas = document.createElement('canvas');
     try { 
@@ -32,8 +31,8 @@ const renderQR = (el: LabelElement) => {
     return url; 
 };
 
-// Memoized Individual Element to prevent full re-render on selection change
-const CanvasElement = memo(({ el, isSelected, zoom, onPointerDown, onSelect }: any) => {
+// Memoized Element with Scale Injection
+const CanvasElement = memo(({ el, isSelected, scale, onPointerDown, onSelect }: any) => {
     return (
         <div
             onMouseDown={(e) => onPointerDown(e, el.id, 'MOVE')}
@@ -41,35 +40,43 @@ const CanvasElement = memo(({ el, isSelected, zoom, onPointerDown, onSelect }: a
             className={`absolute group select-none cursor-move
                 ${isSelected ? 'z-50 outline outline-2 outline-indigo-500' : 'z-10 hover:outline hover:outline-1 hover:outline-indigo-300'}`}
             style={{
-                left: `${el.x * MM_TO_PX * zoom}px`,
-                top: `${el.y * MM_TO_PX * zoom}px`,
-                width: `${el.width * MM_TO_PX * zoom}px`,
-                height: `${el.height * MM_TO_PX * zoom}px`,
+                left: `${el.x * scale}px`,
+                top: `${el.y * scale}px`,
+                width: `${el.width * scale}px`,
+                height: `${el.height * scale}px`,
                 transform: `rotate(${el.rotation}deg)`,
             }}
             onClick={(e) => { e.stopPropagation(); onSelect(el.id); }}
         >
             <div className="w-full h-full overflow-hidden flex items-center justify-center relative" style={{
-                border: (el.type === 'SHAPE' && el.shapeType !== 'LINE') ? `${(el.strokeWidth||1)*zoom}px solid ${el.stroke}` : 'none',
+                border: (el.type === 'SHAPE' && el.shapeType !== 'LINE') ? `${(el.strokeWidth||1)}px solid ${el.stroke}` : 'none',
                 borderRadius: el.shapeType === 'CIRCLE' ? '50%' : '0',
                 backgroundColor: el.type === 'SHAPE' ? el.fill : 'transparent',
             }}>
                 {el.type === 'TEXT' && (
                     <div style={{
-                        fontSize: `${(el.fontSize||10)*zoom}px`,
+                        // Simple pt to px conversion roughly, scaled by zoom if needed visually, but DOM scales
+                        fontSize: `${(el.fontSize||10)}pt`, 
                         fontFamily: el.fontFamily,
                         fontWeight: el.fontWeight,
                         color: el.color,
                         textAlign: el.textAlign,
                         whiteSpace: el.isMultiline ? 'pre-wrap' : 'nowrap',
-                        width: '100%', height: '100%', lineHeight: 1.2
+                        width: '100%', height: '100%', lineHeight: 1.2,
+                        display: 'flex', alignItems: 'center', justifyContent: el.textAlign === 'center' ? 'center' : el.textAlign === 'right' ? 'flex-end' : 'flex-start'
                     }}>{el.content}</div>
                 )}
                 {el.type === 'BARCODE' && <img src={renderBarcode(el)} className="w-full h-full object-fill pointer-events-none"/>}
                 {el.type === 'QR' && <img src={renderQR(el)} className="w-full h-full object-contain pointer-events-none"/>}
                 {el.type === 'IMAGE' && <img src={el.content} className="w-full h-full object-contain pointer-events-none"/>}
-                {el.type === 'SHAPE' && el.shapeType === 'LINE' && <div style={{width:'100%', height:`${(el.strokeWidth||1)*zoom}px`, backgroundColor: el.stroke}}/>}
-                {el.type === 'DETAIL_TABLE' && <div className="w-full h-full border-2 border-dashed border-purple-300 bg-purple-50 flex items-center justify-center text-purple-500 font-bold text-[10px]">DETALLES</div>}
+                {el.type === 'SHAPE' && el.shapeType === 'LINE' && <div style={{width:'100%', height:`${(el.strokeWidth||1)}px`, backgroundColor: el.stroke}}/>}
+                {el.type === 'DETAIL_TABLE' && (
+                    <div className="w-full h-full border border-slate-300 bg-white text-xs">
+                        <div className="bg-slate-100 font-bold p-1 border-b">Encabezado Tabla</div>
+                        <div className="p-1 text-slate-400">Filas de datos...</div>
+                        <div className="p-1 text-slate-400">Filas de datos...</div>
+                    </div>
+                )}
             </div>
 
             {/* HANDLES */}
@@ -90,6 +97,15 @@ const CanvasElement = memo(({ el, isSelected, zoom, onPointerDown, onSelect }: a
 const DesignerCanvas: React.FC<DesignerCanvasProps> = ({ template, selectedId, zoom, setZoom, setSelectedId, onPointerDown }) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const lastDist = useRef<number | null>(null);
+    
+    // Recalculate scale locally or pass via props. 
+    // We import hooks helper for constant consistency
+    const { scaleFactor, unitLabel } = useLabelDesigner();
+    // We override scaleFactor based on template type directly here for render
+    // because useLabelDesigner hook above initializes new state which is not shared props.
+    // FIX: Calculate scale based on props
+    const currentScale = template.type === 'DOCUMENT' ? 37.795 : 3.7795;
+    const currentUnit = template.type === 'DOCUMENT' ? 'cm' : 'mm';
 
     // --- GESTURE LOGIC ---
     useEffect(() => {
@@ -100,11 +116,10 @@ const DesignerCanvas: React.FC<DesignerCanvasProps> = ({ template, selectedId, z
             if (e.ctrlKey) {
                 e.preventDefault();
                 const delta = e.deltaY * -0.01;
-                setZoom(z => Math.max(0.5, Math.min(5, z + delta)));
+                setZoom(z => Math.max(0.1, Math.min(5, z + delta)));
             }
         };
 
-        // Touch Pinch Logic
         const handleTouchStart = (e: TouchEvent) => {
             if (e.touches.length === 2) {
                 const dist = Math.hypot(
@@ -117,23 +132,18 @@ const DesignerCanvas: React.FC<DesignerCanvasProps> = ({ template, selectedId, z
 
         const handleTouchMove = (e: TouchEvent) => {
             if (e.touches.length === 2 && lastDist.current) {
-                e.preventDefault(); // Prevent page scroll
+                e.preventDefault();
                 const dist = Math.hypot(
                     e.touches[0].clientX - e.touches[1].clientX,
                     e.touches[0].clientY - e.touches[1].clientY
                 );
-                
                 const delta = dist - lastDist.current;
-                const zoomFactor = delta * 0.005; // Sensitivity
-                
-                setZoom(z => Math.max(0.5, Math.min(5, z + zoomFactor)));
+                setZoom(z => Math.max(0.1, Math.min(5, z + (delta * 0.005))));
                 lastDist.current = dist;
             }
         };
 
-        const handleTouchEnd = () => {
-            lastDist.current = null;
-        };
+        const handleTouchEnd = () => { lastDist.current = null; };
 
         container.addEventListener('wheel', handleWheel, { passive: false });
         container.addEventListener('touchstart', handleTouchStart, { passive: false });
@@ -154,7 +164,6 @@ const DesignerCanvas: React.FC<DesignerCanvasProps> = ({ template, selectedId, z
             className="flex-1 bg-slate-200/50 overflow-hidden relative flex items-center justify-center p-8 touch-none"
             onClick={() => setSelectedId(null)}
         >
-            {/* Zoom Controls */}
             <div className="absolute bottom-6 left-6 flex flex-col gap-2 bg-white p-1 rounded-xl shadow-lg border border-slate-200 z-10">
                 <button onClick={() => setZoom(z => Math.min(z + 0.5, 5))} className="p-2 hover:bg-slate-100 rounded-lg text-slate-600"><ZoomIn size={20}/></button>
                 <div className="text-[10px] font-bold text-slate-400 text-center py-1 border-y border-slate-100 select-none">{Math.round(zoom*100)}%</div>
@@ -164,32 +173,32 @@ const DesignerCanvas: React.FC<DesignerCanvasProps> = ({ template, selectedId, z
             <div 
                 className="bg-white shadow-2xl relative transition-transform duration-75 ease-out ring-1 ring-slate-900/5 origin-center"
                 style={{
-                    width: `${template.width * MM_TO_PX}px`,
-                    height: `${template.height * MM_TO_PX}px`,
+                    width: `${template.width * currentScale}px`,
+                    height: `${template.height * currentScale}px`,
                     transform: `scale(${zoom})`,
                 }}
                 onClick={(e) => e.stopPropagation()}
             >
-                {/* Size Label */}
+                {/* Visual Grid for Reports */}
+                {template.type === 'DOCUMENT' && (
+                    <div className="absolute inset-0 pointer-events-none opacity-10" 
+                        style={{backgroundImage: `linear-gradient(#000 1px, transparent 1px), linear-gradient(90deg, #000 1px, transparent 1px)`, backgroundSize: `${currentScale}px ${currentScale}px`}}>
+                    </div>
+                )}
+
                 <div 
                     className="absolute -top-8 left-0 bg-slate-800 text-white text-[10px] px-2 py-1 rounded font-bold shadow-sm opacity-50 hover:opacity-100 transition-opacity"
                     style={{ transform: `scale(${1/zoom})`, transformOrigin: 'bottom left' }}
                 >
-                    {template.width}mm x {template.height}mm
+                    {template.width}{currentUnit} x {template.height}{currentUnit}
                 </div>
 
-                {/* Grid Pattern */}
-                <div className="absolute inset-0 pointer-events-none opacity-20" 
-                    style={{backgroundImage: `radial-gradient(#cbd5e1 1px, transparent 1px)`, backgroundSize: `10px 10px`}}>
-                </div>
-
-                {/* ELEMENTS RENDER */}
                 {template.elements.map(el => (
                     <CanvasElement 
                         key={el.id} 
                         el={el} 
                         isSelected={selectedId === el.id} 
-                        zoom={1} // Elements inside handled by container scale, but we pass 1 to reuse component math
+                        scale={currentScale}
                         onPointerDown={onPointerDown}
                         onSelect={setSelectedId}
                     />

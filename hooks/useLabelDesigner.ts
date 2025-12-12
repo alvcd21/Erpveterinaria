@@ -5,7 +5,9 @@ import { LabelService, AdminService } from '../services/api';
 import Swal from 'sweetalert2';
 
 // Constants
-export const MM_TO_PX = 3.7795; // 96 DPI
+export const MM_TO_PX = 3.7795; // 96 DPI / 25.4
+export const CM_TO_PX = 37.795; // 96 DPI / 2.54
+
 const INITIAL_TEMPLATE: LabelTemplate = {
   id: '',
   name: 'Nuevo Diseño',
@@ -13,8 +15,8 @@ const INITIAL_TEMPLATE: LabelTemplate = {
   type: 'LABEL',
   dataSource: 'NONE',
   isDefault: false,
-  width: 50,
-  height: 25,
+  width: 50, // mm default
+  height: 25, // mm default
   elements: []
 };
 
@@ -30,12 +32,16 @@ export const useLabelDesigner = () => {
     // --- STATE ---
     const [template, setTemplate] = useState<LabelTemplate>(INITIAL_TEMPLATE);
     const [selectedId, setSelectedId] = useState<string | null>(null);
-    const [zoom, setZoom] = useState(2);
+    const [zoom, setZoom] = useState(2); // Initial zoom factor
     const [history, setHistory] = useState<LabelTemplate[]>([]);
     const [historyIndex, setHistoryIndex] = useState(-1);
     const [dbSchema, setDbSchema] = useState<Record<string, SchemaTable>>({});
     const [clipboard, setClipboard] = useState<LabelElement | null>(null);
     
+    // Derived State for Unit Scale
+    const scaleFactor = template.type === 'DOCUMENT' ? CM_TO_PX : MM_TO_PX;
+    const unitLabel = template.type === 'DOCUMENT' ? 'cm' : 'mm';
+
     // Interaction State
     const [interaction, setInteraction] = useState<{
         mode: 'NONE' | 'MOVE' | 'RESIZE' | 'ROTATE';
@@ -49,13 +55,24 @@ export const useLabelDesigner = () => {
         setTemplate(tpl);
         setHistory([]);
         setHistoryIndex(-1);
+        // Adjust zoom based on document type for better UX
+        setZoom(tpl.type === 'DOCUMENT' ? 0.8 : 2.5);
     };
 
-    const createNew = () => {
-        setTemplate(INITIAL_TEMPLATE);
+    const createNew = (type: 'LABEL' | 'DOCUMENT', name: string) => {
+        setTemplate({
+            ...INITIAL_TEMPLATE,
+            name,
+            type,
+            // A4 for Document (cm), Standard for Label (mm)
+            width: type === 'DOCUMENT' ? 21 : 50,
+            height: type === 'DOCUMENT' ? 29.7 : 25,
+            category: type === 'DOCUMENT' ? 'REPORT' : 'GENERAL',
+            elements: []
+        });
         setHistory([]);
         setHistoryIndex(-1);
-        setZoom(window.innerWidth < 768 ? 1.5 : 3);
+        setZoom(type === 'DOCUMENT' ? 0.8 : 2.5);
     };
 
     const fetchDbSchema = async () => {
@@ -106,27 +123,35 @@ export const useLabelDesigner = () => {
     const updateElement = (id: string, updates: Partial<LabelElement>) => {
         const newElements = template.elements.map(el => el.id === id ? { ...el, ...updates } : el);
         setTemplate({ ...template, elements: newElements });
-        // NOTE: We don't add to history on every tiny update (like slider drag), parent handles that on mouseUp
     };
 
     const addElement = (type: LabelElement['type'], extra: Partial<LabelElement> = {}) => {
+        const isDoc = template.type === 'DOCUMENT';
+        // Default sizes based on unit type
+        const defW = isDoc ? 5 : 30; // 5cm vs 30mm
+        const defH = isDoc ? 2 : 5;  // 2cm vs 5mm
+
         const newEl: LabelElement = {
             id: generateId(),
             type,
-            x: 5, y: 5,
-            width: type === 'TEXT' ? 30 : 20,
-            height: type === 'TEXT' ? 5 : 20,
+            x: isDoc ? 2 : 5, y: isDoc ? 2 : 5,
+            width: defW,
+            height: defH,
             rotation: 0,
             content: type === 'TEXT' ? 'Texto' : '',
-            fontSize: 8, color: '#000000', textAlign: 'left', fontWeight: 'normal', fontFamily: 'helvetica',
+            fontSize: 10, color: '#000000', textAlign: 'left', fontWeight: 'normal', fontFamily: 'helvetica',
             barcodeFormat: 'CODE128', displayValue: true, shapeType: 'RECTANGLE',
             ...extra
         };
 
-        if (type === 'BARCODE') { newEl.content = '123456'; newEl.width = 30; newEl.height = 10; }
-        if (type === 'QR') { newEl.content = 'QR CODE'; newEl.width = 15; newEl.height = 15; }
-        if (type === 'SHAPE') { newEl.fill = 'transparent'; newEl.stroke = '#000000'; newEl.strokeWidth = 0.5; }
-        if (type === 'DETAIL_TABLE') { newEl.width = template.width - 10; newEl.height = 15; newEl.content = 'TABLA DETALLE'; }
+        if (type === 'BARCODE') { newEl.content = '123456'; newEl.width = isDoc?6:30; newEl.height = isDoc?2:10; }
+        if (type === 'QR') { newEl.content = 'QR CODE'; newEl.width = isDoc?3:15; newEl.height = isDoc?3:15; }
+        if (type === 'SHAPE') { newEl.fill = 'transparent'; newEl.stroke = '#000000'; newEl.strokeWidth = 0.5; newEl.width = isDoc?4:15; newEl.height = isDoc?4:15; }
+        if (type === 'DETAIL_TABLE') { 
+            newEl.width = template.width - (isDoc?2:10); 
+            newEl.height = isDoc?5:15; 
+            newEl.content = 'TABLA DETALLE'; 
+        }
 
         const newElements = [...template.elements, newEl];
         updateTemplate({ elements: newElements });
@@ -167,15 +192,12 @@ export const useLabelDesigner = () => {
 
     // --- KEYBOARD SHORTCUTS ---
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
-        // Ignorar si está escribiendo en un input
         const target = e.target as HTMLElement;
         if (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return;
 
-        // Undo / Redo
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); undo(); return; }
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); return; }
 
-        // Copy / Paste
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c') {
             if (selectedId) {
                 const el = template.elements.find(x => x.id === selectedId);
@@ -187,26 +209,24 @@ export const useLabelDesigner = () => {
             if (clipboard) {
                 addElement(clipboard.type, {
                     ...clipboard,
-                    x: clipboard.x + 2,
-                    y: clipboard.y + 2
+                    x: clipboard.x + (template.type==='DOCUMENT'?0.5:2),
+                    y: clipboard.y + (template.type==='DOCUMENT'?0.5:2)
                 });
             }
             return;
         }
 
-        // Delete (Only Delete Key, Backspace Removed)
         if (e.key === 'Delete') {
             if (selectedId) deleteSelected();
             return;
         }
 
-        // Arrow Keys (Nudge)
         if (selectedId && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
             e.preventDefault();
             const el = template.elements.find(x => x.id === selectedId);
             if (!el) return;
 
-            const step = e.shiftKey ? 10 : 0.5; // mm
+            const step = e.shiftKey ? (template.type==='DOCUMENT'?1:10) : (template.type==='DOCUMENT'?0.1:0.5);
             let { x, y } = el;
 
             if (e.key === 'ArrowUp') y -= step;
@@ -214,10 +234,9 @@ export const useLabelDesigner = () => {
             if (e.key === 'ArrowLeft') x -= step;
             if (e.key === 'ArrowRight') x += step;
 
-            updateElement(selectedId, { x: Number(x.toFixed(1)), y: Number(y.toFixed(1)) });
+            updateElement(selectedId, { x: Number(x.toFixed(2)), y: Number(y.toFixed(2)) });
         }
         
-        // Escape
         if (e.key === 'Escape') setSelectedId(null);
     };
 
@@ -260,18 +279,18 @@ export const useLabelDesigner = () => {
         
         const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
         const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
-        const deltaMmX = (clientX - interaction.startPos.x) / (MM_TO_PX * zoom);
-        const deltaMmY = (clientY - interaction.startPos.y) / (MM_TO_PX * zoom);
+        const deltaX = (clientX - interaction.startPos.x) / (scaleFactor * zoom);
+        const deltaY = (clientY - interaction.startPos.y) / (scaleFactor * zoom);
         
         const start = interaction.elementStart;
         let newEl = { ...template.elements.find(x => x.id === selectedId)! };
 
         if (interaction.mode === 'MOVE') {
-            newEl.x = Number((start.x + deltaMmX).toFixed(1));
-            newEl.y = Number((start.y + deltaMmY).toFixed(1));
+            newEl.x = Number((start.x + deltaX).toFixed(2));
+            newEl.y = Number((start.y + deltaY).toFixed(2));
         } else if (interaction.mode === 'RESIZE' && interaction.handle) {
-            if (interaction.handle.includes('e')) newEl.width = Math.max(2, Number((start.w + deltaMmX).toFixed(1)));
-            if (interaction.handle.includes('s')) newEl.height = Math.max(2, Number((start.h + deltaMmY).toFixed(1)));
+            if (interaction.handle.includes('e')) newEl.width = Math.max(0.5, Number((start.w + deltaX).toFixed(2)));
+            if (interaction.handle.includes('s')) newEl.height = Math.max(0.5, Number((start.h + deltaY).toFixed(2)));
         } else if (interaction.mode === 'ROTATE') {
             newEl.rotation = (start.r + ((clientX - interaction.startPos.x)/2)) % 360;
         }
@@ -295,9 +314,8 @@ export const useLabelDesigner = () => {
         undo, redo,
         addElement, updateElement, deleteSelected, updateTemplate,
         saveTemplate,
-        moveLayer,
-        reorderElements,
-        interaction,
+        moveLayer, reorderElements,
+        interaction, scaleFactor, unitLabel,
         handlePointerDown, handlePointerMove, handlePointerUp
     };
 };

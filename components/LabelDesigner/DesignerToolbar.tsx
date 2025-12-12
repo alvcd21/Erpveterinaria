@@ -44,7 +44,7 @@ const DesignerToolbar: React.FC<DesignerToolbarProps> = ({
                 <ToolButton icon={<Shapes size={20}/>} label="Forma" onClick={() => setShowShapeModal(true)} />
                 <ToolButton icon={<ImageIcon size={20}/>} label="Imagen" onClick={() => fileInputRef.current?.click()} />
                 
-                {template.type === 'INVOICE' && <ToolButton icon={<TableIcon size={20}/>} label="Tabla" onClick={() => addElement('DETAIL_TABLE')} color="text-purple-600 bg-purple-50" />}
+                {template.type === 'DOCUMENT' && <ToolButton icon={<TableIcon size={20}/>} label="Tabla" onClick={() => addElement('DETAIL_TABLE')} color="text-purple-600 bg-purple-50" />}
             </div>
             
             <div className="mt-auto flex flex-col gap-4 w-full px-2 pt-4 border-t border-slate-100">

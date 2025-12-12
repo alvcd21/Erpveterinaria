@@ -240,10 +240,10 @@ export type ElementType = 'TEXT' | 'BARCODE' | 'QR' | 'IMAGE' | 'SHAPE' | 'DETAI
 export interface LabelElement {
   id: string;
   type: ElementType;
-  x: number; // mm
-  y: number; // mm
-  width: number; // mm
-  height: number; // mm
+  x: number; // units (mm or cm)
+  y: number; // units
+  width: number; // units
+  height: number; // units
   rotation: number; // degrees
   
   // Content & Variables
@@ -277,14 +277,14 @@ export interface LabelTemplate {
   id: string; // UUID
   name: string;
   
-  // Classification
-  category?: 'GENERAL' | 'TELEPHONE' | 'ACCESSORY'; 
-  type?: 'LABEL' | 'REPORT' | 'INVOICE'; // Tipo de uso
-  dataSource?: 'INVENTORY' | 'SALES' | 'CLIENTS' | 'NONE'; // De qué tabla saca datos
+  // Strict Categories for Logic Separation
+  category?: 'GENERAL' | 'TELEPHONE' | 'ACCESSORY' | 'INVOICE' | 'REPORT'; 
+  type?: 'LABEL' | 'DOCUMENT'; // LABEL uses mm, DOCUMENT uses cm
+  dataSource?: 'NONE' | 'TELEPHONES' | 'INVENTORY_ACCESSORIES' | 'SALES' | 'CLIENTS' | 'FULL_DB';
   
   isDefault: boolean;
-  width: number; // mm
-  height: number; // mm
+  width: number; // units based on type
+  height: number; // units based on type
   elements: LabelElement[];
   createdAt?: string;
 }

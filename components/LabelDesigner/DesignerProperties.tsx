@@ -57,6 +57,7 @@ const DesignerProperties: React.FC<DesignerPropertiesProps> = ({
     selectedId, template, setTemplate, updateElement, deleteSelected, setShowVarModal 
 }) => {
     const sel = template.elements.find((e: any) => e.id === selectedId);
+    const unit = template.type === 'DOCUMENT' ? 'cm' : 'mm';
 
     if (!sel) {
         // Page Settings
@@ -64,32 +65,48 @@ const DesignerProperties: React.FC<DesignerPropertiesProps> = ({
             <div className="p-6 space-y-6">
                 <div className="flex items-center gap-2 text-slate-800 border-b pb-2">
                     <FileCog size={18} className="text-indigo-600"/>
-                    <h3 className="font-bold text-sm uppercase">Configuración Página</h3>
+                    <h3 className="font-bold text-sm uppercase">Configuración {template.type === 'DOCUMENT' ? 'Documento' : 'Etiqueta'}</h3>
                 </div>
                 
                 <div className="space-y-4">
-                    <div>
-                        <label className="text-xs font-bold text-slate-400 uppercase mb-1 block">Tipo Documento</label>
-                        <div className="grid grid-cols-2 gap-2">
-                            <button onClick={() => setTemplate({...template, type:'LABEL'})} className={`p-2 rounded-lg border text-xs font-bold transition-all ${template.type==='LABEL'?'border-indigo-600 bg-indigo-50 text-indigo-700':'border-slate-200 text-slate-500'}`}>Etiqueta</button>
-                            <button onClick={() => setTemplate({...template, type:'INVOICE'})} className={`p-2 rounded-lg border text-xs font-bold transition-all ${template.type==='INVOICE'?'border-indigo-600 bg-indigo-50 text-indigo-700':'border-slate-200 text-slate-500'}`}>Factura</button>
-                        </div>
-                    </div>
-
                     <div className="grid grid-cols-2 gap-3">
-                        <PropertyInput label="Ancho (mm)" value={template.width} onChange={(v:any) => setTemplate({...template, width:v})} type="number" />
-                        <PropertyInput label="Alto (mm)" value={template.height} onChange={(v:any) => setTemplate({...template, height:v})} type="number" />
+                        <PropertyInput label={`Ancho (${unit})`} value={template.width} onChange={(v:any) => setTemplate({...template, width:v})} type="number" step={0.1} />
+                        <PropertyInput label={`Alto (${unit})`} value={template.height} onChange={(v:any) => setTemplate({...template, height:v})} type="number" step={0.1} />
                     </div>
 
                     <div>
                         <label className="text-xs font-bold text-slate-400 uppercase mb-1 block">Contexto de Datos</label>
                         <select className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm outline-none" value={template.dataSource} onChange={e => setTemplate({...template, dataSource:e.target.value as any})}>
                             <option value="NONE">Sin Conexión</option>
-                            <option value="INVENTORY">Inventario / Productos</option>
-                            <option value="SALES">Ventas / Facturas</option>
-                            <option value="CLIENTS">Clientes</option>
+                            <option disabled>--- ETIQUETAS ---</option>
+                            <option value="TELEPHONES">Inventario Teléfonos (IMEI)</option>
+                            <option value="INVENTORY_ACCESSORIES">Inventario Accesorios</option>
+                            <option disabled>--- DOCUMENTOS ---</option>
+                            <option value="SALES">Ventas / Facturación</option>
+                            <option value="CLIENTS">Reporte Clientes</option>
+                            <option value="FULL_DB">Base de Datos Completa</option>
                         </select>
                     </div>
+                    
+                    {template.dataSource && template.dataSource !== 'NONE' && (
+                        <div>
+                            <label className="text-xs font-bold text-slate-400 uppercase mb-1 block">Categoría Uso</label>
+                            <select className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm outline-none" value={template.category} onChange={e => setTemplate({...template, category:e.target.value as any})}>
+                                {template.type === 'LABEL' ? (
+                                    <>
+                                        <option value="GENERAL">General</option>
+                                        <option value="TELEPHONE">Teléfonos</option>
+                                        <option value="ACCESSORY">Accesorios</option>
+                                    </>
+                                ) : (
+                                    <>
+                                        <option value="INVOICE">Factura</option>
+                                        <option value="REPORT">Reporte</option>
+                                    </>
+                                )}
+                            </select>
+                        </div>
+                    )}
 
                     <div className="flex items-center gap-2 p-3 bg-slate-50 rounded-lg border border-slate-100 cursor-pointer" onClick={() => setTemplate({...template, isDefault: !template.isDefault})}>
                         <div className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${template.isDefault ? 'bg-indigo-600 border-indigo-600' : 'bg-white border-slate-300'}`}>
@@ -114,10 +131,10 @@ const DesignerProperties: React.FC<DesignerPropertiesProps> = ({
 
             {/* Common Geometry */}
             <div className="grid grid-cols-2 gap-3">
-                <PropertyInput label="X (mm)" value={sel.x} onChange={(v:any) => updateElement(sel.id, {x:v})} type="number" />
-                <PropertyInput label="Y (mm)" value={sel.y} onChange={(v:any) => updateElement(sel.id, {y:v})} type="number" />
-                <PropertyInput label="Ancho" value={sel.width} onChange={(v:any) => updateElement(sel.id, {width:v})} type="number" />
-                <PropertyInput label="Alto" value={sel.height} onChange={(v:any) => updateElement(sel.id, {height:v})} type="number" />
+                <PropertyInput label={`X (${unit})`} value={sel.x} onChange={(v:any) => updateElement(sel.id, {x:v})} type="number" step={0.1}/>
+                <PropertyInput label={`Y (${unit})`} value={sel.y} onChange={(v:any) => updateElement(sel.id, {y:v})} type="number" step={0.1}/>
+                <PropertyInput label="Ancho" value={sel.width} onChange={(v:any) => updateElement(sel.id, {width:v})} type="number" step={0.1}/>
+                <PropertyInput label="Alto" value={sel.height} onChange={(v:any) => updateElement(sel.id, {height:v})} type="number" step={0.1}/>
             </div>
 
             {/* Content Logic (Text/Barcode) */}

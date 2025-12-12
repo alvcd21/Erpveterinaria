@@ -30,6 +30,7 @@ const Inventory: React.FC = () => {
   const [locations, setLocations] = useState<Ubicacion[]>([]);
   const [providers, setProviders] = useState<Proveedor[]>([]);
 
+  // Forms...
   const [phoneForm, setPhoneForm] = useState<Partial<Telefono>>({});
   const [stockForm, setStockForm] = useState<Partial<Inventario>>({});
   const [masterForm, setMasterForm] = useState<Partial<Accesorio>>({});
@@ -80,19 +81,21 @@ const Inventory: React.FC = () => {
     }
   };
 
-  // --- LOGICA DE IMPRESIÓN DIRECTA ACTUALIZADA ---
   const printLabel = async (type: 'TELEPHONE' | 'ACCESSORY', data: any) => {
       try {
-          // Fetch templates specifically for the category, fallback to General
           const templates = await LabelService.getAll();
-          let tpl = templates.find(t => t.isDefault && t.category === (type === 'TELEPHONE' ? 'TELEPHONE' : 'ACCESSORY'));
+          
+          // STRICT CATEGORY FILTERING
+          const targetCategory = type === 'TELEPHONE' ? 'TELEPHONE' : 'ACCESSORY';
+          let tpl = templates.find(t => t.isDefault && t.category === targetCategory);
+          
           if (!tpl) tpl = templates.find(t => t.isDefault && t.category === 'GENERAL');
           
           if (!tpl) {
-              return Swal.fire('Sin Plantilla', `No hay plantilla predeterminada para ${type}. Configúrala en el Diseñador.`, 'warning');
+              return Swal.fire('Sin Plantilla', `No hay plantilla predeterminada para ${type === 'TELEPHONE' ? 'TELÉFONOS' : 'ACCESORIOS'}.`, 'warning');
           }
 
-          // Build context object explicitly for variable replacement
+          // Context Data Construction
           let contextData: any = {};
           if (type === 'TELEPHONE') {
               contextData = {
@@ -103,47 +106,44 @@ const Inventory: React.FC = () => {
                   }
               };
           } else {
-              // For Accessories, we have Inventory data + Accessory Master data
-              // The passed 'data' object from table is flat, let's restructure or use it directly
-              // Assuming 'data' contains fields from both inventory and accesorios joined
               contextData = {
                   inventario: {
                       ...data,
-                      codInventario: data.codInventario || data.codigo,
+                      codInventario: data.codInventario,
                       cantidad: data.cantidad,
                       precioVenta: `L. ${Number(data.precioVenta || 0).toFixed(2)}`,
                   },
-                  accesorios: {
+                  accesorios: { // Mapeo cruzado para facilitar
                       codAccesorio: data.codAccesorio,
-                      descripcion: data.descripcion || data.descripcionAccesorio,
-                      // Add other fields if available
+                      descripcion: data.descripcionAccesorio, // Usar el nombre del join
+                      nombreCategoria: data.categoriaAccesorio
                   }
               };
           }
 
-          // Generate PDF
-          const orientation = tpl.width > tpl.height ? 'l' : 'p';
-          const doc = new jsPDF({ orientation, unit: 'mm', format: [tpl.width, tpl.height] });
+          // PDF Generation
+          // Convert template units (mm/cm) to mm for jsPDF
+          const scale = tpl.type === 'DOCUMENT' ? 10 : 1; 
+          const docWidth = tpl.width * scale;
+          const docHeight = tpl.height * scale;
+          const orientation = docWidth > docHeight ? 'l' : 'p';
+          
+          const doc = new jsPDF({ orientation, unit: 'mm', format: [docWidth, docHeight] });
 
-          // Helper to get value from dot notation string (e.g. "telefonos.marca")
           const getValue = (path: string, obj: any) => {
               return path.split('.').reduce((prev, curr) => prev && prev[curr], obj) || '';
           };
 
           tpl.elements.forEach(el => {
-              // Variable Replacement Logic
               let content = el.content || '';
-              
-              // Find all {{variables}}
+              // Regex to find {{variables}}
               const matches = content.match(/{{(.*?)}}/g);
               if (matches) {
                   matches.forEach(match => {
-                      const key = match.replace(/{{|}}/g, ''); // e.g. "telefonos.marca" or "marca"
-                      
-                      // Try to find in context
+                      const key = match.replace(/{{|}}/g, '').trim(); 
                       let val = getValue(key, contextData);
                       
-                      // Fallback: If user used short names without table prefix (e.g. {{marca}})
+                      // Fallbacks for short names
                       if (!val && !key.includes('.')) {
                           if (type === 'TELEPHONE') val = getValue(`telefonos.${key}`, contextData);
                           else {
@@ -151,10 +151,14 @@ const Inventory: React.FC = () => {
                               if (!val) val = getValue(`accesorios.${key}`, contextData);
                           }
                       }
-                      
                       content = content.replace(match, String(val));
                   });
               }
+
+              const elX = el.x * scale;
+              const elY = el.y * scale;
+              const elW = el.width * scale;
+              const elH = el.height * scale;
 
               if (el.type === 'TEXT') {
                   doc.setFontSize(el.fontSize || 10);
@@ -164,19 +168,17 @@ const Inventory: React.FC = () => {
                   const options: any = { angle: el.rotation || 0 };
                   if (el.textAlign) options.align = el.textAlign;
                   
-                  // Correction for Text Align Pivot in jsPDF
-                  let x = el.x;
-                  if (el.textAlign === 'center') x += el.width / 2;
-                  if (el.textAlign === 'right') x += el.width;
+                  let x = elX;
+                  if (el.textAlign === 'center') x += elW / 2;
+                  if (el.textAlign === 'right') x += elW;
 
-                  doc.text(content, x, el.y + (el.height/2), options);
+                  doc.text(content, x, elY + (elH/2), options);
 
               } else if (el.type === 'BARCODE') {
                   try {
                       const canvas = document.createElement('canvas');
-                      // Ensure content is a clean value for barcode
                       let codeContent = content.trim();
-                      if (!codeContent) codeContent = "000000"; // Fallback
+                      if (!codeContent) codeContent = "000000";
 
                       JsBarcode(canvas, codeContent, {
                           format: (el.barcodeFormat as any) || "CODE128",
@@ -185,7 +187,7 @@ const Inventory: React.FC = () => {
                           width: 2, height: 50, fontSize: 20
                       });
                       const imgData = canvas.toDataURL("image/png");
-                      doc.addImage(imgData, 'PNG', el.x, el.y, el.width, el.height, undefined, 'FAST', el.rotation);
+                      doc.addImage(imgData, 'PNG', elX, elY, elW, elH, undefined, 'FAST', el.rotation);
                   } catch (e) { console.error("Error barcode", e); }
               } else if (el.type === 'SHAPE') {
                   doc.setDrawColor(el.stroke || '#000000');
@@ -195,16 +197,16 @@ const Inventory: React.FC = () => {
                   const style = (el.fill && el.fill !== 'transparent') ? 'FD' : 'S';
 
                   if (el.shapeType === 'CIRCLE') {
-                      doc.ellipse(el.x + el.width/2, el.y + el.height/2, el.width/2, el.height/2, style);
+                      doc.ellipse(elX + elW/2, elY + elH/2, elW/2, elH/2, style);
                   } else if (el.shapeType === 'LINE') {
-                      doc.line(el.x, el.y + el.height/2, el.x + el.width, el.y + el.height/2);
+                      doc.line(elX, elY + elH/2, elX + elW, elY + elH/2);
                   } else {
-                      doc.rect(el.x, el.y, el.width, el.height, style);
+                      doc.rect(elX, elY, elW, elH, style);
                   }
               }
           });
 
-          doc.save(`etiqueta_${type}_${data.codigo || data.codInventario || Date.now()}.pdf`);
+          doc.save(`${type}_${Date.now()}.pdf`);
 
       } catch (err: any) {
           console.error(err);
@@ -212,6 +214,8 @@ const Inventory: React.FC = () => {
       }
   };
 
+  // ... (Rest of modal and handler logic is identical to previous, preserved for brevity)
+  
   const openNewModal = () => {
     setIsEditing(false);
     setCurrentId(null);
@@ -288,7 +292,7 @@ const Inventory: React.FC = () => {
 
   return (
     <div className="space-y-6 h-full flex flex-col">
-      {/* HEADER & TABS (Same as before) */}
+      {/* HEADER & TABS */}
       <div>
         <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-6 gap-4">
           <div>
@@ -328,7 +332,7 @@ const Inventory: React.FC = () => {
           ))}
         </div>
         
-        {/* SEARCH BAR & FILTERS (Same as before) */}
+        {/* SEARCH BAR & FILTERS */}
         <div className="bg-white border-x border-b border-slate-200 p-3 flex flex-col md:flex-row gap-3 rounded-b-xl mb-4">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
@@ -440,13 +444,9 @@ const Inventory: React.FC = () => {
                   <td className="p-4 text-center flex items-center justify-center gap-2">
                     <button 
                         onClick={() => printLabel('ACCESSORY', {
-                            codigo: s.codInventario,
-                            codAccesorio: s.codAccesorio,
-                            descripcion: s.descripcionAccesorio,
-                            precioVenta: s.precioVenta,
-                            categoria: s.categoriaAccesorio,
-                            ubicacion: s.nombreUbicacion,
-                            cantidad: s.cantidad
+                            ...s,
+                            descripcionAccesorio: s.descripcionAccesorio, // Explicit
+                            categoriaAccesorio: s.categoriaAccesorio
                         })}
                         className="text-slate-500 hover:text-indigo-600" 
                         title="Imprimir Etiqueta"
@@ -499,7 +499,7 @@ const Inventory: React.FC = () => {
       {showModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl p-6 animate-fade-in max-h-[90vh] overflow-y-auto">
-            {/* Modal Content - Same as previous */}
+            {/* Modal Content - Preserved */}
             <div className="flex justify-between items-center mb-6 border-b border-slate-100 pb-4">
               <h3 className="text-xl font-bold text-slate-800">
                 {isEditing ? 'Editar' : 'Nuevo'}
@@ -508,7 +508,7 @@ const Inventory: React.FC = () => {
             </div>
             
             <form onSubmit={handleSubmit} className="space-y-4">
-               {/* ... (Existing form content preserved) ... */}
+               {/* ... (Existing form content - No changes needed here, logic is abstracted) ... */}
                {activeTab === 'TELEPHONES' && (
                  <>
                    <div className="grid grid-cols-2 gap-4">
@@ -678,6 +678,8 @@ const Inventory: React.FC = () => {
                  </>
                )}
 
+               {/* ... (Existing Master, Categories, Locations Forms preserved) ... */}
+               {/* Just ensure to close the modal logic properly */}
                {/* --- OTROS FORMULARIOS --- */}
                {activeTab === 'MASTER' && (
                  <>
