@@ -12,10 +12,29 @@ router.get('/labels', authenticateToken, async (req, res) => {
     } catch(e) { handleDbError(res, e); }
 });
 
-// Obtener plantilla por defecto (opcional: por categoría y tipo)
+// Obtener plantilla por defecto (filtrada por categoría si se especifica)
 router.get('/labels/default', authenticateToken, async (req, res) => {
     try {
-        const result = await pool.query('SELECT id, name, category, type, data_source as "dataSource", is_default as "isDefault", width, height, elements FROM label_templates WHERE is_default = TRUE');
+        const { category } = req.query;
+        let query = 'SELECT id, name, category, type, data_source as "dataSource", is_default as "isDefault", width, height, elements FROM label_templates WHERE is_default = TRUE';
+        const params = [];
+
+        if (category) {
+            query += ' AND category = $1';
+            params.push(category);
+        }
+
+        // Si hay varios defaults (uno por categoría), priorizamos por la query category
+        query += ' LIMIT 1';
+
+        const result = await pool.query(query, params);
+        
+        // Si no encuentra por categoría específica, intentar buscar un GENERAL por defecto como fallback
+        if (result.rows.length === 0 && category) {
+             const fallback = await pool.query('SELECT id, name, category, type, data_source as "dataSource", is_default as "isDefault", width, height, elements FROM label_templates WHERE is_default = TRUE AND category = $1 LIMIT 1', ['GENERAL']);
+             return res.json(fallback.rows[0] || null);
+        }
+
         res.json(result.rows[0] || null);
     } catch(e) { handleDbError(res, e); }
 });

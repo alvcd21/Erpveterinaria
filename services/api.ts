@@ -1,3 +1,4 @@
+
 import { 
   Usuario, Empleado, Rol, Caja, Permiso, 
   Cliente, Proveedor, Telefono, Inventario, Accesorio, Categoria, Ubicacion, ProductoUnified,
@@ -155,7 +156,7 @@ export const ReportsService = {
 
 export const LabelService = {
   getAll: () => request<LabelTemplate[]>('/labels'),
-  getDefault: () => request<LabelTemplate | null>('/labels/default'),
+  getDefault: (category?: string) => request<LabelTemplate | null>(`/labels/default${category ? `?category=${category}` : ''}`),
   create: (data: Partial<LabelTemplate>) => request<{message: string, id: string}>('/labels', { method: 'POST', body: JSON.stringify(data) }),
   update: (id: string, data: Partial<LabelTemplate>) => request(`/labels/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   delete: (id: string) => request(`/labels/${id}`, { method: 'DELETE' }),

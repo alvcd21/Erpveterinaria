@@ -1,18 +1,21 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { InventoryService } from '../services/api';
+import { InventoryService, LabelService } from '../services/api';
 import { 
   Telefono, 
   Inventario, 
   Accesorio, 
   Categoria, 
   Ubicacion, 
-  Proveedor 
+  Proveedor,
+  LabelTemplate 
 } from '../types';
 import { 
-  Search, PlusCircle, Package, Smartphone, Layers, MapPin, Tag, Edit2, Trash2, X, RefreshCw, Box, Filter
+  Search, PlusCircle, Package, Smartphone, Layers, MapPin, Tag, Edit2, Trash2, X, RefreshCw, Box, Filter, Printer
 } from 'lucide-react';
 import Swal from 'sweetalert2';
+import { jsPDF } from 'jspdf';
+import JsBarcode from 'jsbarcode';
 
 type InventoryTab = 'TELEPHONES' | 'STOCK' | 'MASTER' | 'CATEGORIES' | 'LOCATIONS';
 
@@ -105,6 +108,132 @@ const Inventory: React.FC = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  // --- LOGICA IMPRESIÓN CON PLANTILLAS DISEÑADOR ---
+  const replaceVariables = (content: string, item: any, type: 'TELEFONO' | 'STOCK'): string => {
+      let text = content;
+      
+      // Variables Generales
+      const brand = type === 'TELEFONO' ? item.marca : '';
+      const model = type === 'TELEFONO' ? item.modelo : item.descripcionAccesorio;
+      const title = `${brand} ${model}`.trim();
+      const code = type === 'TELEFONO' ? item.imei1 : item.codInventario;
+      const price = `L. ${Number(item.precioVenta).toFixed(2)}`;
+
+      // Reemplazo Directo
+      text = text.replace(/{{TITULO}}/g, title);
+      text = text.replace(/{{PRECIO}}/g, price);
+      text = text.replace(/{{CODIGO}}/g, code);
+
+      // Reemplazo Avanzado (Variables de BD)
+      if (type === 'TELEFONO') {
+          text = text.replace(/{{telefonos\.marca}}/g, item.marca || '');
+          text = text.replace(/{{telefonos\.modelo}}/g, item.modelo || '');
+          text = text.replace(/{{telefonos\.precioVenta}}/g, String(item.precioVenta));
+          text = text.replace(/{{telefonos\.imei1}}/g, item.imei1 || '');
+          text = text.replace(/{{telefonos\.codigo}}/g, item.codigo || '');
+      } else {
+          text = text.replace(/{{accesorios\.descripcion}}/g, item.descripcionAccesorio || '');
+          text = text.replace(/{{inventario\.precioVenta}}/g, String(item.precioVenta));
+          text = text.replace(/{{inventario\.codInventario}}/g, item.codInventario || '');
+          text = text.replace(/{{categoria\.tipo}}/g, item.categoriaAccesorio || '');
+      }
+
+      return text;
+  };
+
+  const handlePrintLabel = async (item: any, type: 'TELEFONO' | 'STOCK') => {
+      try {
+          // 1. Obtener la plantilla predeterminada correcta
+          const category = type === 'TELEFONO' ? 'TELEPHONE' : 'ACCESSORY';
+          const template = await LabelService.getDefault(category);
+
+          if (!template) {
+              return Swal.fire('Sin Plantilla', `No hay una etiqueta predeterminada para ${category}. Ve al Diseñador de Etiquetas y configura una.`, 'warning');
+          }
+
+          // 2. Configurar PDF según dimensiones de la plantilla (mm)
+          const doc = new jsPDF({
+              orientation: template.width > template.height ? 'landscape' : 'portrait',
+              unit: 'mm',
+              format: [template.width, template.height]
+          });
+
+          // 3. Renderizar elementos
+          template.elements.forEach(el => {
+              if (el.type === 'TEXT') {
+                  const finalContent = replaceVariables(el.content, item, type);
+                  
+                  doc.setFontSize(el.fontSize || 10);
+                  // Mapear font-family básico
+                  if(el.fontFamily?.includes('Courier')) doc.setFont('courier', el.fontWeight);
+                  else if(el.fontFamily?.includes('Times')) doc.setFont('times', el.fontWeight);
+                  else doc.setFont('helvetica', el.fontWeight);
+                  
+                  doc.setTextColor(el.color || '#000000');
+                  
+                  // Calcular posición para alineación (jsPDF text usa x como inicio, no tiene align nativo simple en todas las versiones, pero usaremos el text option)
+                  const opts: any = { baseline: 'top' };
+                  let x = el.x;
+                  if (el.textAlign === 'center') {
+                      x = el.x + (el.width / 2);
+                      opts.align = 'center';
+                  } else if (el.textAlign === 'right') {
+                      x = el.x + el.width;
+                      opts.align = 'right';
+                  }
+
+                  // Rotación
+                  if (el.rotation && el.rotation !== 0) {
+                      opts.angle = el.rotation;
+                      // Ajuste de pivote podría ser necesario
+                  }
+
+                  doc.text(finalContent, x, el.y, opts);
+              } 
+              else if (el.type === 'BARCODE') {
+                  const code = type === 'TELEFONO' ? item.imei1 : item.codInventario;
+                  const canvas = document.createElement('canvas');
+                  try {
+                      JsBarcode(canvas, code, {
+                          format: (el.barcodeFormat as any) || "CODE128",
+                          displayValue: el.displayValue,
+                          fontSize: 10, // Pequeño para imagen
+                          margin: 0,
+                          width: 2,
+                          height: 40
+                      });
+                      const imgData = canvas.toDataURL("image/png");
+                      // jsPDF addImage(data, fmt, x, y, w, h)
+                      doc.addImage(imgData, 'PNG', el.x, el.y, el.width, el.height);
+                  } catch(e) { console.error("Barcode Error", e); }
+              }
+              else if (el.type === 'SHAPE') {
+                  const style = el.fill && el.fill !== 'transparent' ? 'FD' : 'S'; // Fill+Draw or Stroke
+                  doc.setDrawColor(el.stroke || '#000000');
+                  doc.setFillColor(el.fill || '#FFFFFF');
+                  doc.setLineWidth((el.strokeWidth || 1) * 0.1); // Scale adjustment
+
+                  if (el.shapeType === 'CIRCLE') {
+                      const r = Math.min(el.width, el.height) / 2;
+                      doc.circle(el.x + r, el.y + r, r, style);
+                  } else if (el.shapeType === 'LINE') {
+                      doc.line(el.x, el.y, el.x + el.width, el.y); // Simple horizontal line logic for now
+                  } else {
+                      doc.rect(el.x, el.y, el.width, el.height, style);
+                  }
+              }
+          });
+
+          // 4. Descargar
+          const filename = type === 'TELEFONO' ? `Label_${item.imei1}.pdf` : `Label_${item.codInventario}.pdf`;
+          doc.save(filename);
+
+      } catch (error) {
+          console.error(error);
+          Swal.fire('Error', 'No se pudo generar la etiqueta. Verifique la plantilla.', 'error');
+      }
   };
 
   const openModal = (item?: any) => {
@@ -214,6 +343,7 @@ const Inventory: React.FC = () => {
                               <td className="p-3 text-xs">{p.nombreUbicacion || p.idubicacion}</td>
                               <td className="p-3"><span className={`px-2 py-1 rounded-full text-xs font-bold ${p.estado === 'Disponible' ? 'bg-green-100 text-green-700' : p.estado === 'Vendido' ? 'bg-slate-100 text-slate-600' : 'bg-red-100 text-red-600'}`}>{p.estado}</span></td>
                               <td className="p-3 text-right">
+                                  <button onClick={() => handlePrintLabel(p, 'TELEFONO')} className="text-slate-400 hover:text-slate-600 hover:bg-slate-100 p-1.5 rounded mr-1" title="Imprimir Etiqueta"><Printer size={16}/></button>
                                   <button onClick={() => openModal(p)} className="text-blue-500 hover:bg-blue-50 p-1.5 rounded mr-1"><Edit2 size={16}/></button>
                                   <button onClick={() => handleDelete(p.codigo)} className="text-red-500 hover:bg-red-50 p-1.5 rounded"><Trash2 size={16}/></button>
                               </td>
@@ -256,6 +386,7 @@ const Inventory: React.FC = () => {
                             <td className="p-3 text-right font-bold text-emerald-600">L. {Number(s.precioVenta).toFixed(2)}</td>
                             <td className="p-3 text-xs">{s.nombreUbicacion || s.idubicacion}</td>
                             <td className="p-3 text-right">
+                                <button onClick={() => handlePrintLabel(s, 'STOCK')} className="text-slate-400 hover:text-slate-600 hover:bg-slate-100 p-1.5 rounded mr-1" title="Imprimir Etiqueta"><Printer size={16}/></button>
                                 <button onClick={() => openModal(s)} className="text-blue-500 hover:bg-blue-50 p-1.5 rounded mr-1"><Edit2 size={16}/></button>
                                 <button onClick={() => handleDelete(s.codInventario)} className="text-red-500 hover:bg-red-50 p-1.5 rounded"><Trash2 size={16}/></button>
                             </td>
