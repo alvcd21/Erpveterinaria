@@ -110,34 +110,35 @@ const Inventory: React.FC = () => {
     }
   };
 
-  // --- LOGICA IMPRESIÓN CON PLANTILLAS DISEÑADOR ---
-  const replaceVariables = (content: string, item: any, type: 'TELEFONO' | 'STOCK'): string => {
+  // --- LOGICA IMPRESIÓN AVANZADA ---
+  
+  // Función auxiliar para obtener valores anidados: getValue(obj, 'categoria.tipo')
+  const getNestedValue = (obj: any, path: string) => {
+      return path.split('.').reduce((o, key) => (o && o[key] !== undefined) ? o[key] : undefined, obj);
+  };
+
+  const replaceVariables = (content: string, dataContext: any): string => {
       let text = content;
       
-      // Variables Generales
-      const brand = type === 'TELEFONO' ? item.marca : '';
-      const model = type === 'TELEFONO' ? item.modelo : item.descripcionAccesorio;
-      const title = `${brand} ${model}`.trim();
-      const code = type === 'TELEFONO' ? item.imei1 : item.codInventario;
-      const price = `L. ${Number(item.precioVenta).toFixed(2)}`;
+      // Reemplazo dinámico usando Regex para capturar cualquier {{variable.ruta}}
+      // Esto hace que funcione escalablemente para cualquier tabla relacionada
+      text = text.replace(/{{([\w.]+)}}/g, (match, path) => {
+          // Intentar obtener el valor del contexto de datos
+          const val = getNestedValue(dataContext, path);
+          
+          // Formateo especial para moneda
+          if (typeof val === 'number' && (path.toLowerCase().includes('precio') || path.toLowerCase().includes('costo'))) {
+              return `L. ${val.toFixed(2)}`;
+          }
+          
+          return val !== undefined ? String(val) : ''; // Retorna vacío si no encuentra, en lugar de undefined
+      });
 
-      // Reemplazo Directo
-      text = text.replace(/{{TITULO}}/g, title);
-      text = text.replace(/{{PRECIO}}/g, price);
-      text = text.replace(/{{CODIGO}}/g, code);
-
-      // Reemplazo Avanzado (Variables de BD)
-      if (type === 'TELEFONO') {
-          text = text.replace(/{{telefonos\.marca}}/g, item.marca || '');
-          text = text.replace(/{{telefonos\.modelo}}/g, item.modelo || '');
-          text = text.replace(/{{telefonos\.precioVenta}}/g, String(item.precioVenta));
-          text = text.replace(/{{telefonos\.imei1}}/g, item.imei1 || '');
-          text = text.replace(/{{telefonos\.codigo}}/g, item.codigo || '');
-      } else {
-          text = text.replace(/{{accesorios\.descripcion}}/g, item.descripcionAccesorio || '');
-          text = text.replace(/{{inventario\.precioVenta}}/g, String(item.precioVenta));
-          text = text.replace(/{{inventario\.codInventario}}/g, item.codInventario || '');
-          text = text.replace(/{{categoria\.tipo}}/g, item.categoriaAccesorio || '');
+      // Variables Legacy/Hardcoded (por compatibilidad si se usaron {{TITULO}} manualmente)
+      if (dataContext.legacy) {
+          text = text.replace(/{{TITULO}}/g, dataContext.legacy.titulo || '');
+          text = text.replace(/{{PRECIO}}/g, dataContext.legacy.precio || '');
+          text = text.replace(/{{CODIGO}}/g, dataContext.legacy.codigo || '');
       }
 
       return text;
@@ -153,27 +154,85 @@ const Inventory: React.FC = () => {
               return Swal.fire('Sin Plantilla', `No hay una etiqueta predeterminada para ${category}. Ve al Diseñador de Etiquetas y configura una.`, 'warning');
           }
 
-          // 2. Configurar PDF según dimensiones de la plantilla (mm)
+          // 2. Construir Contexto de Datos Estructurado (Mapeo de DB Plana a Objetos Anidados)
+          // Esto permite que {{categoria.tipo}} funcione aunque la API devuelva categoriaAccesorio
+          let dataContext: any = {};
+
+          if (type === 'TELEFONO') {
+              dataContext = {
+                  telefonos: {
+                      codigo: item.codigo,
+                      imei1: item.imei1,
+                      imei2: item.imei2,
+                      marca: item.marca,
+                      modelo: item.modelo,
+                      precioCompra: item.precioCompra,
+                      precioVenta: item.precioVenta,
+                      fecha: item.fecha,
+                      estado: item.estado
+                  },
+                  ubicacion: {
+                      nombre: item.nombreUbicacion // Mapeo desde API
+                  },
+                  proveedores: {
+                      // Si la API devolviera nombreProveedor se pondría aquí
+                      codProveedor: item.codProveedor
+                  },
+                  legacy: {
+                      titulo: `${item.marca} ${item.modelo}`,
+                      precio: `L. ${Number(item.precioVenta).toFixed(2)}`,
+                      codigo: item.imei1
+                  }
+              };
+          } else {
+              // STOCK ACCESORIOS
+              dataContext = {
+                  inventario: {
+                      codInventario: item.codInventario,
+                      cantidad: item.cantidad,
+                      precioCompra: item.precioCompra,
+                      precioVenta: item.precioVenta,
+                      estado: item.estado,
+                      fecha: item.fecha
+                  },
+                  accesorios: {
+                      descripcion: item.descripcionAccesorio // Mapeo crítico
+                  },
+                  categoria: {
+                      tipo: item.categoriaAccesorio // Mapeo crítico para que funcione {{categoria.tipo}}
+                  },
+                  ubicacion: {
+                      nombre: item.nombreUbicacion
+                  },
+                  legacy: {
+                      titulo: item.descripcionAccesorio,
+                      precio: `L. ${Number(item.precioVenta).toFixed(2)}`,
+                      codigo: item.codInventario
+                  }
+              };
+          }
+
+          // 3. Configurar PDF
           const doc = new jsPDF({
               orientation: template.width > template.height ? 'landscape' : 'portrait',
               unit: 'mm',
               format: [template.width, template.height]
           });
 
-          // 3. Renderizar elementos
-          template.elements.forEach(el => {
+          // 4. Renderizar Elementos
+          for (const el of template.elements) {
               if (el.type === 'TEXT') {
-                  const finalContent = replaceVariables(el.content, item, type);
+                  const finalContent = replaceVariables(el.content, dataContext);
                   
                   doc.setFontSize(el.fontSize || 10);
-                  // Mapear font-family básico
+                  
+                  // Fuente
                   if(el.fontFamily?.includes('Courier')) doc.setFont('courier', el.fontWeight);
                   else if(el.fontFamily?.includes('Times')) doc.setFont('times', el.fontWeight);
                   else doc.setFont('helvetica', el.fontWeight);
                   
                   doc.setTextColor(el.color || '#000000');
                   
-                  // Calcular posición para alineación (jsPDF text usa x como inicio, no tiene align nativo simple en todas las versiones, pero usaremos el text option)
                   const opts: any = { baseline: 'top' };
                   let x = el.x;
                   if (el.textAlign === 'center') {
@@ -184,10 +243,8 @@ const Inventory: React.FC = () => {
                       opts.align = 'right';
                   }
 
-                  // Rotación
                   if (el.rotation && el.rotation !== 0) {
                       opts.angle = el.rotation;
-                      // Ajuste de pivote podría ser necesario
                   }
 
                   doc.text(finalContent, x, el.y, opts);
@@ -195,38 +252,43 @@ const Inventory: React.FC = () => {
               else if (el.type === 'BARCODE') {
                   const code = type === 'TELEFONO' ? item.imei1 : item.codInventario;
                   const canvas = document.createElement('canvas');
+                  
                   try {
+                      // ALTA RESOLUCIÓN: Generamos el código a una escala mucho mayor (4x)
+                      // y luego jsPDF lo escala hacia abajo, manteniendo la nitidez.
+                      const scaleFactor = 4; 
+                      
                       JsBarcode(canvas, code, {
                           format: (el.barcodeFormat as any) || "CODE128",
                           displayValue: el.displayValue,
-                          fontSize: 10, // Pequeño para imagen
+                          fontSize: 14 * scaleFactor, // Escalar fuente
                           margin: 0,
-                          width: 2,
-                          height: 40
+                          width: 2 * scaleFactor,     // Barras más anchas
+                          height: 50 * scaleFactor    // Altura base alta
                       });
+                      
                       const imgData = canvas.toDataURL("image/png");
-                      // jsPDF addImage(data, fmt, x, y, w, h)
+                      // jsPDF addImage(data, fmt, x, y, w, h) -> Aquí usamos el tamaño real (mm) definido en el diseño
                       doc.addImage(imgData, 'PNG', el.x, el.y, el.width, el.height);
                   } catch(e) { console.error("Barcode Error", e); }
               }
               else if (el.type === 'SHAPE') {
-                  const style = el.fill && el.fill !== 'transparent' ? 'FD' : 'S'; // Fill+Draw or Stroke
+                  const style = el.fill && el.fill !== 'transparent' ? 'FD' : 'S';
                   doc.setDrawColor(el.stroke || '#000000');
                   doc.setFillColor(el.fill || '#FFFFFF');
-                  doc.setLineWidth((el.strokeWidth || 1) * 0.1); // Scale adjustment
+                  doc.setLineWidth((el.strokeWidth || 1) * 0.1); 
 
                   if (el.shapeType === 'CIRCLE') {
                       const r = Math.min(el.width, el.height) / 2;
                       doc.circle(el.x + r, el.y + r, r, style);
                   } else if (el.shapeType === 'LINE') {
-                      doc.line(el.x, el.y, el.x + el.width, el.y); // Simple horizontal line logic for now
+                      doc.line(el.x, el.y, el.x + el.width, el.y);
                   } else {
                       doc.rect(el.x, el.y, el.width, el.height, style);
                   }
               }
-          });
+          }
 
-          // 4. Descargar
           const filename = type === 'TELEFONO' ? `Label_${item.imei1}.pdf` : `Label_${item.codInventario}.pdf`;
           doc.save(filename);
 
@@ -397,16 +459,13 @@ const Inventory: React.FC = () => {
         );
       }
 
+      // ... Resto de los tabs (Master, Categories, Locations) igual que antes ...
+      // Para no exceder límites de respuesta, el resto del renderContent es igual al anterior
       if (activeTab === 'MASTER') {
           return (
             <table className="w-full text-left">
                 <thead className="bg-slate-50 text-xs font-bold text-slate-500 uppercase sticky top-0">
-                    <tr>
-                        <th className="p-3">ID</th>
-                        <th className="p-3">Descripción</th>
-                        <th className="p-3">Categoría</th>
-                        <th className="p-3 text-right">Acciones</th>
-                    </tr>
+                    <tr><th className="p-3">ID</th><th className="p-3">Descripción</th><th className="p-3">Categoría</th><th className="p-3 text-right">Acciones</th></tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                     {master.filter(m => m.descripcion.toLowerCase().includes(searchTerm.toLowerCase())).map(m => (
@@ -424,26 +483,18 @@ const Inventory: React.FC = () => {
             </table>
           );
       }
-
       if (activeTab === 'CATEGORIES') {
           return (
              <div className="p-4 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
                  {categories.map(c => (
                      <div key={c.codCategoria} className="bg-white border border-slate-200 rounded-xl p-4 flex justify-between items-center shadow-sm">
-                         <div>
-                             <p className="font-bold text-slate-700">{c.tipo}</p>
-                             <p className="text-xs text-slate-400 font-mono">{c.codCategoria}</p>
-                         </div>
-                         <div className="flex gap-1">
-                            <button onClick={() => openModal(c)} className="text-blue-500 hover:bg-blue-50 p-1.5 rounded"><Edit2 size={16}/></button>
-                            <button onClick={() => handleDelete(c.codCategoria)} className="text-red-500 hover:bg-red-50 p-1.5 rounded"><Trash2 size={16}/></button>
-                         </div>
+                         <div><p className="font-bold text-slate-700">{c.tipo}</p><p className="text-xs text-slate-400 font-mono">{c.codCategoria}</p></div>
+                         <div className="flex gap-1"><button onClick={() => openModal(c)} className="text-blue-500 hover:bg-blue-50 p-1.5 rounded"><Edit2 size={16}/></button><button onClick={() => handleDelete(c.codCategoria)} className="text-red-500 hover:bg-red-50 p-1.5 rounded"><Trash2 size={16}/></button></div>
                      </div>
                  ))}
              </div>
           );
       }
-
       if (activeTab === 'LOCATIONS') {
           return (
              <div className="p-4 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
@@ -451,20 +502,8 @@ const Inventory: React.FC = () => {
                      <div key={l.idUbicacion} className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm relative overflow-hidden group">
                          <div className={`absolute left-0 top-0 bottom-0 w-1 ${l.estado === 'Activo' ? 'bg-green-500' : 'bg-red-500'}`}/>
                          <div className="pl-3">
-                             <div className="flex justify-between items-start">
-                                 <div>
-                                    <h4 className="font-bold text-slate-800">{l.nombre}</h4>
-                                    <p className="text-xs text-slate-500">{l.descripcion}</p>
-                                 </div>
-                                 <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                    <button onClick={() => openModal(l)} className="text-blue-500 hover:bg-blue-50 p-1.5 rounded"><Edit2 size={16}/></button>
-                                    <button onClick={() => handleDelete(l.idUbicacion)} className="text-red-500 hover:bg-red-50 p-1.5 rounded"><Trash2 size={16}/></button>
-                                 </div>
-                             </div>
-                             <div className="mt-3 flex gap-2 text-xs">
-                                 <span className="bg-slate-100 px-2 py-1 rounded text-slate-600 font-mono">Estante: {l.estante}</span>
-                                 <span className="bg-slate-100 px-2 py-1 rounded text-slate-600 font-mono">Nivel: {l.nivel}</span>
-                             </div>
+                             <div className="flex justify-between items-start"><div><h4 className="font-bold text-slate-800">{l.nombre}</h4><p className="text-xs text-slate-500">{l.descripcion}</p></div><div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity"><button onClick={() => openModal(l)} className="text-blue-500 hover:bg-blue-50 p-1.5 rounded"><Edit2 size={16}/></button><button onClick={() => handleDelete(l.idUbicacion)} className="text-red-500 hover:bg-red-50 p-1.5 rounded"><Trash2 size={16}/></button></div></div>
+                             <div className="mt-3 flex gap-2 text-xs"><span className="bg-slate-100 px-2 py-1 rounded text-slate-600 font-mono">Estante: {l.estante}</span><span className="bg-slate-100 px-2 py-1 rounded text-slate-600 font-mono">Nivel: {l.nivel}</span></div>
                          </div>
                      </div>
                  ))}
@@ -495,7 +534,7 @@ const Inventory: React.FC = () => {
           {[
               { id: 'TELEPHONES', label: 'Teléfonos', icon: <Smartphone size={18}/> },
               { id: 'STOCK', label: 'Stock Accesorios', icon: <Box size={18}/> },
-              { id: 'MASTER', label: 'Accesorios', icon: <Layers size={18}/> }, // RENOMBRADO A ACCESORIOS
+              { id: 'MASTER', label: 'Accesorios', icon: <Layers size={18}/> }, 
               { id: 'CATEGORIES', label: 'Categorías', icon: <Tag size={18}/> },
               { id: 'LOCATIONS', label: 'Ubicaciones', icon: <MapPin size={18}/> },
           ].map(tab => (
@@ -550,7 +589,7 @@ const Inventory: React.FC = () => {
           </div>
       </div>
 
-      {/* --- MODAL FORM --- */}
+      {/* --- MODAL FORM (El formulario sigue igual, lo omito para brevedad ya que el cambio era solo en impresión) --- */}
       {showModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className={`bg-white rounded-3xl w-full ${activeTab === 'TELEPHONES' || activeTab === 'STOCK' ? 'max-w-4xl' : 'max-w-md'} shadow-2xl p-0 overflow-hidden animate-fade-in flex flex-col max-h-[90vh]`}>
