@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   ArrowLeft, Save, Undo2, Redo2, Plus, Star, FileCog, Type, ScanLine, Shapes, Settings, ChevronDown, MoreVertical, X, Square, Circle, Minus,
-  Layers, Search, Database, Table, ChevronRight, Key, GripVertical, FileText, Tag, ChevronUp
+  Layers, Search, Database, Table, ChevronRight, Key, GripVertical, FileText, Tag, ChevronUp, Image as ImageIcon
 } from 'lucide-react';
 import { LabelService } from '../services/api';
 import { LabelTemplate } from '../types';
@@ -34,7 +34,6 @@ const SchemaNode = ({ table, path, schema, onSelect, level = 0 }: any) => {
 
             {expanded && (
                 <div className="pl-4">
-                    {/* Columns */}
                     <div className="grid grid-cols-2 gap-1 mb-2">
                         {tableDef.columns.map((col: any) => (
                             <button 
@@ -49,7 +48,6 @@ const SchemaNode = ({ table, path, schema, onSelect, level = 0 }: any) => {
                             </button>
                         ))}
                     </div>
-                    {/* Relations */}
                     {tableDef.relations.map((rel: any) => (
                         <SchemaNode 
                             key={rel.foreignTable}
@@ -71,8 +69,11 @@ const LabelDesigner: React.FC = () => {
   const navigate = useNavigate();
   const [view, setView] = useState<'GALLERY' | 'DESIGNER'>('GALLERY');
   const [savedTemplates, setSavedTemplates] = useState<LabelTemplate[]>([]);
+  
+  // Create Modal State
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newDesignName, setNewDesignName] = useState('');
+  const [selectedType, setSelectedType] = useState<'LABEL' | 'DOCUMENT' | null>(null);
   
   // Custom Hook
   const {
@@ -93,8 +94,7 @@ const LabelDesigner: React.FC = () => {
   const [isMobilePropOpen, setIsMobilePropOpen] = useState(false);
   const [showVarModal, setShowVarModal] = useState(false);
   const [showShapeModal, setShowShapeModal] = useState(false);
-  const [varSearch, setVarSearch] = useState('');
-
+  
   // Drag and Drop
   const dragItem = useRef<number | null>(null);
   const dragOverItem = useRef<number | null>(null);
@@ -108,12 +108,13 @@ const LabelDesigner: React.FC = () => {
       } catch (e) { console.error(e); }
   };
 
-  const initCreation = (type: 'LABEL' | 'DOCUMENT') => {
-      if(!newDesignName.trim()) return;
-      createNew(type, newDesignName);
+  const initCreation = () => {
+      if(!newDesignName.trim() || !selectedType) return;
+      createNew(selectedType, newDesignName);
       setShowCreateModal(false);
       setView('DESIGNER');
       setNewDesignName('');
+      setSelectedType(null);
   };
 
   const handleOpen = (t: LabelTemplate) => {
@@ -205,19 +206,32 @@ const LabelDesigner: React.FC = () => {
                               onChange={e => setNewDesignName(e.target.value)}
                               autoFocus
                           />
-                          <div className="grid grid-cols-2 gap-4">
-                              <button onClick={() => initCreation('LABEL')} className="p-4 border-2 border-slate-100 hover:border-indigo-500 hover:bg-indigo-50 rounded-xl transition-all group text-left">
-                                  <Tag className="text-indigo-600 mb-2 group-hover:scale-110 transition-transform" size={28}/>
+                          <div className="grid grid-cols-2 gap-4 mb-6">
+                              <button 
+                                  onClick={() => setSelectedType('LABEL')} 
+                                  className={`p-4 border-2 rounded-xl transition-all group text-left ${selectedType === 'LABEL' ? 'border-indigo-600 bg-indigo-50' : 'border-slate-100 hover:border-indigo-300'}`}
+                              >
+                                  <Tag className={`${selectedType === 'LABEL' ? 'text-indigo-600' : 'text-slate-400'} mb-2`} size={28}/>
                                   <h4 className="font-bold text-slate-800">Etiqueta</h4>
-                                  <p className="text-xs text-slate-500 mt-1">Códigos de barra, precios, tickets pequeños (mm).</p>
+                                  <p className="text-xs text-slate-500 mt-1">Códigos de barra, precios (mm).</p>
                               </button>
-                              <button onClick={() => initCreation('DOCUMENT')} className="p-4 border-2 border-slate-100 hover:border-purple-500 hover:bg-purple-50 rounded-xl transition-all group text-left">
-                                  <FileText className="text-purple-600 mb-2 group-hover:scale-110 transition-transform" size={28}/>
-                                  <h4 className="font-bold text-slate-800">Reporte / Doc</h4>
-                                  <p className="text-xs text-slate-500 mt-1">Facturas, informes A4/Carta, tablas (cm).</p>
+                              <button 
+                                  onClick={() => setSelectedType('DOCUMENT')} 
+                                  className={`p-4 border-2 rounded-xl transition-all group text-left ${selectedType === 'DOCUMENT' ? 'border-purple-600 bg-purple-50' : 'border-slate-100 hover:border-purple-300'}`}
+                              >
+                                  <FileText className={`${selectedType === 'DOCUMENT' ? 'text-purple-600' : 'text-slate-400'} mb-2`} size={28}/>
+                                  <h4 className="font-bold text-slate-800">Reporte</h4>
+                                  <p className="text-xs text-slate-500 mt-1">Facturas, informes A4 (cm).</p>
                               </button>
                           </div>
-                          <button onClick={() => setShowCreateModal(false)} className="mt-6 w-full py-3 text-slate-500 font-bold hover:bg-slate-100 rounded-xl">Cancelar</button>
+                          <button 
+                              onClick={initCreation} 
+                              disabled={!selectedType || !newDesignName.trim()}
+                              className="w-full py-3 bg-indigo-600 text-white font-bold rounded-xl shadow-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed mb-3"
+                          >
+                              CREAR DISEÑO
+                          </button>
+                          <button onClick={() => setShowCreateModal(false)} className="w-full py-3 text-slate-500 font-bold hover:bg-slate-100 rounded-xl">Cancelar</button>
                       </div>
                   </div>
               )}
@@ -228,7 +242,7 @@ const LabelDesigner: React.FC = () => {
   // --- DESIGNER VIEW ---
   return (
     <div 
-        className="flex flex-col h-screen bg-slate-100 overflow-hidden font-sans" 
+        className="flex flex-col h-[100dvh] bg-slate-100 overflow-hidden font-sans" 
         onMouseMove={handlePointerMove} 
         onMouseUp={handlePointerUp} 
         onTouchMove={handlePointerMove} 
@@ -261,13 +275,15 @@ const LabelDesigner: React.FC = () => {
         </header>
 
         <div className="flex flex-1 overflow-hidden relative">
+            
+            {/* Desktop Toolbar */}
             <DesignerToolbar 
                 template={template}
                 addElement={(t, e) => { addElement(t, e); if(window.innerWidth < 768) setIsMobilePropOpen(true); }}
                 onImageUpload={handleImageUpload}
                 setShowShapeModal={setShowShapeModal}
-                onConfigClick={() => { setSelectedId(null); setActivePanel('PROPERTIES'); if(window.innerWidth < 768) setIsMobilePropOpen(true); }}
-                onLayersClick={() => { setActivePanel('LAYERS'); if(window.innerWidth < 768) setIsMobilePropOpen(true); }}
+                onConfigClick={() => { setSelectedId(null); setActivePanel('PROPERTIES'); }}
+                onLayersClick={() => { setActivePanel('LAYERS'); }}
                 activePanel={activePanel}
             />
 
@@ -308,7 +324,7 @@ const LabelDesigner: React.FC = () => {
                                 >
                                     <div className="cursor-grab text-slate-300 hover:text-slate-500"><GripVertical size={14}/></div>
                                     <span className="text-[10px] bg-slate-200 px-1.5 rounded text-slate-500 font-mono w-6 text-center">{index+1}</span>
-                                    <span className="truncate flex-1">{el.type} - {el.content?.substring(0,10)}</span>
+                                    <span className="truncate flex-1">{el.type}</span>
                                 </div>
                             ))}
                         </div>
@@ -317,7 +333,61 @@ const LabelDesigner: React.FC = () => {
             </aside>
         </div>
 
-        {/* --- VARIABLE PICKER (Recursive) --- */}
+        {/* --- MOBILE UI --- */}
+        
+        {/* MOBILE BOTTOM TOOLBAR */}
+        <div className="md:hidden bg-white border-t px-4 py-3 flex justify-between items-center z-40 pb-safe shrink-0">
+            <button onClick={() => addElement('TEXT')} className="p-3 bg-slate-50 rounded-lg text-slate-600"><Type size={20}/></button>
+            <button onClick={() => addElement('BARCODE')} className="p-3 bg-slate-50 rounded-lg text-slate-600"><ScanLine size={20}/></button>
+            <button onClick={() => setShowShapeModal(true)} className="p-3 bg-slate-50 rounded-lg text-slate-600"><Shapes size={20}/></button>
+            <button onClick={() => { setActivePanel('LAYERS'); setIsMobilePropOpen(true); }} className="p-3 bg-slate-50 rounded-lg text-slate-600"><Layers size={20}/></button>
+            <div className="w-px h-8 bg-slate-200 mx-2"/>
+            <button 
+                onClick={() => { 
+                    if(isMobilePropOpen && activePanel === 'PROPERTIES') setIsMobilePropOpen(false);
+                    else { setActivePanel('PROPERTIES'); setIsMobilePropOpen(true); }
+                }} 
+                className={`p-3 rounded-full ${selectedId || isMobilePropOpen ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-400'}`}
+            >
+                {isMobilePropOpen ? <ChevronDown/> : <MoreVertical/>}
+            </button>
+        </div>
+
+        {/* MOBILE SLIDE-UP PANEL */}
+        <div className={`md:hidden fixed inset-x-0 bottom-0 bg-white rounded-t-3xl shadow-[0_-10px_40px_rgba(0,0,0,0.2)] z-50 transition-transform duration-300 transform flex flex-col max-h-[70vh] border-t border-slate-100 ${isMobilePropOpen ? 'translate-y-0' : 'translate-y-full'}`}>
+            <div className="flex justify-between items-center px-4 pt-3 pb-2 border-b border-slate-50 cursor-pointer" onClick={() => setIsMobilePropOpen(false)}>
+                <div className="w-8"/> 
+                <div className="w-12 h-1.5 bg-slate-200 rounded-full"/>
+                <button onClick={() => setIsMobilePropOpen(false)} className="p-2 bg-slate-100 rounded-full text-slate-500 hover:bg-slate-200">
+                    <X size={16}/>
+                </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4">
+                {activePanel === 'PROPERTIES' ? (
+                    <DesignerProperties 
+                        selectedId={selectedId} 
+                        template={template} 
+                        setTemplate={updateTemplate} 
+                        updateElement={updateElement} 
+                        deleteSelected={deleteSelected}
+                        setShowVarModal={setShowVarModal}
+                    />
+                ) : (
+                    <div className="space-y-2">
+                        <p className="text-xs text-slate-400 mb-2 font-bold uppercase">Orden de capas</p>
+                        {template.elements.map((el, i) => (
+                            <div key={el.id} onClick={() => setSelectedId(el.id)} className={`p-3 rounded-lg border flex items-center gap-2 ${selectedId===el.id?'border-indigo-500 bg-indigo-50':'border-slate-200'}`}>
+                                <span className="font-bold text-slate-400 text-xs">{i+1}.</span>
+                                <span className="flex-1 font-medium">{el.type}</span>
+                                <GripVertical size={16} className="text-slate-300"/>
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </div>
+        </div>
+
+        {/* --- MODALS --- */}
         {showVarModal && (
             <div className="fixed inset-0 bg-slate-900/60 z-[60] flex items-center justify-center p-4 backdrop-blur-sm animate-fade-in">
                 <div className="bg-white rounded-2xl w-full max-w-lg h-[80vh] shadow-2xl flex flex-col overflow-hidden">
@@ -350,7 +420,6 @@ const LabelDesigner: React.FC = () => {
             </div>
         )}
 
-        {/* SHAPE SELECTOR */}
         {showShapeModal && (
             <div className="fixed inset-0 bg-slate-900/60 z-[60] flex items-center justify-center p-4 backdrop-blur-sm animate-fade-in">
                 <div className="bg-white rounded-2xl w-full max-w-xs p-6 shadow-2xl">
