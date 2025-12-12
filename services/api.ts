@@ -1,59 +1,35 @@
-
 import { 
-  Telefono, 
-  Inventario, 
-  Accesorio, 
-  Categoria, 
-  Ubicacion, 
-  Proveedor, 
-  ProductoUnified, 
-  Cliente, 
-  Venta, 
-  VentaPayload, 
-  DetalleVenta, 
-  Arqueo, 
-  Ingreso, 
-  Egreso, 
-  Saldo, 
-  Paquete, 
-  Costo, 
-  Usuario, 
-  Empleado, 
-  Rol, 
-  Caja, 
-  Permiso, 
-  LabelTemplate 
+  Usuario, Empleado, Rol, Caja, Permiso, 
+  Cliente, Proveedor, Telefono, Inventario, Accesorio, Categoria, Ubicacion, ProductoUnified,
+  Venta, DetalleVenta, VentaPayload,
+  Arqueo, Ingreso, Egreso, Saldo, Paquete, Costo,
+  LabelTemplate
 } from '../types';
 
 const API_URL = '/api';
 
-export const request = async <T>(endpoint: string, options: RequestInit = {}): Promise<T> => {
+const getHeaders = () => {
   const token = localStorage.getItem('smartcloud_token');
-  const headers = {
+  return {
     'Content-Type': 'application/json',
-    ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
-    ...options.headers,
+    'Authorization': token ? `Bearer ${token}` : ''
   };
+};
 
+const request = async <T>(endpoint: string, options?: RequestInit): Promise<T> => {
   const response = await fetch(`${API_URL}${endpoint}`, {
     ...options,
-    headers,
+    headers: { ...getHeaders(), ...options?.headers }
   });
 
+  const data = await response.json();
   if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData.error || `Error ${response.status}: ${response.statusText}`);
+    throw new Error(data.error || data.message || 'Error en la petición');
   }
-
-  // Some endpoints might return empty body (like DELETE)
-  if (response.status === 204) return {} as T;
-
-  return response.json();
+  return data;
 };
 
 export const InventoryService = {
-  getUnifiedProducts: () => request<ProductoUnified[]>('/productos/unificados'),
-  
   getTelefonos: () => request<Telefono[]>('/inventory/telefonos'),
   createTelefono: (data: Partial<Telefono>) => request('/inventory/telefonos', { method: 'POST', body: JSON.stringify(data) }),
   updateTelefono: (id: string, data: Partial<Telefono>) => request(`/inventory/telefonos/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
@@ -83,15 +59,8 @@ export const InventoryService = {
   createProveedor: (data: Partial<Proveedor>) => request('/proveedores', { method: 'POST', body: JSON.stringify(data) }),
   updateProveedor: (id: string, data: Partial<Proveedor>) => request(`/proveedores/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteProveedor: (id: string) => request(`/proveedores/${id}`, { method: 'DELETE' }),
-};
 
-export const SalesService = {
-  getVentasDiarias: (fecha: string) => request<Venta[]>(`/ventas/historial?fecha=${fecha}`),
-  createVenta: (data: VentaPayload) => request<{message: string, codVenta: string}>('/ventas', { method: 'POST', body: JSON.stringify(data) }),
-  getVenta: (id: string) => request<Venta>(`/ventas/${id}`),
-  updateVenta: (id: string, data: VentaPayload) => request<{message: string, codVenta: string}>(`/ventas/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  getDetallesVenta: (id: string) => request<DetalleVenta[]>(`/ventas/${id}/detalles`),
-  anularVenta: (id: string) => request(`/ventas/${id}/anular`, { method: 'PUT' }),
+  getUnifiedProducts: () => request<ProductoUnified[]>('/productos/unificados'),
 };
 
 export const ClientService = {
@@ -101,33 +70,56 @@ export const ClientService = {
   delete: (id: string) => request(`/clientes/${id}`, { method: 'DELETE' }),
 };
 
+export const SalesService = {
+  getVentasDiarias: (fecha?: string) => request<Venta[]>(`/ventas/historial${fecha ? `?fecha=${fecha}` : ''}`),
+  getVenta: (id: string) => request<Venta>(`/ventas/${id}`),
+  createVenta: (data: VentaPayload) => request<{message: string, codVenta: string}>('/ventas', { method: 'POST', body: JSON.stringify(data) }),
+  updateVenta: (id: string, data: VentaPayload) => request<{message: string, codVenta: string}>(`/ventas/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  getDetallesVenta: (id: string) => request<DetalleVenta[]>(`/ventas/${id}/detalles`),
+  anularVenta: (id: string) => request(`/ventas/${id}/anular`, { method: 'PUT' }),
+};
+
 export const CashService = {
   getActiveArqueo: () => request<Arqueo | null>('/arqueo/active'),
-  openCaja: (data: { montoInicial: number; saldoTigoInicial: number; saldoClaroInicial: number; fechaLocal: string }) => request('/arqueo/open', { method: 'POST', body: JSON.stringify(data) }),
-  closeCaja: (idArqueo: string) => request<{message: string, resumen: any}>('/arqueo/close', { method: 'POST', body: JSON.stringify({ idArqueo }) }),
-  getSaldosStatus: (fecha: string) => request<{ tigo: boolean; claro: boolean }>(`/saldos/status?fecha=${fecha}`),
-  getSaldosToday: (fecha: string) => request<Saldo[]>(`/saldos/today?fecha=${fecha}`),
-  buySaldo: (data: { red: string; montoPagado: number; montoRecibido: number; fechaLocal: string }) => request('/saldos/buy', { method: 'POST', body: JSON.stringify(data) }),
-  
+  openCaja: (data: { montoInicial: number, saldoTigoInicial?: number, saldoClaroInicial?: number, fechaLocal?: string }) => request('/arqueo/open', { method: 'POST', body: JSON.stringify(data) }),
+  closeCaja: (idArqueo: string) => request<{resumen: any}>('/arqueo/close', { method: 'POST', body: JSON.stringify({ idArqueo }) }),
+
   getIngresos: (idCaja: string, fecha?: string) => request<Ingreso[]>(`/ingresos?idCaja=${idCaja}${fecha ? `&fecha=${fecha}` : ''}`),
-  createIngreso: (data: Partial<Ingreso>) => request('/ingresos', { method: 'POST', body: JSON.stringify(data) }),
-  updateIngreso: (id: string, data: Partial<Ingreso>) => request(`/ingresos/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  createIngreso: (data: { descripcion: string, monto: number, costo?: number }) => request('/ingresos', { method: 'POST', body: JSON.stringify(data) }),
+  updateIngreso: (id: string, data: { descripcion: string, monto: number, costo?: number }) => request(`/ingresos/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteIngreso: (id: string) => request(`/ingresos/${id}`, { method: 'DELETE' }),
 
   getEgresos: (idCaja: string, fecha?: string) => request<Egreso[]>(`/egresos?idCaja=${idCaja}${fecha ? `&fecha=${fecha}` : ''}`),
-  createEgreso: (data: Partial<Egreso>) => request('/egresos', { method: 'POST', body: JSON.stringify(data) }),
-  updateEgreso: (id: string, data: Partial<Egreso>) => request(`/egresos/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  createEgreso: (data: { descripcion: string, monto: number }) => request('/egresos', { method: 'POST', body: JSON.stringify(data) }),
+  updateEgreso: (id: string, data: { descripcion: string, monto: number }) => request(`/egresos/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteEgreso: (id: string) => request(`/egresos/${id}`, { method: 'DELETE' }),
 
-  createRecarga: (data: { red: string; tipo: string; descripcion: string; precioCobrado: number; precioPagado: number; fechaLocal: string }) => request('/recargas', { method: 'POST', body: JSON.stringify(data) }),
+  getSaldosToday: (fecha?: string) => request<Saldo[]>(`/saldos/today${fecha ? `?fecha=${fecha}` : ''}`),
+  getSaldosStatus: (fecha?: string) => request<{tigo: boolean, claro: boolean}>(`/saldos/status${fecha ? `?fecha=${fecha}` : ''}`),
+  buySaldo: (data: { red: string, montoPagado: number, montoRecibido: number, fechaLocal?: string }) => request('/saldos/buy', { method: 'POST', body: JSON.stringify(data) }),
+  createRecarga: (data: { red: string, tipo: string, descripcion: string, precioCobrado: number, precioPagado: number, fechaLocal?: string }) => request('/recargas', { method: 'POST', body: JSON.stringify(data) }),
 
-  getAdminBoxesStatus: () => request<any[]>('/api/admin/boxes/status'), 
+  getAdminBoxesStatus: () => request<any[]>('/admin/boxes/status'), 
   reopenBox: (idArqueo: string) => request(`/arqueo/${idArqueo}/reopen`, { method: 'PUT' }),
+  getSessionDetails: (idArqueo: string) => request<{arqueo: Arqueo, ingresos: Ingreso[], egresos: Egreso[]}>(`/arqueo/${idArqueo}/details`),
+  updateInitialAmount: (idArqueo: string, monto: number) => request(`/arqueo/${idArqueo}/initial`, { method: 'PUT', body: JSON.stringify({ montoInicial: monto }) }),
+};
+
+export const CostsService = {
+  getAll: () => request<Costo[]>('/costs'),
+  create: (data: Partial<Costo>) => request('/costs', { method: 'POST', body: JSON.stringify(data) }),
+  update: (id: string, data: Partial<Costo>) => request(`/costs/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  delete: (id: string) => request(`/costs/${id}`, { method: 'DELETE' }),
+};
+
+export const PackagesService = {
+  getAll: () => request<Paquete[]>('/paquetes'),
+  create: (data: Partial<Paquete>) => request('/paquetes', { method: 'POST', body: JSON.stringify(data) }),
+  update: (id: string, data: Partial<Paquete>) => request(`/paquetes/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  delete: (id: string) => request(`/paquetes/${id}`, { method: 'DELETE' }),
 };
 
 export const AdminService = {
-  getSchema: () => request<Record<string, {name: string, type: string}[]>>('/schema'),
-  
   getUsers: () => request<Usuario[]>('/users'),
   createUser: (data: Partial<Usuario>) => request('/users', { method: 'POST', body: JSON.stringify(data) }),
   updateUser: (id: string, data: Partial<Usuario>) => request(`/users/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
@@ -142,27 +134,14 @@ export const AdminService = {
   createRol: (data: Partial<Rol>) => request('/roles', { method: 'POST', body: JSON.stringify(data) }),
   updateRol: (id: string, data: Partial<Rol>) => request(`/roles/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteRol: (id: string) => request(`/roles/${id}`, { method: 'DELETE' }),
-
   getPermisos: () => request<Permiso[]>('/permisos'),
 
   getCajas: () => request<Caja[]>('/cajas'),
   createCaja: (nombre: string) => request('/cajas', { method: 'POST', body: JSON.stringify({ nombre }) }),
-  updateCaja: (id: string, data: Partial<Caja>) => request(`/cajas/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  updateCaja: (id: string, data: { nombre: string, estado: string }) => request(`/cajas/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteCaja: (id: string) => request(`/cajas/${id}`, { method: 'DELETE' }),
-};
 
-export const CostsService = {
-  getAll: () => request<Costo[]>('/costos'), 
-  create: (data: Partial<Costo>) => request('/costos', { method: 'POST', body: JSON.stringify(data) }),
-  update: (id: string, data: Partial<Costo>) => request(`/costos/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  delete: (id: string) => request(`/costos/${id}`, { method: 'DELETE' }),
-};
-
-export const PackagesService = {
-  getAll: () => request<Paquete[]>('/paquetes'),
-  create: (data: Partial<Paquete>) => request('/paquetes', { method: 'POST', body: JSON.stringify(data) }),
-  update: (id: string, data: Partial<Paquete>) => request(`/paquetes/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  delete: (id: string) => request(`/paquetes/${id}`, { method: 'DELETE' }),
+  getSchema: () => request<any>('/schema'),
 };
 
 export const ReportsService = {
@@ -177,7 +156,7 @@ export const ReportsService = {
 export const LabelService = {
   getAll: () => request<LabelTemplate[]>('/labels'),
   getDefault: () => request<LabelTemplate | null>('/labels/default'),
-  create: (data: Partial<LabelTemplate>) => request('/labels', { method: 'POST', body: JSON.stringify(data) }),
+  create: (data: Partial<LabelTemplate>) => request<{message: string, id: string}>('/labels', { method: 'POST', body: JSON.stringify(data) }),
   update: (id: string, data: Partial<LabelTemplate>) => request(`/labels/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   delete: (id: string) => request(`/labels/${id}`, { method: 'DELETE' }),
 };
