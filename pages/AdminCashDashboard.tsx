@@ -45,13 +45,16 @@ const AdminCashDashboard: React.FC = () => {
       if (sessionDetails) {
           const ingresos = sessionDetails.ingresos.reduce((acc, curr) => acc + Number(curr.monto || 0), 0);
           const egresos = sessionDetails.egresos.reduce((acc, curr) => acc + Number(curr.monto || 0), 0);
-          // Usamos el monto inicial que viene del detalle actualizado, o el del box seleccionado si no ha cargado
           const inicial = Number(sessionDetails.arqueo.montoInicial || 0);
+          
+          // Usar el valor real de la base de datos si está disponible, sino calcular
+          const finalFromDB = Number(sessionDetails.arqueo.montoFinal);
+          const finalCalculado = !isNaN(finalFromDB) ? finalFromDB : (inicial + ingresos) - egresos;
           
           setLocalTotals({
               totalIngresos: ingresos,
               totalEgresos: egresos,
-              finalCalculado: (inicial + ingresos) - egresos
+              finalCalculado: finalCalculado
           });
       }
   }, [sessionDetails]);
@@ -273,7 +276,7 @@ const AdminCashDashboard: React.FC = () => {
                                <p className="text-xs text-indigo-300 uppercase font-bold mb-1">Efectivo Calculado</p>
                                <p className="text-2xl font-bold tracking-tight">L. {localTotals.finalCalculado.toFixed(2)}</p>
                                <div className="mt-3 text-[10px] opacity-70 flex justify-between border-t border-indigo-700/50 pt-2">
-                                   <span>Ini: {Number(sessionDetails.arqueo.montoInicial).toFixed(0)}</span>
+                                   <span>Ini: {Number(sessionDetails.arqueo.montoInicial || 0).toFixed(2)}</span>
                                    <span>Ing: {localTotals.totalIngresos.toFixed(0)}</span>
                                    <span>Egr: {localTotals.totalEgresos.toFixed(0)}</span>
                                </div>

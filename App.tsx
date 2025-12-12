@@ -66,7 +66,7 @@ const App: React.FC = () => {
                   
                   {/* Rutas de Administración */}
                   <Route path="/admin/cash-dashboard" element={
-                    <ProtectedRoute requiredPermission="VER_ADMIN"><AdminCashDashboard /></ProtectedRoute>
+                    <ProtectedRoute requiredPermission="GESTIONAR_PANEL_CAJAS"><AdminCashDashboard /></ProtectedRoute>
                   } />
                   <Route path="/admin/users" element={
                     <ProtectedRoute requiredPermission="GESTIONAR_USUARIOS"><AdminUsers initialView="USERS" /></ProtectedRoute>

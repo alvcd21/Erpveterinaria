@@ -78,7 +78,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       icon: <ShieldCheck size={20} />,
       permission: 'VER_ADMIN',
       subItems: [
-        { name: 'Panel Cajas', path: '/admin/cash-dashboard', icon: <Activity size={18} />, permission: 'VER_ADMIN' },
+        { name: 'Panel Cajas', path: '/admin/cash-dashboard', icon: <Activity size={18} />, permission: 'GESTIONAR_PANEL_CAJAS' },
         { name: 'Usuarios', path: '/admin/users', icon: <UserCog size={18} />, permission: 'GESTIONAR_USUARIOS' },
         { name: 'Empleados', path: '/admin/employees', icon: <Briefcase size={18} />, permission: 'GESTIONAR_USUARIOS' },
         { name: 'Roles', path: '/admin/roles', icon: <ShieldCheck size={18} />, permission: 'GESTIONAR_ROLES' },

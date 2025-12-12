@@ -68,7 +68,9 @@ const initDB = async () => {
 
             -- INSERCIÓN DE NUEVOS PERMISOS
             INSERT INTO permisos (idPermiso, nombre, modulo)
-            VALUES ('DISEÑAR_ETIQUETAS', 'Diseñar Etiquetas y Reportes', 'Logística')
+            VALUES 
+            ('DISEÑAR_ETIQUETAS', 'Diseñar Etiquetas y Reportes', 'Logística'),
+            ('GESTIONAR_PANEL_CAJAS', 'Gestionar y Auditar Cajas', 'Finanzas')
             ON CONFLICT (idPermiso) DO NOTHING;
         `);
     } catch (err) { console.error("Error init DB:", err); }
