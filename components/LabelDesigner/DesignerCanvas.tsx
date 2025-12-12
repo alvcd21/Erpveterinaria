@@ -44,13 +44,17 @@ const CanvasElement = memo(({ el, isSelected, scale, onPointerDown, onSelect, to
     // so you can click things behind it. The INNER visible part should capture pointers.
     const isHollow = el.type === 'SHAPE' && (el.fill === 'transparent' || !el.fill);
     
+    // CRITICAL FIX: If tool is HAND, disable pointer events on individual elements
+    // so clicks fall through to the background for panning.
+    const pointerEventsClass = tool === 'HAND' ? 'pointer-events-none' : (isHollow ? 'pointer-events-none' : '');
+
     return (
         <div
             onMouseDown={(e) => tool === 'SELECT' && onPointerDown(e, el.id, 'MOVE')}
             onTouchStart={(e) => tool === 'SELECT' && onPointerDown(e, el.id, 'MOVE')}
             className={`absolute group select-none cursor-move
                 ${isSelected ? 'z-50 outline outline-2 outline-indigo-500' : 'z-10 hover:outline hover:outline-1 hover:outline-indigo-300'}
-                ${isHollow ? 'pointer-events-none' : ''}`} 
+                ${pointerEventsClass}`} 
             style={{
                 left: `${el.x * scale}px`,
                 top: `${el.y * scale}px`,
@@ -60,18 +64,15 @@ const CanvasElement = memo(({ el, isSelected, scale, onPointerDown, onSelect, to
             }}
             onClick={(e) => { e.stopPropagation(); if(tool === 'SELECT') onSelect(el.id); }}
         >
-            {/* Inner Content needs pointer-events-auto if container is none, EXCEPT for pure transparent fill where we only want border clickable? 
-                Actually, user wants to select "what is inside the hole". So the center must pass events.
-                The border/content needs to capture it.
-            */}
-            <div className={`w-full h-full overflow-hidden flex items-center justify-center relative ${isHollow ? 'pointer-events-none' : ''}`} style={{
+            {/* Inner Content needs pointer-events-auto if container is none AND tool is SELECT */}
+            <div className={`w-full h-full overflow-hidden flex items-center justify-center relative ${tool === 'HAND' ? '' : (isHollow ? 'pointer-events-none' : '')}`} style={{
                 borderRadius: el.shapeType === 'CIRCLE' ? '50%' : '0',
                 backgroundColor: el.type === 'SHAPE' ? el.fill : 'transparent',
             }}>
                 {/* Specific Handling for Hollow Shapes BORDER */}
                 {el.type === 'SHAPE' && (
                     <div 
-                        className={isHollow ? 'pointer-events-auto' : ''}
+                        className={tool === 'SELECT' && isHollow ? 'pointer-events-auto' : ''}
                         style={{
                             position: 'absolute', inset: 0,
                             border: el.shapeType !== 'LINE' ? `${(el.strokeWidth||1)}px solid ${el.stroke}` : 'none',
@@ -81,7 +82,7 @@ const CanvasElement = memo(({ el, isSelected, scale, onPointerDown, onSelect, to
                 )}
 
                 {el.type === 'TEXT' && (
-                    <div className="pointer-events-auto" style={{
+                    <div className={tool === 'SELECT' ? 'pointer-events-auto' : ''} style={{
                         fontSize: `${(el.fontSize||10)}pt`, 
                         fontFamily: el.fontFamily,
                         fontWeight: el.fontWeight,
@@ -95,10 +96,10 @@ const CanvasElement = memo(({ el, isSelected, scale, onPointerDown, onSelect, to
                 {el.type === 'BARCODE' && <img src={renderBarcode(el)} className="w-full h-full object-fill pointer-events-none"/>}
                 {el.type === 'QR' && <img src={renderQR(el)} className="w-full h-full object-contain pointer-events-none"/>}
                 {el.type === 'IMAGE' && <img src={el.content} className="w-full h-full object-contain pointer-events-none"/>}
-                {el.type === 'SHAPE' && el.shapeType === 'LINE' && <div className={isHollow ? 'pointer-events-auto' : ''} style={{width:'100%', height:`${(el.strokeWidth||1)}px`, backgroundColor: el.stroke}}/>}
+                {el.type === 'SHAPE' && el.shapeType === 'LINE' && <div className={tool === 'SELECT' && isHollow ? 'pointer-events-auto' : ''} style={{width:'100%', height:`${(el.strokeWidth||1)}px`, backgroundColor: el.stroke}}/>}
                 
                 {el.type === 'DETAIL_TABLE' && (
-                    <div className="w-full h-full border border-slate-300 bg-white text-xs pointer-events-auto">
+                    <div className={`w-full h-full border border-slate-300 bg-white text-xs ${tool === 'SELECT' ? 'pointer-events-auto' : ''}`}>
                         <div className="bg-slate-100 font-bold p-1 border-b">Encabezado Tabla</div>
                         <div className="p-1 text-slate-400">Filas de datos...</div>
                     </div>

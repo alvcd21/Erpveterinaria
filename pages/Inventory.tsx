@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { InventoryService, LabelService } from '../services/api';
 import { 
-  Telefono, Inventario, Accesorio, Categoria, Ubicacion, Proveedor, EstadoGeneral 
+  Telefono, Inventario, Accesorio, Categoria, Ubicacion, Proveedor, EstadoGeneral, LabelElement 
 } from '../types';
 import { 
   Search, Smartphone, Headphones, Box, MapPin, Tag, PlusCircle, X, RefreshCw, Printer, Edit2, Trash2, Filter
@@ -84,151 +84,134 @@ const Inventory: React.FC = () => {
   const printLabel = async (type: 'TELEPHONE' | 'ACCESSORY', data: any) => {
       try {
           console.log("--- INICIO IMPRESIÓN ETIQUETA ---");
-          console.log("TIPO:", type);
-          console.log("DATA RECIBIDA DEL ROW:", data);
-
           const templates = await LabelService.getAll();
-          
-          // 1. Buscar Plantilla
           const targetCategory = type === 'TELEPHONE' ? 'TELEPHONE' : 'ACCESSORY';
           let tpl = templates.find(t => t.isDefault && t.category === targetCategory);
           if (!tpl) tpl = templates.find(t => t.isDefault && t.category === 'GENERAL');
           
-          if (!tpl) {
-              return Swal.fire('Sin Plantilla', `No hay plantilla predeterminada para ${type === 'TELEPHONE' ? 'TELÉFONOS' : 'ACCESORIOS'}.`, 'warning');
-          }
+          if (!tpl) return Swal.fire('Sin Plantilla', `No hay plantilla predeterminada para ${type === 'TELEPHONE' ? 'TELÉFONOS' : 'ACCESORIOS'}.`, 'warning');
 
-          // 2. Construcción Robusta de Datos (Sanitization)
+          // --- Sanitización de Datos ---
           const sanitizeValue = (val: any) => {
               if (val === null || val === undefined) return '';
-              if (typeof val === 'object') return ''; // CRITICAL: Stop [object Object]
+              if (typeof val === 'object') return ''; 
               return String(val);
           };
 
           let contextData: any = {};
-          
           if (type === 'TELEPHONE') {
               contextData = {
                   ...data,
                   precioVenta: `L. ${Number(data.precioVenta || 0).toFixed(2)}`,
-                  telefonos: {
-                      ...data,
-                      precioVenta: `L. ${Number(data.precioVenta || 0).toFixed(2)}`,
-                      fecha: data.fecha ? String(data.fecha).split('T')[0] : ''
-                  }
+                  telefonos: { ...data, precioVenta: `L. ${Number(data.precioVenta || 0).toFixed(2)}`, fecha: data.fecha ? String(data.fecha).split('T')[0] : '' }
               };
           } else {
-              // ACCESORIOS - Lógica Defensiva y Estructuración Anidada
-              let desc = sanitizeValue(data.descripcionAccesorio);
-              if(!desc) desc = sanitizeValue(data.descripcion);
-              
-              let cat = sanitizeValue(data.categoriaAccesorio);
-              if(!cat) cat = sanitizeValue(data.categoria);
-              if(!cat) cat = sanitizeValue(data.nombreCategoria);
-
-              let code = sanitizeValue(data.codInventario);
-              if(!code) code = sanitizeValue(data.codAccesorio);
-
+              let desc = sanitizeValue(data.descripcionAccesorio || data.descripcion);
+              let cat = sanitizeValue(data.categoriaAccesorio || data.categoria || data.nombreCategoria);
+              let code = sanitizeValue(data.codInventario || data.codAccesorio);
               const price = `L. ${Number(data.precioVenta || 0).toFixed(2)}`;
-
-              // Objeto de accesorio limpio para reusar
-              const accObj = {
-                  codAccesorio: code,
-                  descripcion: desc, 
-                  nombreCategoria: cat,
-                  categoria: cat
-              };
-
-              contextData = {
-                  // Nivel Raíz (Plano para accesos directos)
-                  ...data, 
-                  descripcion: desc,
-                  nombre: desc,
-                  codigo: code,
-                  precio: price,
-                  categoria: cat,
-                  
-                  // Estructura Anidada para {{inventario.accesorios.descripcion}}
-                  inventario: {
-                      codInventario: code,
-                      descripcion: desc,
-                      categoria: cat,
-                      cantidad: sanitizeValue(data.cantidad),
-                      precioVenta: price,
-                      // CRUCIAL: Anidamos 'accesorios' DENTRO de 'inventario'
-                      accesorios: accObj
-                  },
-                  // Estructura paralela por si acaso buscan {{accesorios.descripcion}} directamente
-                  accesorios: accObj
-              };
+              const accObj = { codAccesorio: code, descripcion: desc, nombreCategoria: cat, categoria: cat };
+              contextData = { ...data, descripcion: desc, nombre: desc, codigo: code, precio: price, categoria: cat, inventario: { codInventario: code, descripcion: desc, categoria: cat, cantidad: sanitizeValue(data.cantidad), precioVenta: price, accesorios: accObj }, accesorios: accObj };
           }
 
-          console.log("CONTEXTO FINAL PARA PDF:", contextData);
-
-          // 3. Generación PDF
+          // --- Configuración Documento ---
           const scale = tpl.type === 'DOCUMENT' ? 10 : 1;
           const docWidth = tpl.width * scale;
           const docHeight = tpl.height * scale;
           const orientation = docWidth > docHeight ? 'l' : 'p';
-          
           const doc = new jsPDF({ orientation, unit: 'mm', format: [docWidth, docHeight] });
 
-          // Helper Inteligente: Insensible a mayúsculas/minúsculas y recursivo
+          // --- Helper Recursivo para Variables ---
           const getValue = (path: string, obj: any) => {
               try {
                   const keys = path.split('.');
                   let current = obj;
-                  
                   for (const key of keys) {
                       if (current === null || current === undefined) return '';
-                      
-                      // Intento 1: Acceso directo (rápido)
-                      if (current[key] !== undefined) {
-                          current = current[key];
-                          continue;
-                      }
-
-                      // Intento 2: Búsqueda insensible a mayúsculas/minúsculas
+                      if (current[key] !== undefined) { current = current[key]; continue; }
                       const lowerKey = key.toLowerCase();
                       const foundKey = Object.keys(current).find(k => k.toLowerCase() === lowerKey);
-                      
-                      if (foundKey) {
-                          current = current[foundKey];
-                      } else {
-                          return ''; // Clave no encontrada en este nivel
-                      }
+                      if (foundKey) current = current[foundKey];
+                      else return ''; 
                   }
-                  
                   return sanitizeValue(current);
               } catch (e) { return ''; }
           };
 
-          tpl.elements.forEach(el => {
-              let content = el.content || '';
-              
-              const matches = content.match(/{{(.*?)}}/g);
-              if (matches) {
-                  matches.forEach(match => {
-                      const key = match.replace(/{{|}}/g, '').trim(); 
-                      console.log(`Procesando variable: ${key}`);
-
-                      // Estrategia 1: Buscar ruta exacta o insensible a mayúsculas
+          // --- PRE-PROCESAMIENTO: Sustitución de Variables ---
+          // Clonamos los elementos para no mutar el template original
+          let processElements: LabelElement[] = JSON.parse(JSON.stringify(tpl.elements));
+          
+          processElements.forEach(el => {
+              if (el.content && el.content.includes('{{')) {
+                  el.content = el.content.replace(/{{(.*?)}}/g, (match, key) => {
+                      key = key.trim();
                       let val = getValue(key, contextData);
-                      
-                      // Estrategia 2: Fallback común si falla la ruta completa
                       if (!val && key.includes('.')) {
-                          const cleanKey = key.split('.').pop(); // Obtener última parte (ej: 'descripcion')
-                          if (cleanKey) {
-                              console.log(`   -> Intento fallback con clave simple: ${cleanKey}`);
-                              val = getValue(cleanKey, contextData);
-                          }
+                          const cleanKey = key.split('.').pop();
+                          if (cleanKey) val = getValue(cleanKey, contextData);
                       }
-                      
-                      console.log(`   -> Valor final encontrado: "${val}"`);
-                      content = content.replace(match, val);
+                      return val || '';
                   });
               }
+          });
 
+          // --- ALGORITMO: STRETCH WITH OVERFLOW ---
+          // 1. Ordenar por posición Y para procesar de arriba a abajo
+          processElements.sort((a, b) => a.y - b.y);
+
+          // 2. Calcular desplazamientos
+          for (let i = 0; i < processElements.length; i++) {
+              let el = processElements[i];
+              
+              if (el.type === 'TEXT' && el.isStretchWithOverflow && el.isMultiline) {
+                  // Calcular dimensiones reales
+                  doc.setFontSize(el.fontSize || 10);
+                  doc.setFont(el.fontFamily || 'helvetica', el.fontWeight || 'normal');
+                  
+                  const textLines = doc.splitTextToSize(el.content, el.width * scale);
+                  // Altura aproximada en mm (1pt approx 0.3527mm) * lineHeight factor
+                  const ptToMm = 0.352778;
+                  const lineHeightFactor = el.lineHeight || 1.15;
+                  const singleLineHeight = (el.fontSize || 10) * ptToMm * lineHeightFactor;
+                  
+                  const actualHeight = textLines.length * singleLineHeight;
+                  const designHeight = el.height * scale;
+                  
+                  // Si el contenido es más grande que el diseño
+                  if (actualHeight > designHeight) {
+                      const diff = actualHeight - designHeight;
+                      
+                      // Actualizar altura del elemento actual
+                      // (Nota: dividimos por scale si quisiéramos guardar el valor original, pero aquí ya operamos en unidades de renderizado si aplicamos scale en el loop final, 
+                      // PERO aquí estamos modificando las propiedades base que luego se multiplicarán.
+                      // CORRECCIÓN: el.height es en unidades base. actualHeight y diff están en mm reales (scaled).
+                      // Debemos convertir diff a unidades base para ajustar Y de los siguientes.
+                      
+                      const diffBase = diff / scale;
+                      
+                      // Ajustar altura del elemento actual en unidades base para que el renderizado final use la nueva altura
+                      el.height = actualHeight / scale;
+                      
+                      const bottomEdge = el.y + (designHeight / scale); // Borde inferior original en unidades base
+
+                      // Desplazar elementos que estén DEBAJO
+                      for (let j = 0; j < processElements.length; j++) {
+                          if (i === j) continue;
+                          const other = processElements[j];
+                          
+                          // Si el elemento empieza visualmente debajo del borde inferior original del elemento que creció
+                          // Usamos un pequeño margen de error (0.01) para float comparison
+                          if (other.y >= bottomEdge - 0.01) {
+                              other.y += diffBase;
+                          }
+                      }
+                  }
+              }
+          }
+
+          // --- RENDERIZADO FINAL ---
+          processElements.forEach(el => {
               const elX = el.x * scale;
               const elY = el.y * scale;
               const elW = el.width * scale;
@@ -242,21 +225,34 @@ const Inventory: React.FC = () => {
                   const options: any = { angle: el.rotation || 0 };
                   if (el.textAlign) options.align = el.textAlign;
                   
-                  let x = elX;
-                  if (el.textAlign === 'center') x += elW / 2;
-                  if (el.textAlign === 'right') x += elW;
-
-                  doc.text(content, x, elY + (elH/1.5), options);
+                  // Para multilinea, usamos text con maxWidth
+                  if (el.isMultiline) {
+                      options.maxWidth = elW;
+                      // jsPDF .text() x,y es la linea base o esquina? Depende. baseline default es alphabetic.
+                      // Ajustamos Y un poco para simular padding top básico si es necesario, pero jsPDF text suele pintar desde Y hacia abajo.
+                      // Si hay rotación, es complejo. Asumimos rotación 0 para stretch overflow por simplicidad.
+                      let x = elX;
+                      if (el.textAlign === 'center') x += elW / 2;
+                      if (el.textAlign === 'right') x += elW;
+                      
+                      // Posición Y para texto multiline suele ser la parte superior + altura de linea
+                      // doc.text pinta desde la linea base de la primera linea.
+                      const ptToMm = 0.352778;
+                      const offsetY = (el.fontSize || 10) * ptToMm; 
+                      
+                      doc.text(el.content, x, elY + offsetY, options);
+                  } else {
+                      let x = elX;
+                      if (el.textAlign === 'center') x += elW / 2;
+                      if (el.textAlign === 'right') x += elW;
+                      doc.text(el.content, x, elY + (elH/1.5), options);
+                  }
 
               } else if (el.type === 'BARCODE') {
                   try {
                       const canvas = document.createElement('canvas');
-                      let codeContent = content.replace(/\s/g, '').trim();
-                      
-                      if (!codeContent) {
-                          codeContent = sanitizeValue(type === 'TELEPHONE' ? data.imei1 || data.codigo : data.codInventario);
-                          if(!codeContent) codeContent = "000000";
-                      }
+                      let codeContent = el.content.replace(/\s/g, '').trim();
+                      if (!codeContent) codeContent = "000000";
 
                       JsBarcode(canvas, codeContent, {
                           format: (el.barcodeFormat as any) || "CODE128",
@@ -292,7 +288,6 @@ const Inventory: React.FC = () => {
       }
   };
 
-  // ... (Resto del código del componente se mantiene igual: openNewModal, openEditModal, handleSubmit, handleDelete, render)
   const openNewModal = () => {
     setIsEditing(false);
     setCurrentId(null);
@@ -569,7 +564,7 @@ const Inventory: React.FC = () => {
         </div>
       </div>
 
-      {/* Modal ... (Sin cambios aquí) */}
+      {/* Modal */}
       {showModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl p-6 animate-fade-in max-h-[90vh] overflow-y-auto">

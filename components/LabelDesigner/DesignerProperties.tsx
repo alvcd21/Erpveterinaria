@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, memo } from 'react';
 import { 
-  Trash2, AlignLeft, AlignCenter, AlignRight, FileCog, Database, Check
+  Trash2, AlignLeft, AlignCenter, AlignRight, FileCog, Database, Check, ArrowDownToLine
 } from 'lucide-react';
 import { LabelTemplate, LabelElement } from '../../types';
 
@@ -175,9 +175,22 @@ const DesignerProperties: React.FC<DesignerPropertiesProps> = ({
                             </button>
                         ))}
                     </div>
-                    <div className="flex items-center gap-2 mt-2">
-                        <input type="checkbox" checked={sel.isMultiline} onChange={e => updateElement(sel.id, {isMultiline: e.target.checked})} className="rounded text-indigo-600"/>
-                        <label className="text-xs font-medium text-slate-600">Multilínea (Ajuste)</label>
+                    <div className="flex flex-col gap-2 mt-2">
+                        <div className="flex items-center gap-2">
+                            <input type="checkbox" checked={sel.isMultiline} onChange={e => updateElement(sel.id, {isMultiline: e.target.checked})} className="rounded text-indigo-600"/>
+                            <label className="text-xs font-medium text-slate-600">Multilínea (Ajuste)</label>
+                        </div>
+                        {sel.isMultiline && (
+                             <div className="flex items-center gap-2 bg-indigo-50 p-2 rounded-lg border border-indigo-100 cursor-pointer" onClick={() => updateElement(sel.id, {isStretchWithOverflow: !sel.isStretchWithOverflow})}>
+                                <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${sel.isStretchWithOverflow ? 'bg-indigo-600 border-indigo-600' : 'bg-white border-slate-300'}`}>
+                                    {sel.isStretchWithOverflow && <Check size={12} className="text-white"/>}
+                                </div>
+                                <div className="flex items-center gap-1.5">
+                                    <ArrowDownToLine size={14} className="text-indigo-600"/>
+                                    <span className="text-xs font-medium text-slate-600">Estirar con Desbordamiento</span>
+                                </div>
+                             </div>
+                        )}
                     </div>
                 </div>
             )}

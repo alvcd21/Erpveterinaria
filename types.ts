@@ -260,6 +260,7 @@ export interface LabelElement {
   // Advanced Text Properties
   isMultiline?: boolean; // Permitir salto de línea
   lineHeight?: number; 
+  isStretchWithOverflow?: boolean; // NUEVO: Si true, el elemento empuja a los de abajo
   
   // Shape/Image specific
   shapeType?: 'RECTANGLE' | 'LINE' | 'CIRCLE';

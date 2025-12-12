@@ -150,6 +150,7 @@ export const useLabelDesigner = () => {
             content: type === 'TEXT' ? 'Texto' : '',
             fontSize: 10, color: '#000000', textAlign: 'left', fontWeight: 'normal', fontFamily: 'helvetica',
             barcodeFormat: 'CODE128', displayValue: true, shapeType: 'RECTANGLE',
+            isStretchWithOverflow: false, // Default false
             ...extra
         };
 
@@ -231,11 +232,6 @@ export const useLabelDesigner = () => {
             return;
         }
         
-        // Panning with Spacebar? Optional but common
-        if (e.code === 'Space' && tool !== 'HAND') {
-             // Logic could go here to temp switch to hand
-        }
-
         if (selectedId && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
             e.preventDefault();
             const el = template.elements.find(x => x.id === selectedId);
@@ -302,8 +298,7 @@ export const useLabelDesigner = () => {
                 handle
             });
         } else {
-            // Clicked on empty canvas -> Pan if HAND or just deselect
-            // HAND tool is handled above.
+            // Clicked on empty canvas -> Deselect
             setSelectedId(null);
         }
     };
