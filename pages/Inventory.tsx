@@ -94,51 +94,55 @@ const Inventory: React.FC = () => {
               return Swal.fire('Sin Plantilla', `No hay plantilla predeterminada para ${type === 'TELEPHONE' ? 'TELÉFONOS' : 'ACCESORIOS'}.`, 'warning');
           }
 
-          // 2. Construcción Robusta de Datos (Mapeo Inteligente)
+          // 2. Construcción Robusta de Datos (Mapeo Inteligente y Limpieza)
           let contextData: any = {};
           
           if (type === 'TELEPHONE') {
               contextData = {
-                  // Nivel Raíz (para variables simples {{marca}})
+                  // Nivel Raíz
                   ...data,
                   precioVenta: `L. ${Number(data.precioVenta || 0).toFixed(2)}`,
                   
-                  // Nivel Estructurado (para variables {{telefonos.marca}})
+                  // Nivel Estructurado
                   telefonos: {
                       ...data,
                       precioVenta: `L. ${Number(data.precioVenta || 0).toFixed(2)}`,
-                      fecha: data.fecha ? data.fecha.split('T')[0] : ''
+                      fecha: data.fecha ? String(data.fecha).split('T')[0] : ''
                   }
               };
           } else {
-              // ACCESORIOS: Mapeo cruzado para asegurar que siempre haya datos
-              // data viene de la tabla Stock que ya tiene Joins
-              
-              const description = data.descripcionAccesorio || data.descripcion || '';
-              const category = data.categoriaAccesorio || data.categoria || '';
-              const code = data.codInventario || data.codAccesorio || '';
-              
+              // ACCESORIOS: Forzar conversión a string y evitar objetos
+              const rawDesc = data.descripcionAccesorio || data.descripcion || '';
+              const rawCat = data.categoriaAccesorio || data.categoria || data.nombreCategoria || '';
+              const rawCode = data.codInventario || data.codAccesorio || '';
+              const rawPrice = `L. ${Number(data.precioVenta || 0).toFixed(2)}`;
+
+              // Asegurar que sean strings planos
+              const description = typeof rawDesc === 'object' ? '' : String(rawDesc);
+              const category = typeof rawCat === 'object' ? '' : String(rawCat);
+              const code = typeof rawCode === 'object' ? '' : String(rawCode);
+
               contextData = {
-                  // Nivel Raíz (Fallbacks)
+                  // Nivel Raíz (Fallbacks para {{variable}})
                   ...data,
                   descripcion: description,
-                  nombre: description, // Alias común
+                  nombre: description,
                   codigo: code,
-                  precio: `L. ${Number(data.precioVenta || 0).toFixed(2)}`,
-
-                  // Nivel Estructurado (Inventario)
+                  precio: rawPrice,
+                  categoria: category,
+                  
+                  // Nivel Estructurado (para {{tabla.variable}})
                   inventario: {
                       ...data,
                       codInventario: code,
-                      cantidad: data.cantidad,
-                      precioVenta: `L. ${Number(data.precioVenta || 0).toFixed(2)}`,
-                      descripcion: description, // Asegurar que esté aquí también
+                      descripcion: description,
+                      categoria: category,
+                      cantidad: String(data.cantidad || 0),
+                      precioVenta: rawPrice,
                   },
-                  // Nivel Estructurado (Accesorios - Simulado del join)
                   accesorios: { 
-                      codAccesorio: data.codAccesorio,
+                      codAccesorio: data.codAccesorio ? String(data.codAccesorio) : code,
                       descripcion: description, 
-                      nombre: description,
                       nombreCategoria: category,
                       categoria: category
                   }
@@ -146,7 +150,7 @@ const Inventory: React.FC = () => {
           }
 
           // 3. Generación PDF
-          const scale = tpl.type === 'DOCUMENT' ? 10 : 1; // Conversión cm a mm si es documento
+          const scale = tpl.type === 'DOCUMENT' ? 10 : 1;
           const docWidth = tpl.width * scale;
           const docHeight = tpl.height * scale;
           const orientation = docWidth > docHeight ? 'l' : 'p';
@@ -156,7 +160,10 @@ const Inventory: React.FC = () => {
           // Helper para obtener valor anidado seguro
           const getValue = (path: string, obj: any) => {
               try {
-                  return path.split('.').reduce((prev, curr) => prev ? prev[curr] : null, obj);
+                  const result = path.split('.').reduce((prev, curr) => prev ? prev[curr] : null, obj);
+                  // CRITICO: Si es un objeto, devolver vacío para evitar [object Object]
+                  if (typeof result === 'object' && result !== null) return '';
+                  return result;
               } catch (e) { return null; }
           };
 
@@ -170,18 +177,15 @@ const Inventory: React.FC = () => {
                       const key = match.replace(/{{|}}/g, '').trim(); 
                       
                       // Estrategia de Búsqueda de Valor:
-                      // 1. Búsqueda exacta (ej: "telefonos.marca")
+                      // 1. Búsqueda exacta
                       let val = getValue(key, contextData);
                       
-                      // 2. Búsqueda inteligente si no se encuentra
+                      // 2. Búsqueda inteligente (Fallbacks)
                       if (val === null || val === undefined || val === '') {
-                          // Si pidieron solo {{marca}}, ya se buscó en raíz.
-                          // Si pidieron {{accesorios.descripcion}} y falló, intentar en raíz 'descripcion'
                           if (key.includes('.')) {
                               const cleanKey = key.split('.')[1];
                               val = getValue(cleanKey, contextData);
                           } else {
-                              // Si pidieron {{descripcion}}, intentar en sub-objetos comunes
                               if (type === 'ACCESSORY') {
                                   val = getValue(`inventario.${key}`, contextData) || getValue(`accesorios.${key}`, contextData);
                               } else {
@@ -190,6 +194,7 @@ const Inventory: React.FC = () => {
                           }
                       }
                       
+                      // Reemplazo final seguro
                       content = content.replace(match, (val !== null && val !== undefined) ? String(val) : '');
                   });
               }
@@ -211,17 +216,18 @@ const Inventory: React.FC = () => {
                   if (el.textAlign === 'center') x += elW / 2;
                   if (el.textAlign === 'right') x += elW;
 
-                  // Ajuste vertical simple para centrar texto
                   doc.text(content, x, elY + (elH/1.5), options);
 
               } else if (el.type === 'BARCODE') {
                   try {
                       const canvas = document.createElement('canvas');
-                      let codeContent = content.trim();
+                      // Limpiar contenido del código de barras
+                      let codeContent = content.replace(/\s/g, '').trim();
                       
-                      // Fallback final para código de barras si la variable falló
+                      // Fallback final si la variable de código falló
                       if (!codeContent || codeContent === '') {
-                          codeContent = type === 'TELEPHONE' ? (data.imei1 || data.codigo) : (data.codInventario || data.codAccesorio || '000000');
+                          if (type === 'TELEPHONE') codeContent = String(data.imei1 || data.codigo || '0000');
+                          else codeContent = String(data.codInventario || data.codAccesorio || '0000');
                       }
 
                       JsBarcode(canvas, codeContent, {
@@ -258,7 +264,7 @@ const Inventory: React.FC = () => {
       }
   };
 
-  // ... (Rest of Modal Logic same as before)
+  // ... (Resto del código del componente se mantiene igual)
   const openNewModal = () => {
     setIsEditing(false);
     setCurrentId(null);
@@ -276,11 +282,11 @@ const Inventory: React.FC = () => {
     setIsEditing(true);
     setCurrentId(item.codigo || item.codInventario || item.codAccesorio || item.codCategoria || item.idUbicacion);
     if (activeTab === 'TELEPHONES') {
-      setPhoneForm({ ...item, fecha: item.fecha ? item.fecha.split('T')[0] : '' });
+      setPhoneForm({ ...item, fecha: item.fecha ? String(item.fecha).split('T')[0] : '' });
       setManualBrandMode(true); 
       setManualModelMode(true);
     }
-    else if (activeTab === 'STOCK') setStockForm({ ...item, fecha: item.fecha ? item.fecha.split('T')[0] : '' });
+    else if (activeTab === 'STOCK') setStockForm({ ...item, fecha: item.fecha ? String(item.fecha).split('T')[0] : '' });
     else if (activeTab === 'MASTER') setMasterForm({ ...item });
     else if (activeTab === 'CATEGORIES') setCatForm({ ...item });
     else if (activeTab === 'LOCATIONS') setLocForm({ ...item });
@@ -335,7 +341,7 @@ const Inventory: React.FC = () => {
 
   return (
     <div className="space-y-6 h-full flex flex-col">
-      {/* HEADER & TABS (Same as before) */}
+      {/* HEADER & TABS */}
       <div>
         <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-6 gap-4">
           <div>
@@ -375,7 +381,7 @@ const Inventory: React.FC = () => {
           ))}
         </div>
         
-        {/* SEARCH BAR & FILTERS (Same as before) */}
+        {/* SEARCH BAR & FILTERS */}
         <div className="bg-white border-x border-b border-slate-200 p-3 flex flex-col md:flex-row gap-3 rounded-b-xl mb-4">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
@@ -496,7 +502,7 @@ const Inventory: React.FC = () => {
                 </tr>
               ))}
 
-              {/* ... (Other Tabs Rendered Same as Before) ... */}
+              {/* ... Rest of tabs ... */}
               {activeTab === 'MASTER' && master.filter(m => JSON.stringify(m).toLowerCase().includes(searchTerm.toLowerCase())).map(m => (
                 <tr key={m.codAccesorio} className="hover:bg-slate-50">
                   <td className="p-4 text-xs font-mono text-slate-500">{m.codAccesorio}</td>
@@ -538,7 +544,7 @@ const Inventory: React.FC = () => {
       {showModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl p-6 animate-fade-in max-h-[90vh] overflow-y-auto">
-            {/* Modal Content Preserved */}
+            {/* Modal Content */}
             <div className="flex justify-between items-center mb-6 border-b border-slate-100 pb-4">
               <h3 className="text-xl font-bold text-slate-800">
                 {isEditing ? 'Editar' : 'Nuevo'}
@@ -547,7 +553,7 @@ const Inventory: React.FC = () => {
             </div>
             
             <form onSubmit={handleSubmit} className="space-y-4">
-               {/* ... (Existing Form Logic - No Changes) ... */}
+               {/* Forms Logic */}
                {activeTab === 'TELEPHONES' && (
                  <>
                    <div className="grid grid-cols-2 gap-4">
@@ -657,7 +663,6 @@ const Inventory: React.FC = () => {
                  </>
                )}
 
-               {/* --- FORMULARIO STOCK ACCESORIOS --- */}
                {activeTab === 'STOCK' && (
                  <>
                    <div>
@@ -717,7 +722,7 @@ const Inventory: React.FC = () => {
                  </>
                )}
 
-               {/* --- OTROS FORMULARIOS (Preserved) --- */}
+               {/* ... Other forms (Master, Categories, Locations) ... */}
                {activeTab === 'MASTER' && (
                  <>
                    <div>

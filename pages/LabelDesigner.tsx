@@ -109,7 +109,7 @@ const LabelDesigner: React.FC = () => {
   };
 
   const initCreation = () => {
-      if(!newDesignName.trim() || !selectedType) return;
+      if(!newDesignName || newDesignName.trim() === '' || !selectedType) return;
       createNew(selectedType, newDesignName);
       setShowCreateModal(false);
       setView('DESIGNER');
@@ -226,8 +226,8 @@ const LabelDesigner: React.FC = () => {
                           </div>
                           <button 
                               onClick={initCreation} 
-                              disabled={!selectedType || !newDesignName.trim()}
-                              className="w-full py-3 bg-indigo-600 text-white font-bold rounded-xl shadow-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed mb-3"
+                              disabled={!selectedType || newDesignName.trim() === ''}
+                              className={`w-full py-3 font-bold rounded-xl shadow-lg transition-all mb-3 ${(!selectedType || newDesignName.trim() === '') ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-indigo-600 text-white hover:bg-indigo-700'}`}
                           >
                               CREAR DISEÑO
                           </button>
