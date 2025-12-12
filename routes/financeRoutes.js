@@ -21,13 +21,11 @@ const validateOpenBox = async (idCaja, res) => {
 // --- ADMIN: STATUS DASHBOARD ---
 router.get('/admin/boxes/status', authenticateToken, async (req, res) => {
     try {
-        console.log("[DEBUG] Solicitando estado de cajas...");
         // 1. Obtener cajas activas para recalcular
         const activeBoxes = await pool.query("SELECT idCaja FROM arqueo WHERE estado = 'Activo'");
         
         // 2. Recalcular cada una
         for(const box of activeBoxes.rows) {
-            // Postgres devuelve columnas en minúscula por defecto (idcaja) si no se usan comillas
             const idCajaReal = box.idCaja || box.idcaja; 
             if(idCajaReal) await updateArqueoBalance(idCajaReal, pool);
         }
@@ -53,7 +51,6 @@ router.get('/admin/boxes/status', authenticateToken, async (req, res) => {
             ORDER BY c.idCaja, a.fechaApertura DESC
         `;
         const result = await pool.query(query);
-        console.log(`[DEBUG] Cajas encontradas: ${result.rows.length}`);
         res.json(result.rows);
     } catch (err) { handleDbError(res, err); }
 });
@@ -62,16 +59,16 @@ router.get('/admin/boxes/status', authenticateToken, async (req, res) => {
 router.get('/arqueo/:id/details', authenticateToken, async (req, res) => {
     try {
         const { id } = req.params;
-        console.log(`[DEBUG] Solicitando detalles de arqueo ID: ${id}`);
         
-        // 1. Info General (Alias explícitos son VITALES aquí)
+        // 1. Info General
+        // IMPORTANTE: Extraemos fechas como string para evitar desplazamiento UTC
         const arqueoRes = await pool.query(`
             SELECT 
                 a.idArqueo as "idArqueo",
                 a.idCaja as "idCaja",
                 a.idUsuario as "idUsuario",
-                a.fechaApertura as "fechaApertura",
-                a.fechaCierre as "fechaCierre",
+                TO_CHAR(a.fechaApertura, 'YYYY-MM-DD HH24:MI:SS') as "fechaApertura",
+                TO_CHAR(a.fechaCierre, 'YYYY-MM-DD HH24:MI:SS') as "fechaCierre",
                 a.montoInicial as "montoInicial",
                 a.montoFinal as "montoFinal",
                 a.ganancia as "ganancia",
@@ -82,36 +79,35 @@ router.get('/arqueo/:id/details', authenticateToken, async (req, res) => {
             WHERE a.idArqueo = $1`, [id]);
             
         if(arqueoRes.rows.length === 0) {
-            console.log("[DEBUG] Arqueo no encontrado en DB");
             return res.status(404).json({error: 'Arqueo no encontrado'});
         }
 
         const arqueo = arqueoRes.rows[0];
-        const fechaInicio = arqueo.fechaApertura;
-        const fechaFin = arqueo.fechaCierre || getLocalTimestamp(); // Usar hora actual si no ha cerrado
+        // Aseguramos que usamos los strings exactos recuperados de BD
+        const fechaInicioStr = arqueo.fechaApertura;
+        // Si no ha cerrado, usamos la hora actual del servidor
+        const fechaFinStr = arqueo.fechaCierre || getLocalTimestamp(); 
         const targetCaja = arqueo.idCaja;
 
-        console.log(`[DEBUG] Buscando movimientos para Caja: ${targetCaja} entre ${fechaInicio} y ${fechaFin}`);
-
         // 2. Movimientos
-        // Usamos fechaCreacion >= fechaInicio para traer todo lo posterior a la apertura
+        // Usamos ::timestamp para convertir el string a fecha en SQL sin añadir zonas horarias
         const ingresos = await pool.query(`
             SELECT idIngreso as "idIngreso", descripcion, monto, costo, fechaCreacion as "fechaCreacion"
             FROM ingresos 
             WHERE idCaja = $1 
-            AND fechaCreacion >= $2
+            AND fechaCreacion >= $2::timestamp
+            AND fechaCreacion <= $3::timestamp
             ORDER BY fechaCreacion DESC
-        `, [targetCaja, fechaInicio]);
+        `, [targetCaja, fechaInicioStr, fechaFinStr]);
             
         const egresos = await pool.query(`
             SELECT idegresos as "idegresos", descripcion, monto, fechaCreacion as "fechaCreacion"
             FROM egresos 
             WHERE idCaja = $1 
-            AND fechaCreacion >= $2
+            AND fechaCreacion >= $2::timestamp
+            AND fechaCreacion <= $3::timestamp
             ORDER BY fechaCreacion DESC
-        `, [targetCaja, fechaInicio]);
-
-        console.log(`[DEBUG] Encontrados ${ingresos.rows.length} ingresos y ${egresos.rows.length} egresos.`);
+        `, [targetCaja, fechaInicioStr, fechaFinStr]);
 
         res.json({
             arqueo: arqueo,

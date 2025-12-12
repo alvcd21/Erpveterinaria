@@ -66,51 +66,47 @@ async function generateNextId(table, column, prefix, client = pool) {
 
 // Función CRÍTICA: Actualizar balance en tiempo real
 async function updateArqueoBalance(idCaja, client = pool) {
-    console.log(`[DEBUG] Iniciando recálculo para caja: ${idCaja}`);
+    // console.log(`[DEBUG] Iniciando recálculo para caja: ${idCaja}`);
     try {
         // 1. Obtener datos de la sesión activa
-        // IMPORTANTE: Usamos alias "idCaja" para asegurar compatibilidad con el resto del código
+        // IMPORTANTE: Usamos TO_CHAR para evitar que Node convierta la fecha a UTC y cambie el día
         const arqRes = await client.query(
-            `SELECT idArqueo as "idArqueo", montoInicial as "montoInicial", fechaApertura as "fechaApertura" 
+            `SELECT idArqueo as "idArqueo", montoInicial as "montoInicial", 
+             TO_CHAR(fechaApertura, 'YYYY-MM-DD HH24:MI:SS') as "fechaAperturaStr"
              FROM arqueo 
              WHERE idCaja = $1 AND estado = 'Activo'`, 
             [idCaja]
         );
         
         if (arqRes.rows.length === 0) {
-            console.log(`[DEBUG] Caja ${idCaja} cerrada o sin sesión activa. No se actualiza.`);
             return; 
         }
 
-        const { idArqueo, montoInicial, fechaApertura } = arqRes.rows[0];
-        console.log(`[DEBUG] Sesión encontrada: ${idArqueo}. Inicio: ${montoInicial}, Fecha: ${fechaApertura}`);
-
+        const { idArqueo, montoInicial, fechaAperturaStr } = arqRes.rows[0];
+        
         // 2. Calcular sumatorias (Ingresos)
+        // Comparamos strings de fechas (YYYY-MM-DD HH:MM:SS) que es seguro en Postgres para TIMESTAMP sin zona
         const ingRes = await client.query(`
             SELECT COALESCE(SUM(monto), 0) as total, COALESCE(SUM(costo), 0) as costo
             FROM ingresos 
-            WHERE idCaja = $1 AND fechaCreacion >= $2
-        `, [idCaja, fechaApertura]);
+            WHERE idCaja = $1 AND fechaCreacion >= $2::timestamp
+        `, [idCaja, fechaAperturaStr]);
 
         // 3. Calcular sumatorias (Egresos)
         const egrRes = await client.query(`
             SELECT COALESCE(SUM(monto), 0) as total
             FROM egresos 
-            WHERE idCaja = $1 AND fechaCreacion >= $2
-        `, [idCaja, fechaApertura]);
+            WHERE idCaja = $1 AND fechaCreacion >= $2::timestamp
+        `, [idCaja, fechaAperturaStr]);
 
         const totalIngresos = Number(ingRes.rows[0].total);
         const totalCostos = Number(ingRes.rows[0].costo);
         const totalEgresos = Number(egrRes.rows[0].total);
         const baseInicial = Number(montoInicial);
 
-        console.log(`[DEBUG] Calculos -> Ingresos: ${totalIngresos}, Costos: ${totalCostos}, Egresos: ${totalEgresos}`);
-
         // Fórmula: Caja Final = Lo que había al inicio + Lo que entró - Lo que salió
         const montoFinal = (baseInicial + totalIngresos) - totalEgresos;
         const ganancia = totalIngresos - totalCostos;
-
-        console.log(`[DEBUG] Resultado Final -> Caja: ${montoFinal}, Ganancia: ${ganancia}`);
 
         // 3. Impactar en base de datos
         await client.query(`
