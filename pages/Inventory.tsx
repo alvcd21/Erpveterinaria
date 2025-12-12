@@ -132,7 +132,7 @@ const Inventory: React.FC = () => {
   };
 
   const replaceVariables = (content: string, dataContext: any): string => {
-      let text = content;
+      let text = content || '';
       
       // Reemplazo dinámico usando Regex para capturar cualquier {{variable.ruta}}
       text = text.replace(/{{([\w.]+)}}/g, (match, path) => {
@@ -147,6 +147,12 @@ const Inventory: React.FC = () => {
       });
 
       return text;
+  };
+
+  // Helper para sanitizar números y evitar NaN
+  const safeNum = (val: any, def: number = 0): number => {
+      const num = parseFloat(val);
+      return isNaN(num) ? def : num;
   };
 
   const handlePrintLabel = async (item: any, type: 'TELEFONO' | 'STOCK') => {
@@ -217,13 +223,19 @@ const Inventory: React.FC = () => {
           let totalShiftY = 0; // Cuánto se ha desplazado el layout hacia abajo
 
           // Ordenar elementos por posición Y para procesarlos de arriba a abajo
-          // Esto asegura que si un elemento crece, empuje a los que están abajo
-          const sortedElements = [...template.elements].sort((a, b) => a.y - b.y);
+          // Usamos safeNum para garantizar ordenamiento numérico
+          const sortedElements = [...template.elements].sort((a, b) => safeNum(a.y) - safeNum(b.y));
 
           const layoutElements = sortedElements.map(el => {
+              // Sanitizar dimensiones
+              const elY = safeNum(el.y);
+              const elH = safeNum(el.height);
+              const elW = safeNum(el.width);
+              const elX = safeNum(el.x);
+
               // Aplicar el desplazamiento acumulado hasta el momento a la posición Y
-              let finalY = el.y + totalShiftY;
-              let finalHeight = el.height;
+              let finalY = elY + totalShiftY;
+              let finalHeight = elH;
               let finalContent = el.content;
 
               if (el.type === 'TEXT') {
@@ -231,7 +243,8 @@ const Inventory: React.FC = () => {
                   finalContent = replaceVariables(el.content, dataContext);
                   
                   if (el.isStretchWithOverflow) {
-                      const fontSize = el.fontSize || 10;
+                      const fontSize = safeNum(el.fontSize, 10);
+                      
                       // Configurar fuente en dummy doc para medición precisa
                       if(el.fontFamily?.includes('Courier')) scratchDoc.setFont('courier', el.fontWeight);
                       else if(el.fontFamily?.includes('Times')) scratchDoc.setFont('times', el.fontWeight);
@@ -240,15 +253,17 @@ const Inventory: React.FC = () => {
                       scratchDoc.setFontSize(fontSize);
 
                       // jsPDF divide el texto en líneas según el ancho disponible
-                      const lines = scratchDoc.splitTextToSize(finalContent, el.width);
+                      // Usamos un ancho mínimo de seguridad si el width viene mal
+                      const usableWidth = elW > 0 ? elW : 10;
+                      const lines = scratchDoc.splitTextToSize(finalContent, usableWidth);
                       
                       // Calcular altura real: líneas * factor de altura de línea (aprox 1.15) conversion pt->mm (0.3527)
                       const lineHeightMm = fontSize * 0.3527 * 1.15;
                       const actualHeight = lines.length * lineHeightMm;
 
                       // Si la altura real es mayor que la definida en diseño
-                      if (actualHeight > el.height) {
-                          const growth = actualHeight - el.height;
+                      if (actualHeight > elH) {
+                          const growth = actualHeight - elH;
                           finalHeight = actualHeight; // El elemento crece
                           totalShiftY += growth; // Acumulamos el crecimiento para empujar elementos siguientes
                       }
@@ -257,23 +272,32 @@ const Inventory: React.FC = () => {
                    finalContent = replaceVariables(el.content, dataContext);
               }
 
-              return { ...el, y: finalY, height: finalHeight, computedContent: finalContent };
+              return { 
+                  ...el, 
+                  y: finalY, 
+                  height: finalHeight, 
+                  width: elW, 
+                  x: elX, 
+                  computedContent: finalContent 
+              };
           });
 
           // Aumentar el tamaño total del PDF con el desplazamiento acumulado
-          const finalPdfHeight = template.height + totalShiftY;
+          const baseW = safeNum(template.width, 50);
+          const baseH = safeNum(template.height, 25);
+          const finalPdfHeight = baseH + totalShiftY;
 
           // 3. Configurar PDF FINAL con el nuevo tamaño
           const doc = new jsPDF({
-              orientation: template.width > finalPdfHeight ? 'landscape' : 'portrait',
+              orientation: baseW > finalPdfHeight ? 'landscape' : 'portrait',
               unit: 'mm',
-              format: [template.width, finalPdfHeight]
+              format: [baseW, finalPdfHeight]
           });
 
           // 4. Renderizar Elementos Calculados
           for (const el of layoutElements) {
               if (el.type === 'TEXT') {
-                  doc.setFontSize(el.fontSize || 10);
+                  doc.setFontSize(safeNum(el.fontSize, 10));
                   
                   if(el.fontFamily?.includes('Courier')) doc.setFont('courier', el.fontWeight);
                   else if(el.fontFamily?.includes('Times')) doc.setFont('times', el.fontWeight);
@@ -292,14 +316,14 @@ const Inventory: React.FC = () => {
                   }
                   
                   if (el.isMultiline) {
-                      opts.maxWidth = el.width;
+                      opts.maxWidth = el.width > 0 ? el.width : baseW;
                   }
 
                   if (el.rotation && el.rotation !== 0) {
                       opts.angle = el.rotation;
                   }
 
-                  doc.text(el.computedContent || '', x, el.y, opts);
+                  doc.text(String(el.computedContent || ''), x, el.y, opts);
               } 
               else if (el.type === 'BARCODE') {
                   const codeValue = el.computedContent;
@@ -321,6 +345,7 @@ const Inventory: React.FC = () => {
                           });
                           
                           const imgData = canvas.toDataURL("image/png");
+                          // Usar dimensiones sanitizadas
                           doc.addImage(imgData, 'PNG', el.x, el.y, el.width, el.height);
                       } catch(e) { console.error("Barcode Error", e); }
                   }
