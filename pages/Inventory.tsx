@@ -459,8 +459,6 @@ const Inventory: React.FC = () => {
         );
       }
 
-      // ... Resto de los tabs (Master, Categories, Locations) igual que antes ...
-      // Para no exceder límites de respuesta, el resto del renderContent es igual al anterior
       if (activeTab === 'MASTER') {
           return (
             <table className="w-full text-left">
