@@ -15,15 +15,15 @@ const inventoryRoutes = require('./routes/inventoryRoutes');
 const salesRoutes = require('./routes/salesRoutes');
 const financeRoutes = require('./routes/financeRoutes');
 const reportsRoutes = require('./routes/reportsRoutes');
-const labelRoutes = require('./routes/labelRoutes'); // NUEVA RUTA
+const labelRoutes = require('./routes/labelRoutes'); 
 
 const app = express();
 const port = process.env.PORT || 3000;
 
 app.use(cors());
-app.use(express.json({ limit: '50mb' })); // Aumentar limite para imagenes base64
+app.use(express.json({ limit: '50mb' })); 
 
-// --- INICIALIZACIÓN BD (Tablas Nuevas) ---
+// --- INICIALIZACIÓN BD ---
 const initDB = async () => {
     try {
         await pool.query(`
@@ -40,8 +40,8 @@ const initDB = async () => {
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                 name VARCHAR(100) NOT NULL,
                 category VARCHAR(50) DEFAULT 'GENERAL', 
-                type VARCHAR(50) DEFAULT 'LABEL', -- LABEL, REPORT, INVOICE
-                data_source VARCHAR(50) DEFAULT 'NONE', -- INVENTORY, SALES, CLIENTS
+                type VARCHAR(50) DEFAULT 'LABEL', 
+                data_source VARCHAR(50) DEFAULT 'NONE', 
                 is_default BOOLEAN DEFAULT FALSE,
                 width NUMERIC(10,2) NOT NULL,
                 height NUMERIC(10,2) NOT NULL,
@@ -49,10 +49,32 @@ const initDB = async () => {
                 created_at TIMESTAMP DEFAULT NOW(),
                 updated_at TIMESTAMP DEFAULT NOW()
             );
+
+            -- TABLA DE CONFIGURACIÓN EMPRESA (SAR HONDURAS)
+            CREATE TABLE IF NOT EXISTS configuracion (
+                id SERIAL PRIMARY KEY,
+                nombreEmpresa VARCHAR(200) NOT NULL,
+                rtn VARCHAR(50),
+                direccion TEXT,
+                telefono VARCHAR(50),
+                correo VARCHAR(100),
+                cai VARCHAR(100),
+                rangoInicial VARCHAR(50),
+                rangoFinal VARCHAR(50),
+                fechaLimite DATE,
+                isv INTEGER DEFAULT 15,
+                mensajeFinal TEXT DEFAULT 'LA FACTURA ES BENEFICIO DE TODOS, EXIJALA'
+            );
             
-            -- Migraciones seguras
+            -- Migraciones seguras y Seed Inicial
             DO $$ 
             BEGIN 
+                -- Verificar si existe configuración, sino crear default
+                IF NOT EXISTS (SELECT 1 FROM configuracion LIMIT 1) THEN
+                    INSERT INTO configuracion (nombreEmpresa, rtn, direccion, telefono, isv)
+                    VALUES ('SMARTCLOUD', '00000000000000', 'Mercado Nuevo-Avenida Valle', '+504-00000000', 15);
+                END IF;
+
                 BEGIN
                     ALTER TABLE label_templates ADD COLUMN category VARCHAR(50) DEFAULT 'GENERAL';
                 EXCEPTION WHEN duplicate_column THEN NULL; END;
@@ -71,7 +93,8 @@ const initDB = async () => {
             VALUES 
             ('DISEÑAR_ETIQUETAS', 'Diseñar Etiquetas y Reportes', 'Logística'),
             ('GESTIONAR_PANEL_CAJAS', 'Gestionar y Auditar Cajas', 'Finanzas'),
-            ('ANULAR_VENTA', 'Anular Facturas', 'Ventas')
+            ('ANULAR_VENTA', 'Anular Facturas', 'Ventas'),
+            ('CONFIGURAR_EMPRESA', 'Configurar Empresa/SAR', 'Administración')
             ON CONFLICT (idPermiso) DO NOTHING;
         `);
     } catch (err) { console.error("Error init DB:", err); }
@@ -132,7 +155,7 @@ app.use('/api', inventoryRoutes);
 app.use('/api', salesRoutes);
 app.use('/api', financeRoutes);
 app.use('/api', reportsRoutes);
-app.use('/api', labelRoutes); // REGISTRO
+app.use('/api', labelRoutes); 
 
 // --- STATIC FILES ---
 app.use(express.static(path.join(__dirname, 'build')));

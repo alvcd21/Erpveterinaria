@@ -1,12 +1,45 @@
 
 import React, { useState, useEffect } from 'react';
-import { InventoryService, ClientService, SalesService, CashService } from '../services/api';
-import { ProductoUnified, DetalleVenta, Cliente } from '../types';
+import { InventoryService, ClientService, SalesService, CashService, ConfigService } from '../services/api';
+import { ProductoUnified, DetalleVenta, Cliente, EmpresaConfig } from '../types';
 import { Search, ShoppingCart, Trash2, CreditCard, Smartphone, Headphones, Zap, RefreshCw, List, LayoutGrid, Save } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { jsPDF } from 'jspdf';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate, useLocation } from 'react-router-dom';
+import 'jspdf-autotable';
+
+// Helper básico para números a letras (Simplificado para Lempiras)
+const numeroALetras = (num: number): string => {
+    const unidades = ['CERO', 'UNO', 'DOS', 'TRES', 'CUATRO', 'CINCO', 'SEIS', 'SIETE', 'OCHO', 'NUEVE'];
+    const decenas = ['', 'DIEZ', 'VEINTE', 'TREINTA', 'CUARENTA', 'CINCUENTA', 'SESENTA', 'SETENTA', 'OCHENTA', 'NOVENTA'];
+    const centenas = ['', 'CIENTO', 'DOSCIENTOS', 'TRESCIENTOS', 'CUATROCIENTOS', 'QUINIENTOS', 'SEISCIENTOS', 'SETECIENTOS', 'OCHOCIENTOS', 'NOVECIENTOS'];
+
+    // Lógica simplificada para el ejemplo. Para producción robusta, usar librería 'numeros_a_letras'
+    // Esta es una implementación básica para cumplir el requerimiento visual
+    const integerPart = Math.floor(num);
+    const decimalPart = Math.round((num - integerPart) * 100);
+    
+    let text = '';
+    if (integerPart === 100) text = 'CIEN';
+    else if (integerPart > 100 && integerPart < 1000) {
+        text = centenas[Math.floor(integerPart / 100)];
+        const rest = integerPart % 100;
+        if (rest > 0) text += ' ' + convertTwoDigits(rest);
+    } else {
+        text = convertTwoDigits(integerPart);
+    }
+
+    return `${text} CON ${decimalPart}/100 LEMPIRAS`;
+
+    function convertTwoDigits(n: number) {
+        if (n < 10) return unidades[n];
+        if (n < 20) return ['DIEZ', 'ONCE', 'DOCE', 'TRECE', 'CATORCE', 'QUINCE', 'DIECISEIS', 'DIECISIETE', 'DIECIOCHO', 'DIECINUEVE'][n-10];
+        const dec = Math.floor(n/10);
+        const uni = n % 10;
+        return decenas[dec] + (uni > 0 ? ' Y ' + unidades[uni] : '');
+    }
+};
 
 const POS: React.FC = () => {
   const [products, setProducts] = useState<ProductoUnified[]>([]);
@@ -19,10 +52,11 @@ const POS: React.FC = () => {
 
   const [clients, setClients] = useState<Cliente[]>([]);
   const [selectedClientId, setSelectedClientId] = useState<string>('');
+  const [companyConfig, setCompanyConfig] = useState<EmpresaConfig | null>(null);
   
   const [paymentType, setPaymentType] = useState<'Contado' | 'Credito'>('Contado');
   const [discount, setDiscount] = useState<number>(0);
-  const [taxAmount, setTaxAmount] = useState<number>(0); // Estado para ISV visual
+  // Remove separate taxAmount state, calculate on the fly based on config
   const [isLoading, setIsLoading] = useState(false);
   
   // Edit Mode State
@@ -92,10 +126,12 @@ const POS: React.FC = () => {
     setIsLoading(true);
     Promise.all([
       InventoryService.getUnifiedProducts(),
-      ClientService.getAll()
-    ]).then(([prodData, clientData]) => {
+      ClientService.getAll(),
+      ConfigService.get()
+    ]).then(([prodData, clientData, configData]) => {
       setProducts(prodData || []);
       setClients(clientData || []);
+      setCompanyConfig(configData);
     }).catch(err => console.error(err))
       .finally(() => setIsLoading(false));
   };
@@ -106,9 +142,7 @@ const POS: React.FC = () => {
           setIsEditing(true);
           setEditingSaleId(saleId);
           
-          // 1. Obtener detalles de productos (Items)
           const details = await SalesService.getDetallesVenta(saleId);
-          // Mapear asegurando tipos numéricos para evitar NaN
           const cleanDetails = details.map(d => ({
               ...d,
               cantidad: Number(d.cantidad),
@@ -116,26 +150,14 @@ const POS: React.FC = () => {
           }));
           setCart(cleanDetails);
 
-          // 2. Obtener cabecera de la venta (Total, Cliente, Estado, Impuestos)
           const header = await SalesService.getVenta(saleId);
-          
           if (header) {
-              // Asegurar el seteo del cliente y configuración
               setSelectedClientId(header.identidadCliente);
               setPaymentType(header.tipoCompra as any || 'Contado');
-              
-              // Setear valores monetarios guardados
               setDiscount(Number(header.descuento) || 0);
-              setTaxAmount(Number(header.isv) || 0);
           }
           
-          const Toast = Swal.mixin({
-            toast: true,
-            position: 'top-end',
-            showConfirmButton: false,
-            timer: 2000
-          });
-          Toast.fire({ icon: 'info', title: `Editando Venta #${saleId}` });
+          Swal.fire({ toast: true, position: 'top-end', icon: 'info', title: `Editando Venta #${saleId}`, showConfirmButton: false, timer: 2000 });
 
       } catch (error) {
           console.error(error);
@@ -183,91 +205,247 @@ const POS: React.FC = () => {
       };
       return [...prev, newItem];
     });
-    // Feedback
-    const Toast = Swal.mixin({
-      toast: true,
-      position: 'top-end',
-      showConfirmButton: false,
-      timer: 1000,
-      timerProgressBar: true
-    });
-    Toast.fire({ icon: 'success', title: 'Agregado' });
+    
+    Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Agregado', showConfirmButton: false, timer: 1000 });
   };
 
   const removeFromCart = (tempId: string) => {
     setCart(prev => prev.filter(item => item.codDetalleVenta !== tempId));
   };
 
+  // Cálculo Monetario
   const calculateTotal = () => {
-    const grossTotal = cart.reduce((acc, item) => acc + (item.cantidad * item.precioVenta), 0);
-    const finalTotal = grossTotal - discount;
-    const isv = finalTotal * 0.15; // 15% ISV fijo
-    const subtotal = finalTotal - isv;
+    // Total Bruto (Suma de precios venta)
+    const totalVenta = cart.reduce((acc, item) => acc + (item.cantidad * item.precioVenta), 0);
+    
+    // Aplicar Descuento global
+    const totalConDescuento = Math.max(0, totalVenta - discount);
+    
+    // ISV incluido o calculado aparte?
+    // Asumiendo que el precio de venta YA incluye ISV para el total a pagar,
+    // y lo desglosamos para la factura.
+    // Base Imponible = Total / (1 + tasa)
+    const isvRate = (companyConfig?.isv || 15) / 100;
+    const subtotal = totalConDescuento / (1 + isvRate);
+    const tax = totalConDescuento - subtotal;
 
     return { 
-      subtotal: subtotal > 0 ? subtotal : 0, 
-      tax: isv > 0 ? isv : 0, 
-      total: finalTotal > 0 ? finalTotal : 0 
+      subtotal, 
+      tax, 
+      total: totalConDescuento 
     };
   };
 
   const { subtotal, tax, total } = calculateTotal();
 
-  // --- PDF GENERATION ---
+  // --- NUEVA GENERACIÓN PDF FACTURA SAR ---
   const generateInvoicePDF = (codVenta: string, date: Date) => {
     try {
       const doc = new jsPDF();
       const client = getClientDetails();
+      const config = companyConfig || { nombreEmpresa: 'SMARTCLOUD', rtn: '', direccion: '', isv: 15 } as any;
 
+      const pageWidth = doc.internal.pageSize.width;
+      const margin = 10;
+      
       doc.setFont("helvetica", "normal");
       
+      // 1. ENCABEZADO IZQUIERDO (EMPRESA) - RECUADRO REDONDEADO
       doc.setDrawColor(0);
-      doc.rect(10, 10, 90, 30);
-      doc.rect(110, 10, 90, 30);
-
+      doc.roundedRect(margin, margin, 85, 35, 3, 3, 'S');
+      
+      // Logo Placeholder (Circles graphic in example)
+      // doc.addImage(...) here if logo available
       doc.setFontSize(14);
       doc.setFont("helvetica", "bold");
-      doc.text("SMARTCLOUD", 55, 18, { align: "center" });
+      doc.text(config.nombreEmpresa.toUpperCase(), margin + 25, margin + 8);
+      
       doc.setFontSize(8);
       doc.setFont("helvetica", "normal");
-      doc.text("Mercado Nuevo-Avenida Valle", 55, 23, { align: "center" });
-      doc.text("Telefono:+504-96676374", 55, 27, { align: "center" });
+      const splitAddr = doc.splitTextToSize(config.direccion || '', 55);
+      doc.text(splitAddr, margin + 25, margin + 14);
+      doc.text("Venta de Teléfonos y Accesorios", margin + 25, margin + 24);
+      doc.text("por mayor y menor", margin + 25, margin + 28);
+      doc.setFont("helvetica", "bold italic");
+      doc.text(`Teléfono:${config.telefono || ''}`, margin + 25, margin + 32);
 
+      // 2. ENCABEZADO DERECHO (FACTURA)
+      doc.roundedRect(115, margin, 85, 35, 3, 3, 'S');
+      doc.setFont("helvetica", "bold");
       doc.setFontSize(12);
-      doc.text("FACTURA", 155, 18, { align: "center" });
+      doc.text("FACTURA", 157.5, margin + 8, { align: "center" });
       doc.setFontSize(10);
-      doc.text(codVenta, 155, 23, { align: "center" });
+      doc.text(codVenta, 157.5, margin + 14, { align: "center" });
       
       doc.setFontSize(8);
-      doc.text(`FECHA: ${date.toLocaleDateString()}`, 115, 30);
+      const startYInfo = margin + 18;
+      const rowHeight = 4.5;
       
-      doc.rect(10, 45, 190, 20);
-      doc.line(10, 55, 200, 55); 
-      doc.line(110, 45, 110, 65); 
+      // Grid interno
+      doc.line(115, startYInfo, 200, startYInfo);
+      doc.line(115, startYInfo + rowHeight, 200, startYInfo + rowHeight);
+      doc.line(115, startYInfo + rowHeight*2, 200, startYInfo + rowHeight*2);
+      doc.line(115, startYInfo + rowHeight*3, 200, startYInfo + rowHeight*3);
+      doc.line(145, startYInfo, 145, margin + 35); // Divisor vertical
 
-      doc.setFont("helvetica", "bold");
-      doc.text("CLIENTE:", 12, 60);
+      // Labels
+      doc.text("R.T.N.:", 118, startYInfo + 3);
+      doc.text("C.A.I.:", 118, startYInfo + rowHeight + 3);
+      doc.text("FECHA:", 118, startYInfo + rowHeight*2 + 3);
+      doc.text("VENCIMIENTO:", 118, startYInfo + rowHeight*3 + 3);
+
+      // Values
       doc.setFont("helvetica", "normal");
-      doc.text(client ? `${client.nombre} ${client.apellido}`.toUpperCase() : "CONSUMIDOR FINAL", 40, 60);
+      doc.text(config.rtn || '', 148, startYInfo + 3);
+      doc.text(config.cai || '', 148, startYInfo + rowHeight + 3);
+      // Fecha Emisión (Solo dia/mes/año) en cabecera derecha si se requiere, pero el diseño lo tiene abajo
+      // Se deja en blanco según imagen o se repite.
+      doc.text(config.fechaLimite ? new Date(config.fechaLimite).toLocaleDateString() : '', 148, startYInfo + rowHeight*3 + 3);
 
-      let y = 70;
-      doc.setFillColor(240, 240, 240);
-      doc.rect(10, y, 190, 8, 'F');
+      // 3. DATOS GENERALES (Cuadro central)
+      const sectionY = 50;
+      doc.rect(margin, sectionY, 190, 20); // Caja principal
       
-      doc.setFont("helvetica", "bold");
-      doc.text("DESCRIPCION", 15, y+5);
-      doc.text("TOTAL", 190, y+5, { align: "center" });
+      // Líneas divisorias
+      doc.line(margin, sectionY + 10, margin + 190, sectionY + 10); // Horizontal medio
+      doc.line(margin + 40, sectionY, margin + 40, sectionY + 10); // Vert fecha
+      doc.line(margin + 90, sectionY, margin + 90, sectionY + 10); // Vert condiciones
+      doc.line(margin + 120, sectionY, margin + 120, sectionY + 20); // Vert identidad/vendedor label
+      doc.line(margin + 150, sectionY, margin + 150, sectionY + 20); // Vert identidad/vendedor value
 
-      y += 8;
-      doc.setFont("helvetica", "normal");
-      cart.forEach(item => {
-        const itemTotal = item.cantidad * item.precioVenta;
-        doc.text(item.descripcionProducto?.substring(0, 40) || "", 15, y+5);
-        doc.text(itemTotal.toFixed(2), 190, y+5, { align: "center" });
-        y += 6;
+      doc.setFontSize(8);
+      // Fila 1
+      doc.text("FECHA EMISION:", margin + 2, sectionY + 6);
+      doc.text(date.toLocaleDateString(), margin + 42, sectionY + 6);
+      
+      doc.text("CONDICIONES DE", margin + 92, sectionY + 3);
+      doc.text("VENTA:", margin + 100, sectionY + 7);
+      
+      doc.text("CONTADO:", margin + 125, sectionY + 6);
+      doc.rect(margin + 140, sectionY + 4, 3, 3); // Checkbox
+      if(paymentType === 'Contado') doc.text("X", margin + 140.5, sectionY + 6.5);
+      
+      doc.text("CREDITO:", margin + 155, sectionY + 6);
+      doc.rect(margin + 168, sectionY + 4, 3, 3); // Checkbox
+      if(paymentType === 'Credito') doc.text("X", margin + 168.5, sectionY + 6.5);
+
+      // Fila 2
+      doc.text("NOMBRE CLIENTE:", margin + 2, sectionY + 16);
+      doc.text(client ? `${client.nombre} ${client.apellido}` : "CONSUMIDOR FINAL", margin + 42, sectionY + 16);
+      
+      doc.text("IDENTIDAD:", margin + 122, sectionY + 16);
+      doc.text(client?.identidad || "N/A", margin + 152, sectionY + 16);
+
+      // Fila 3 (Dirección y Vendedor - Custom, ajustando a imagen)
+      doc.line(margin, sectionY + 20, margin + 190, sectionY + 20); // Cierre arriba
+      doc.rect(margin, sectionY + 20, 190, 10); // Caja extra fila 3
+      
+      doc.line(margin + 40, sectionY + 20, margin + 40, sectionY + 30);
+      doc.line(margin + 120, sectionY + 20, margin + 120, sectionY + 30);
+      doc.line(margin + 150, sectionY + 20, margin + 150, sectionY + 30);
+
+      doc.text("DIRECCION:", margin + 2, sectionY + 26);
+      const address = doc.splitTextToSize(client?.direccion || "N/A", 75);
+      doc.text(address, margin + 42, sectionY + 24);
+
+      doc.text("VENDEDOR:", margin + 122, sectionY + 26);
+      doc.text(user?.nombreEmpleado || "Cajero", margin + 152, sectionY + 26);
+
+      // 4. TABLA PRODUCTOS
+      // @ts-ignore
+      doc.autoTable({
+          startY: sectionY + 35,
+          head: [['CODIGO', 'DESCRIPCION', 'CANT', 'PREC.', 'DESC.', 'TOTAL']],
+          body: cart.map(item => [
+              item.idTelefono || item.idInventario || 'SERV',
+              item.descripcionProducto,
+              item.cantidad,
+              item.precioVenta.toFixed(2),
+              '0.00', // Descuento por item si hubiera
+              (item.cantidad * item.precioVenta).toFixed(2)
+          ]),
+          theme: 'plain',
+          styles: { fontSize: 8, cellPadding: 2, lineColor: 0, lineWidth: 0.1 },
+          headStyles: { fillColor: [255, 255, 255], textColor: 0, fontStyle: 'bold', halign: 'center', lineWidth: 0.1, lineColor: 0 },
+          columnStyles: {
+              0: { halign: 'center' }, // Codigo
+              2: { halign: 'center' }, // Cant
+              3: { halign: 'right' }, // Prec
+              4: { halign: 'right' }, // Desc
+              5: { halign: 'right' }  // Total
+          },
+          margin: { left: margin, right: margin }
       });
 
-      doc.text(`TOTAL: ${total.toFixed(2)}`, 190, y + 10, { align: "right" });
+      // @ts-ignore
+      const finalY = doc.lastAutoTable.finalY;
+
+      // Draw box around table manually or trust autotable border
+      // To match design exactly, let's draw the footer box connected
+      
+      const footerY = Math.max(finalY, 220); // Push footer to bottom if short invoice, or flow
+      
+      // 5. PIE DE PAGINA (TOTALES Y LEGAL)
+      // Cuadro Totales (Derecha)
+      const totalsX = 120;
+      const totalsWidth = 80;
+      doc.rect(totalsX, finalY, totalsWidth, 35);
+      
+      const summaryData = [
+          ['Sub-Total', subtotal.toFixed(2)],
+          ['Descuento y Rebajas', discount.toFixed(2)],
+          [`Importe ISV ${config.isv}%`, subtotal.toFixed(2)], // Taxable Base
+          [`ISV ${config.isv}%`, tax.toFixed(2)],
+          ['TOTAL', total.toFixed(2)]
+      ];
+
+      let currentY = finalY + 5;
+      summaryData.forEach((row, i) => {
+          doc.setFont("helvetica", i === 4 ? "bold" : "normal");
+          doc.text(row[0], totalsX + 2, currentY);
+          doc.text(row[1], totalsX + totalsWidth - 2, currentY, { align: "right" });
+          currentY += 6;
+      });
+
+      // Cuadro Información Legal (Izquierda)
+      doc.rect(margin, finalY, 110, 35);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(7);
+      
+      let legalY = finalY + 5;
+      doc.text(`RANGO EMISION AUTORIZADO:`, margin + 2, legalY);
+      doc.setFont("helvetica", "normal");
+      doc.text(`${config.rangoInicial || ''} al ${config.rangoFinal || ''}`, margin + 45, legalY);
+      
+      legalY += 6;
+      doc.setFont("helvetica", "bold");
+      doc.text(`FECHA LIMITE EMISION:`, margin + 2, legalY);
+      doc.setFont("helvetica", "normal");
+      doc.text(config.fechaLimite ? new Date(config.fechaLimite).toLocaleDateString() : '', margin + 45, legalY);
+
+      legalY += 6;
+      doc.setFont("helvetica", "bold");
+      doc.text(`Original:`, margin + 2, legalY);
+      doc.setFont("helvetica", "normal");
+      doc.text(`Cliente`, margin + 15, legalY);
+      
+      doc.setFont("helvetica", "bold");
+      doc.text(`Copia:`, margin + 40, legalY);
+      doc.setFont("helvetica", "normal");
+      doc.text(`Tributario Emisor`, margin + 50, legalY);
+
+      // SON: (Monto en letras)
+      doc.rect(130, finalY + 35, 70, 7); // Box for "SON"
+      doc.setFontSize(8);
+      doc.text("SON:", 125, finalY + 40, { align: "right" });
+      doc.setFont("helvetica", "normal");
+      doc.text(numeroALetras(total), 132, finalY + 40);
+
+      // MENSAJE FINAL
+      doc.setFontSize(9);
+      doc.setFont("helvetica", "normal");
+      doc.text(config.mensajeFinal || "LA FACTURA ES BENEFICIO DE TODOS, EXIJALA", pageWidth / 2, finalY + 55, { align: "center" });
+
       doc.save(`Factura_${codVenta}.pdf`);
     } catch (err) {
       console.error(err);
@@ -297,7 +475,7 @@ const POS: React.FC = () => {
             isv: tax,
             descuento: discount,
             detalles: cart,
-            fecha: getLocalDate() // Enviar fecha local explícita
+            fecha: getLocalDate() 
         };
 
         let response;
@@ -323,11 +501,9 @@ const POS: React.FC = () => {
         // Reset
         setCart([]);
         setDiscount(0);
-        setTaxAmount(0);
         setSelectedClientId('');
         setIsEditing(false);
         setEditingSaleId(null);
-        // Remove location state
         navigate(location.pathname, { replace: true, state: {} });
         
         loadInitialData();
@@ -343,7 +519,6 @@ const POS: React.FC = () => {
       setCart([]);
       setSelectedClientId('');
       setDiscount(0);
-      setTaxAmount(0);
       navigate(location.pathname, { replace: true, state: {} });
       Swal.fire('Edición Cancelada', 'Se ha limpiado el punto de venta.', 'info');
   };
@@ -352,7 +527,7 @@ const POS: React.FC = () => {
     const term = searchTerm.toLowerCase();
     const matchesSearch = p.nombre.toLowerCase().includes(term) || 
                           p.codigo.toLowerCase().includes(term) ||
-                          p.id.toLowerCase().includes(term) || // Include ID (codInventario/codTelefono)
+                          p.id.toLowerCase().includes(term) || 
                           (p.imei && p.imei.toLowerCase().includes(term));
     const matchesCategory = selectedCategory === 'ALL' || p.tipo === selectedCategory;
     return matchesSearch && matchesCategory;
@@ -527,7 +702,7 @@ const POS: React.FC = () => {
                 <span>L. {subtotal.toFixed(2)}</span>
               </div>
               <div className="flex justify-between text-slate-500 text-xs">
-                <span>ISV (15%)</span>
+                <span>ISV ({companyConfig?.isv || 15}%)</span>
                 <span>L. {tax.toFixed(2)}</span>
               </div>
               <div className="flex justify-between items-center text-slate-500 text-xs py-1">

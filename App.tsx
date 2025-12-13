@@ -17,6 +17,7 @@ import Packages from './pages/Packages';
 import AdminCashDashboard from './pages/AdminCashDashboard';
 import Reports from './pages/Reports';
 import LabelDesigner from './pages/LabelDesigner';
+import CompanyConfig from './pages/CompanyConfig';
 
 const App: React.FC = () => {
   return (
@@ -53,6 +54,7 @@ const App: React.FC = () => {
                   <Route path="admin/employees" element={<ProtectedRoute requiredPermission="GESTIONAR_USUARIOS"><AdminUsers initialView="EMPLOYEES" /></ProtectedRoute>} />
                   <Route path="admin/roles" element={<ProtectedRoute requiredPermission="GESTIONAR_ROLES"><AdminUsers initialView="ROLES" /></ProtectedRoute>} />
                   <Route path="admin/boxes" element={<ProtectedRoute requiredPermission="GESTIONAR_ROLES"><AdminUsers initialView="CAJAS" /></ProtectedRoute>} />
+                  <Route path="admin/config" element={<ProtectedRoute requiredPermission="CONFIGURAR_EMPRESA"><CompanyConfig /></ProtectedRoute>} />
 
                   {/* Redirección Fallback */}
                   <Route path="*" element={<Navigate to="/" replace />} />

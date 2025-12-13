@@ -4,7 +4,7 @@ import {
   Cliente, Proveedor, Telefono, Inventario, Accesorio, Categoria, Ubicacion, ProductoUnified,
   Venta, DetalleVenta, VentaPayload,
   Arqueo, Ingreso, Egreso, Saldo, Paquete, Costo,
-  LabelTemplate
+  LabelTemplate, EmpresaConfig
 } from '../types';
 
 const API_URL = '/api';
@@ -160,4 +160,9 @@ export const LabelService = {
   create: (data: Partial<LabelTemplate>) => request<{message: string, id: string}>('/labels', { method: 'POST', body: JSON.stringify(data) }),
   update: (id: string, data: Partial<LabelTemplate>) => request(`/labels/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   delete: (id: string) => request(`/labels/${id}`, { method: 'DELETE' }),
+};
+
+export const ConfigService = {
+  get: () => request<EmpresaConfig>('/config'),
+  update: (data: Partial<EmpresaConfig>) => request('/config', { method: 'PUT', body: JSON.stringify(data) })
 };

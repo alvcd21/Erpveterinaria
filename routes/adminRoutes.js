@@ -259,4 +259,53 @@ router.delete('/cajas/:id', authenticateToken, async (req, res) => {
     } catch(e) { handleDbError(res, e); }
 });
 
+// --- CONFIGURACIÓN EMPRESA (NUEVO) ---
+router.get('/config', authenticateToken, async (req, res) => {
+    try {
+        // Usamos alias para asegurar camelCase en frontend
+        const r = await pool.query(`
+            SELECT 
+                nombreEmpresa as "nombreEmpresa", 
+                rtn, 
+                direccion, 
+                telefono, 
+                correo, 
+                cai, 
+                rangoInicial as "rangoInicial", 
+                rangoFinal as "rangoFinal", 
+                TO_CHAR(fechaLimite, 'YYYY-MM-DD') as "fechaLimite",
+                isv,
+                mensajeFinal as "mensajeFinal"
+            FROM configuracion LIMIT 1
+        `);
+        res.json(r.rows[0]);
+    } catch(e) { handleDbError(res, e); }
+});
+
+router.put('/config', authenticateToken, async (req, res) => {
+    try {
+        const { nombreEmpresa, rtn, direccion, telefono, correo, cai, rangoInicial, rangoFinal, fechaLimite, isv, mensajeFinal } = req.body;
+        
+        // Check if row exists
+        const check = await pool.query('SELECT 1 FROM configuracion LIMIT 1');
+        
+        if (check.rows.length === 0) {
+            await pool.query(`
+                INSERT INTO configuracion 
+                (nombreEmpresa, rtn, direccion, telefono, correo, cai, rangoInicial, rangoFinal, fechaLimite, isv, mensajeFinal)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+                [nombreEmpresa, rtn, direccion, telefono, correo, cai, rangoInicial, rangoFinal, fechaLimite, isv, mensajeFinal]
+            );
+        } else {
+            await pool.query(`
+                UPDATE configuracion 
+                SET nombreEmpresa=$1, rtn=$2, direccion=$3, telefono=$4, correo=$5, cai=$6, rangoInicial=$7, rangoFinal=$8, fechaLimite=$9, isv=$10, mensajeFinal=$11`,
+                [nombreEmpresa, rtn, direccion, telefono, correo, cai, rangoInicial, rangoFinal, fechaLimite, isv, mensajeFinal]
+            );
+        }
+        
+        res.json({ message: 'Configuración guardada correctamente' });
+    } catch(e) { handleDbError(res, e); }
+});
+
 module.exports = router;

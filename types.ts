@@ -162,6 +162,9 @@ export interface Venta {
   isv?: number;
   descuento?: number;
   detalles?: DetalleVenta[];
+  // Campos calculados o del vendedor para impresión
+  nombreVendedor?: string; 
+  direccionCliente?: string;
 }
 
 export interface VentaPayload {
@@ -231,6 +234,22 @@ export interface Costo {
   descripcion: string;
   monto: number;
   estado: EstadoGeneral;
+}
+
+// --- CONFIGURACION EMPRESA (SAR) ---
+export interface EmpresaConfig {
+  id?: number;
+  nombreEmpresa: string;
+  rtn: string;
+  direccion: string;
+  telefono: string;
+  correo: string;
+  cai: string;
+  rangoInicial: string;
+  rangoFinal: string;
+  fechaLimite: string;
+  isv: number;
+  mensajeFinal: string;
 }
 
 // --- LABEL DESIGNER TYPES ---
