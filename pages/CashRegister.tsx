@@ -7,40 +7,67 @@ import {
 } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { useAuth } from '../context/AuthContext';
-import { useNavigate } from 'react-router-dom';
+import { useHistory } from 'react-router-dom';
 import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
 
 type TabType = 'INGRESOS' | 'EGRESOS' | 'VENTAS' | 'RECARGAS';
 
-// Helper básico para números a letras (Simplificado para Lempiras)
+// Helper robusto para números a letras (Copia exacta de POS.tsx)
 const numeroALetras = (num: number): string => {
-    const unidades = ['CERO', 'UNO', 'DOS', 'TRES', 'CUATRO', 'CINCO', 'SEIS', 'SIETE', 'OCHO', 'NUEVE'];
+    const unidades = ['', 'UNO', 'DOS', 'TRES', 'CUATRO', 'CINCO', 'SEIS', 'SIETE', 'OCHO', 'NUEVE'];
     const decenas = ['', 'DIEZ', 'VEINTE', 'TREINTA', 'CUARENTA', 'CINCUENTA', 'SESENTA', 'SETENTA', 'OCHENTA', 'NOVENTA'];
+    const diez_veinte = ['DIEZ', 'ONCE', 'DOCE', 'TRECE', 'CATORCE', 'QUINCE', 'DIECISEIS', 'DIECISIETE', 'DIECIOCHO', 'DIECINUEVE'];
     const centenas = ['', 'CIENTO', 'DOSCIENTOS', 'TRESCIENTOS', 'CUATROCIENTOS', 'QUINIENTOS', 'SEISCIENTOS', 'SETECIENTOS', 'OCHOCIENTOS', 'NOVECIENTOS'];
+
+    const convertGroup = (n: number): string => {
+        if (n === 0) return '';
+        if (n === 100) return 'CIEN';
+        
+        let output = '';
+        
+        // Centenas
+        if (n >= 100) {
+            output += centenas[Math.floor(n / 100)] + ' ';
+            n %= 100;
+        }
+
+        // Decenas y Unidades
+        if (n >= 10 && n <= 19) {
+            output += diez_veinte[n - 10];
+        } else if (n >= 20) {
+            output += decenas[Math.floor(n / 10)];
+            if (n % 10 > 0) output += ' Y ' + unidades[n % 10];
+        } else if (n > 0) {
+            output += unidades[n];
+        }
+        
+        return output.trim();
+    };
 
     const integerPart = Math.floor(num);
     const decimalPart = Math.round((num - integerPart) * 100);
     
     let text = '';
-    if (integerPart === 100) text = 'CIEN';
-    else if (integerPart > 100 && integerPart < 1000) {
-        text = centenas[Math.floor(integerPart / 100)];
-        const rest = integerPart % 100;
-        if (rest > 0) text += ' ' + convertTwoDigits(rest);
-    } else {
-        text = convertTwoDigits(integerPart);
+    
+    if (integerPart === 0) text = 'CERO';
+    else if (integerPart >= 1000000) {
+        const millions = Math.floor(integerPart / 1000000);
+        const remainder = integerPart % 1000000;
+        text += (millions === 1 ? 'UN MILLON' : convertGroup(millions) + ' MILLONES');
+        if (remainder > 0) text += ' ' + convertGroup(Math.floor(remainder / 1000)) + ' MIL ' + convertGroup(remainder % 1000);
+    } 
+    else if (integerPart >= 1000) {
+        const thousands = Math.floor(integerPart / 1000);
+        const remainder = integerPart % 1000;
+        text += (thousands === 1 ? 'MIL' : convertGroup(thousands) + ' MIL');
+        if (remainder > 0) text += ' ' + convertGroup(remainder);
+    } 
+    else {
+        text = convertGroup(integerPart);
     }
 
     return `${text} CON ${decimalPart}/100 LEMPIRAS`;
-
-    function convertTwoDigits(n: number) {
-        if (n < 10) return unidades[n];
-        if (n < 20) return ['DIEZ', 'ONCE', 'DOCE', 'TRECE', 'CATORCE', 'QUINCE', 'DIECISEIS', 'DIECISIETE', 'DIECIOCHO', 'DIECINUEVE'][n-10];
-        const dec = Math.floor(n/10);
-        const uni = n % 10;
-        return decenas[dec] + (uni > 0 ? ' Y ' + unidades[uni] : '');
-    }
 };
 
 const CashRegister: React.FC = () => {
@@ -61,7 +88,7 @@ const CashRegister: React.FC = () => {
   const [openForm, setOpenForm] = useState({ monto: '', tigo: '', claro: '' });
   
   const { user, hasPermission } = useAuth();
-  const navigate = useNavigate();
+  const history = useHistory();
 
   // Modals Forms
   const [showIngresoModal, setShowIngresoModal] = useState(false);
@@ -291,7 +318,7 @@ const CashRegister: React.FC = () => {
       doc.save(`Cierre_Caja_${user.idCaja}_${new Date().toISOString().split('T')[0]}.pdf`);
   };
 
-  // --- GENERAR FACTURA INDIVIDUAL (REIMPRESIÓN) ---
+  // --- GENERAR FACTURA INDIVIDUAL (REIMPRESIÓN MEJORADA) ---
   const handleReprintInvoice = async (idVenta: string) => {
       try {
           const sale = await SalesService.getVenta(idVenta);
@@ -308,7 +335,7 @@ const CashRegister: React.FC = () => {
           const grayColor = "#64748b";      
           const lightGray = "#f1f5f9";      
 
-          // Header geométrico
+          // Header geométrico (IGUAL AL POS)
           doc.setFillColor(primaryColor);
           doc.triangle(0, 0, pageWidth, 0, pageWidth, 35, 'F');
           doc.triangle(0, 0, pageWidth, 35, 0, 50, 'F');
@@ -338,6 +365,7 @@ const CashRegister: React.FC = () => {
           doc.setFillColor(lightGray);
           doc.roundedRect(14, topInfoY, 90, 35, 3, 3, 'F');
           
+          // INFO CLIENTE (Ahora con dirección gracias a la actualización del backend)
           doc.setTextColor(primaryColor);
           doc.setFontSize(10);
           doc.setFont("helvetica", "bold");
@@ -350,6 +378,7 @@ const CashRegister: React.FC = () => {
           doc.setFontSize(9);
           doc.setTextColor(grayColor);
           doc.text(`ID: ${sale.identidadCliente || "N/A"}`, 18, topInfoY + 17);
+          doc.text(`Dir: ${sale.direccionCliente || "N/A"}`, 18, topInfoY + 22); // NUEVO CAMPO
 
           const rightColX = 115;
           doc.text("FECHA:", rightColX, topInfoY + 5);
@@ -357,11 +386,16 @@ const CashRegister: React.FC = () => {
           doc.text(new Date(sale.fecha).toLocaleDateString(), rightColX + 40, topInfoY + 5);
           
           doc.setTextColor(grayColor);
+          doc.text("VENCIMIENTO:", rightColX, topInfoY + 10);
+          doc.setTextColor(0,0,0);
+          doc.text(config.fechaLimite ? new Date(config.fechaLimite).toLocaleDateString() : 'N/A', rightColX + 40, topInfoY + 10);
+
+          doc.setTextColor(grayColor);
           doc.text("CAI:", rightColX, topInfoY + 15);
           doc.setTextColor(0,0,0);
           doc.text(config.cai || '', rightColX + 40, topInfoY + 15);
 
-          // Tabla
+          // Tabla con Columnas Centradas
           // @ts-ignore
           doc.autoTable({
               startY: topInfoY + 40,
@@ -374,8 +408,13 @@ const CashRegister: React.FC = () => {
               ]),
               theme: 'striped',
               styles: { fontSize: 9, cellPadding: 3, textColor: [50, 50, 50] },
-              headStyles: { fillColor: primaryColor, textColor: [255, 255, 255], fontStyle: 'bold' },
-              columnStyles: { 0: { halign: 'center' }, 2: { halign: 'right' }, 3: { halign: 'right', fontStyle: 'bold' } },
+              headStyles: { fillColor: primaryColor, textColor: [255, 255, 255], fontStyle: 'bold', halign: 'center' }, // Headers centrados
+              columnStyles: { 
+                  0: { halign: 'center' }, // Cantidad centrada
+                  1: { halign: 'center' }, // Descripción centrada (SOLICITUD USUARIO)
+                  2: { halign: 'right' }, 
+                  3: { halign: 'right', fontStyle: 'bold' } 
+              },
               margin: { left: 14, right: 14 }
           });
 
@@ -385,11 +424,9 @@ const CashRegister: React.FC = () => {
 
           // Totals
           const total = Number(sale.total);
-          // Assuming stored ISV/Discount are absolute values, logic might need adjustment if stored as %
-          // Here we display directly from DB fields
           const isv = Number(sale.isv || 0);
           const discount = Number(sale.descuento || 0);
-          // Approximate subtotal back-calculation
+          // Recalcular subtotal
           const subtotal = (total + discount) - isv;
 
           doc.text("Subtotal:", totalsX, finalY);
@@ -408,7 +445,7 @@ const CashRegister: React.FC = () => {
           doc.text("TOTAL:", totalsX, finalY);
           doc.text(`L. ${total.toFixed(2)}`, pageWidth - 14, finalY, {align: "right"});
 
-          // Letras
+          // Letras (Función Robusta)
           doc.setTextColor(grayColor);
           doc.setFont("helvetica", "bold");
           doc.setFontSize(8);
@@ -458,7 +495,7 @@ const CashRegister: React.FC = () => {
          } catch(err:any) { Swal.fire('Error', err.message, 'error'); }
      } else {
          if (ingresoForm.irAPos) {
-             navigate('/pos', { state: { customItem: { descripcion: ingresoForm.descripcion, precio: Number(ingresoForm.monto) } } });
+             history.push('/pos', { customItem: { descripcion: ingresoForm.descripcion, precio: Number(ingresoForm.monto) } });
              return;
          }
          try {
@@ -515,7 +552,7 @@ const CashRegister: React.FC = () => {
   };
   
   const handleEditVenta = (venta: Venta) => {
-      navigate('/pos', { state: { editSaleId: venta.codVenta, saleData: venta } });
+      history.push('/pos', { editSaleId: venta.codVenta, saleData: venta });
   };
 
   const handleBuySaldo = async () => {
