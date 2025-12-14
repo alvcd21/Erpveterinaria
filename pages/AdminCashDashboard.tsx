@@ -2,7 +2,7 @@
 import React, { useEffect, useState } from 'react';
 import { CashService } from '../services/api';
 import { Arqueo, Ingreso, Egreso, Saldo } from '../types';
-import { Activity, Lock, Unlock, RefreshCw, AlertTriangle, Eye, ArrowUpCircle, ArrowDownCircle, Settings, X, Save, Edit2, Trash2, FileText, Smartphone } from 'lucide-react';
+import { Activity, Lock, Unlock, RefreshCw, AlertTriangle, Eye, ArrowUpCircle, ArrowDownCircle, Settings, X, Save, Edit2, Trash2, FileText, Smartphone, Printer } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
@@ -100,12 +100,21 @@ const AdminCashDashboard: React.FC = () => {
   };
 
   // --- PDF GENERATOR (Reutilizado y adaptado) ---
-  const generateClosingReportPDF = () => {
+  const generateClosingReportPDF = (excludeRecharges: boolean = false) => {
       if (!selectedBox || !sessionDetails) return;
 
       const doc = new jsPDF();
       const date = new Date().toLocaleString();
       const arqueo = sessionDetails.arqueo;
+
+      // Filtrar recargas si se solicita
+      let ingresosList = sessionDetails.ingresos;
+      if (excludeRecharges) {
+          ingresosList = ingresosList.filter(i => {
+              const desc = i.descripcion.toUpperCase();
+              return !desc.includes('RECARGA') && !desc.includes('PAQUETE') && !desc.includes('SALDO') && !desc.includes('TIGO') && !desc.includes('CLARO');
+          });
+      }
 
       // HEADER
       doc.setFillColor(30, 41, 59); // Slate 800
@@ -113,17 +122,18 @@ const AdminCashDashboard: React.FC = () => {
       doc.setTextColor(255, 255, 255);
       doc.setFontSize(18);
       doc.setFont('helvetica', 'bold');
-      doc.text("REPORTE DE CIERRE DE CAJA (ADMIN)", 105, 12, { align: 'center' });
+      const title = excludeRecharges ? "REPORTE DE CAJA (SIN RECARGAS)" : "REPORTE DE CIERRE DE CAJA (ADMIN)";
+      doc.text(title, 105, 12, { align: 'center' });
       doc.setFontSize(10);
       doc.setFont('helvetica', 'normal');
       doc.text(`Generado: ${date} | Original: ${arqueo.fechaCierre || 'N/A'}`, 105, 22, { align: 'center' });
       doc.text(`Cajero: ${selectedBox.nombreEmpleado} | Caja: ${selectedBox.idCaja}`, 105, 27, { align: 'center' });
 
-      // SUMMARY SECTION
+      // SUMMARY SECTION (Solo visible en reporte completo, o ajustado)
       doc.setTextColor(0, 0, 0);
       doc.setFontSize(12);
       doc.setFont('helvetica', 'bold');
-      doc.text("RESUMEN FINANCIERO", 14, 40);
+      doc.text("RESUMEN FINANCIERO GLOBAL", 14, 40);
       
       const mInicial = Number(arqueo.montoInicial) || 0;
       const tVentas = localTotals.totalIngresos; // Usar calculados locales actualizados
@@ -176,44 +186,77 @@ const AdminCashDashboard: React.FC = () => {
 
       // DETALLES
       doc.setFontSize(11);
-      doc.text("DETALLE DE INGRESOS", 14, finalY);
+      const detalleTitle = excludeRecharges ? "DETALLE DE INGRESOS (Ventas de Productos/Servicios)" : "DETALLE DE INGRESOS (Completo)";
+      doc.text(detalleTitle, 14, finalY);
       
-      const incomeRows = sessionDetails.ingresos.map(i => {
-          const time = i.fechaCreacion ? new Date(i.fechaCreacion).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : '-';
-          return [time, i.descripcion, `L. ${(Number(i.costo)||0).toFixed(2)}`, `L. ${(Number(i.monto)||0).toFixed(2)}`];
+      // Calcular totales para el footer de la tabla
+      let sumCosto = 0;
+      let sumVenta = 0;
+      let sumGanancia = 0;
+
+      const incomeRows = ingresosList.map(i => {
+          const costo = Number(i.costo) || 0;
+          const monto = Number(i.monto) || 0;
+          const gananciaItem = monto - costo;
+
+          sumCosto += costo;
+          sumVenta += monto;
+          sumGanancia += gananciaItem;
+
+          // Eliminada columna Hora, Agregada columna Ganancia
+          return [
+              i.descripcion, 
+              `L. ${costo.toFixed(2)}`, 
+              `L. ${monto.toFixed(2)}`,
+              `L. ${gananciaItem.toFixed(2)}`
+          ];
       });
 
       // @ts-ignore
       doc.autoTable({
           startY: finalY + 3,
-          head: [['Hora', 'Descripción', 'Costo', 'Monto']],
+          head: [['Descripción', 'Costo', 'Venta', 'Ganancia']],
           body: incomeRows,
           theme: 'striped',
           headStyles: { fillColor: [16, 185, 129] },
-          columnStyles: { 2: { halign: 'right' }, 3: { halign: 'right', fontStyle: 'bold' } }
+          columnStyles: { 
+              1: { halign: 'right' }, 
+              2: { halign: 'right', fontStyle: 'bold' },
+              3: { halign: 'right', fontStyle: 'bold', textColor: [0, 100, 0] }
+          },
+          // Agregar Fila de Totales
+          foot: [[
+              'TOTALES', 
+              `L. ${sumCosto.toFixed(2)}`, 
+              `L. ${sumVenta.toFixed(2)}`, 
+              `L. ${sumGanancia.toFixed(2)}`
+          ]],
+          footStyles: { fillColor: [30, 41, 59], textColor: 255, fontStyle: 'bold', halign: 'right' }
       });
 
       finalY = (doc as any).lastAutoTable.finalY + 10;
 
+      // Si no es el reporte filtrado, mostramos los gastos también
+      // O si se desea mostrar siempre los gastos, dejarlo. Asumo que "Sin Recargas" se refiere solo a filtrar Ingresos de recargas.
       doc.setFontSize(11);
       doc.text("DETALLE DE GASTOS / SALIDAS", 14, finalY);
       
       const expenseRows = sessionDetails.egresos.map(e => {
-          const time = e.fechaCreacion ? new Date(e.fechaCreacion).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : '-';
-          return [time, e.descripcion, `L. ${(Number(e.monto)||0).toFixed(2)}`];
+          return [e.descripcion, `L. ${(Number(e.monto)||0).toFixed(2)}`];
       });
 
       // @ts-ignore
       doc.autoTable({
           startY: finalY + 3,
-          head: [['Hora', 'Descripción', 'Monto']],
+          head: [['Descripción', 'Monto']],
           body: expenseRows,
           theme: 'striped',
           headStyles: { fillColor: [239, 68, 68] },
-          columnStyles: { 2: { halign: 'right', fontStyle: 'bold' } }
+          columnStyles: { 1: { halign: 'right', fontStyle: 'bold' } }
       });
 
-      doc.save(`Reporte_Cierre_Admin_${selectedBox.idArqueo}.pdf`);
+      const fileName = excludeRecharges ? `Reporte_NoRecargas_${selectedBox.idArqueo}.pdf` : `Reporte_Admin_${selectedBox.idArqueo}.pdf`;
+      doc.save(fileName);
   };
 
   const handleUpdateInitial = async () => {
@@ -396,14 +439,24 @@ const AdminCashDashboard: React.FC = () => {
                            </p>
                        </div>
                        <div className="flex gap-2">
-                           {/* BOTÓN PDF DE CIERRE (Solo si cerrada) */}
+                           {/* BOTONES PDF DE CIERRE (Solo si cerrada) */}
                            {selectedBox.estadoArqueo === 'Cerrada' && (
-                               <button 
-                                   onClick={generateClosingReportPDF}
-                                   className="hidden md:flex bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded-lg text-sm font-bold items-center gap-2 shadow-sm transition-colors"
-                               >
-                                   <FileText size={16}/> Reporte Cierre
-                               </button>
+                               <>
+                                   <button 
+                                       onClick={() => generateClosingReportPDF(true)}
+                                       className="hidden md:flex bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg text-sm font-bold items-center gap-2 shadow-sm transition-colors"
+                                       title="Reporte sin incluir recargas"
+                                   >
+                                       <Printer size={16}/> PDF (Sin Recargas)
+                                   </button>
+                                   <button 
+                                       onClick={() => generateClosingReportPDF(false)}
+                                       className="hidden md:flex bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded-lg text-sm font-bold items-center gap-2 shadow-sm transition-colors"
+                                       title="Reporte completo de cierre"
+                                   >
+                                       <FileText size={16}/> Reporte Cierre
+                                   </button>
+                               </>
                            )}
                            <button onClick={() => setSelectedBox(null)} className="p-2 hover:bg-slate-200 rounded-full transition-colors"><X size={24} className="text-slate-500"/></button>
                        </div>
@@ -576,7 +629,7 @@ const AdminCashDashboard: React.FC = () => {
                                                   La caja fue cerrada el {new Date(selectedBox.fechaCierre || '').toLocaleString()}. Si esto fue un error, puede reabrirla para continuar operando.
                                               </p>
                                               <div className="flex gap-2 w-full md:w-auto">
-                                                  <button onClick={generateClosingReportPDF} className="md:hidden flex-1 bg-white border border-amber-200 text-amber-800 px-4 py-3 rounded-lg font-bold shadow-sm flex justify-center items-center gap-2">
+                                                  <button onClick={() => generateClosingReportPDF(false)} className="md:hidden flex-1 bg-white border border-amber-200 text-amber-800 px-4 py-3 rounded-lg font-bold shadow-sm flex justify-center items-center gap-2">
                                                       <FileText size={16}/> PDF
                                                   </button>
                                                   <button onClick={() => handleReopenBox(selectedBox.idArqueo)} className="flex-1 bg-amber-600 text-white px-6 py-3 rounded-lg font-bold hover:bg-amber-700 shadow-lg whitespace-nowrap">
