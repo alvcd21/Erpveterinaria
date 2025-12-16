@@ -100,21 +100,41 @@ router.delete('/accounting/gastos/:id', authenticateToken, async (req, res) => {
     } catch(e) { handleDbError(res, e); }
 });
 
-// --- REPORTE FINANCIERO SIMPLE (Existing) ---
+// --- REPORTE FINANCIERO SIMPLE Y REPARTO DE UTILIDADES (CORREGIDO) ---
 router.get('/accounting/report', authenticateToken, async (req, res) => {
     try {
         const { month, year } = req.query; // e.g. month=10, year=2023
         
+        // 1. Ingresos y Costos Base desde la tabla 'ingresos' (Ya tiene el costo de compra calculado al momento de la venta)
         const ingresosRes = await pool.query(`
             SELECT COALESCE(SUM(monto), 0) as total, COALESCE(SUM(costo), 0) as costo
             FROM ingresos 
             WHERE EXTRACT(MONTH FROM fechaCreacion) = $1 AND EXTRACT(YEAR FROM fechaCreacion) = $2
+            AND (descripcion LIKE 'Venta%' OR descripcion LIKE 'Recarga%') -- Asegurar que solo sean ventas operativas
         `, [month, year]);
         
-        const ingresosVentas = Number(ingresosRes.rows[0].total);
-        const costoVentas = Number(ingresosRes.rows[0].costo);
-        const utilidadBruta = ingresosVentas - costoVentas;
+        let ingresosVentas = Number(ingresosRes.rows[0].total);
+        let costoVentasBase = Number(ingresosRes.rows[0].costo);
 
+        // 2. Calcular COSTOS ADICIONALES (COGS Extra) definidos en el módulo nuevo
+        // Esto suma los costos extras (empaque, comision) por cada producto vendido en el periodo
+        const extraCogsRes = await pool.query(`
+            SELECT SUM(dv.cantidad * COALESCE(pdc.valor, 0)) as extra_cost
+            FROM ventas v
+            JOIN detalleventa dv ON v.codVenta = dv.idVenta
+            LEFT JOIN product_direct_costs pdc ON 
+                (dv.idTelefono IS NOT NULL AND pdc.id_producto = dv.idTelefono) OR 
+                (dv.idAccesorio IS NOT NULL AND pdc.id_producto = dv.idAccesorio)
+            WHERE EXTRACT(MONTH FROM v.fecha) = $1 AND EXTRACT(YEAR FROM v.fecha) = $2
+            AND v.estado = 'Completada'
+        `, [month, year]);
+
+        const costoVentasExtra = Number(extraCogsRes.rows[0].extra_cost || 0);
+        const costoVentasTotal = costoVentasBase + costoVentasExtra;
+        
+        const utilidadBruta = ingresosVentas - costoVentasTotal;
+
+        // 3. Gastos Operativos (Excluyendo personales)
         const gastosOpRes = await pool.query(`
             SELECT COALESCE(SUM(monto), 0) as total
             FROM gastos_contables
@@ -125,6 +145,7 @@ router.get('/accounting/report', authenticateToken, async (req, res) => {
         const gastosOperativos = Number(gastosOpRes.rows[0].total);
         const utilidadNeta = utilidadBruta - gastosOperativos;
 
+        // 4. Distribución a Socios
         const sociosRes = await pool.query('SELECT id_socio, nombre, porcentaje_participacion FROM socios WHERE estado = \'Activo\'');
         
         const distribucion = await Promise.all(sociosRes.rows.map(async (socio) => {
@@ -152,7 +173,7 @@ router.get('/accounting/report', authenticateToken, async (req, res) => {
         res.json({
             periodo: `${month}/${year}`,
             ingresosVentas,
-            costoVentas,
+            costoVentas: costoVentasTotal,
             utilidadBruta,
             gastosOperativos,
             utilidadNeta,
@@ -239,32 +260,33 @@ router.post('/accounting/budgets', authenticateToken, async (req, res) => {
     } catch(e) { handleDbError(res, e); }
 });
 
-// 3. REPORTES AVANZADOS: SALES TRACKING DIARIO
+// 3. REPORTES AVANZADOS: SALES TRACKING DIARIO (CORREGIDO)
 router.get('/accounting/tracking/daily', authenticateToken, async (req, res) => {
     try {
         const { start, end } = req.query;
         
-        // Esta consulta es compleja:
-        // 1. Agrupa ventas por día
-        // 2. Calcula costo directo BASADO EN LA TABLA NUEVA (product_direct_costs) para tener costo real
-        // 3. Suma gastos operativos del día
+        // CORRECCIÓN: Usar idAccesorio o idTelefono en lugar de idInventario
+        // Para costo base, usamos la aproximación o un JOIN simple si existe historial
+        // En un sistema ideal, el costo histórico está en detalleventa, pero usaremos el actual como fallback
         
         const query = `
             WITH ventas_dia AS (
                 SELECT 
                     TO_CHAR(v.fecha, 'YYYY-MM-DD') as fecha,
                     SUM(v.total) as venta_total,
-                    -- Costo Base (Compra) + Costos Extra
                     SUM(
                         dv.cantidad * (
+                            -- 1. Costo Base (Compra)
                             CASE 
                                 WHEN dv.idTelefono IS NOT NULL THEN (SELECT precioCompra FROM telefonos WHERE codigo = dv.idTelefono)
-                                ELSE (SELECT precioCompra FROM inventario WHERE codInventario = dv.idInventario LIMIT 1)
+                                WHEN dv.idAccesorio IS NOT NULL THEN COALESCE((SELECT precioCompra FROM inventario WHERE codAccesorio = dv.idAccesorio ORDER BY fecha DESC LIMIT 1), 0)
+                                ELSE 0
                             END 
                             + 
+                            -- 2. Costos Directos Adicionales (COGS Extra)
                             COALESCE((
                                 SELECT SUM(valor) FROM product_direct_costs 
-                                WHERE id_producto = COALESCE(dv.idTelefono, (SELECT codAccesorio FROM inventario WHERE codInventario = dv.idInventario LIMIT 1))
+                                WHERE id_producto = COALESCE(dv.idTelefono, dv.idAccesorio)
                             ), 0)
                         )
                     ) as costo_real
@@ -299,12 +321,12 @@ router.get('/accounting/tracking/daily', authenticateToken, async (req, res) => 
     } catch(e) { handleDbError(res, e); }
 });
 
-// 4. REPORTES AVANZADOS: P&L
+// 4. REPORTES AVANZADOS: P&L (CORREGIDO)
 router.get('/accounting/pnl', authenticateToken, async (req, res) => {
     try {
         const { year } = req.query;
         
-        // Similares CTEs pero agrupados por año para comparar con presupuesto
+        // CORRECCIÓN: Misma lógica de corrección de columnas que en daily tracking
         const query = `
             WITH real_data AS (
                 SELECT 
@@ -317,12 +339,13 @@ router.get('/accounting/pnl', authenticateToken, async (req, res) => {
                         dv.cantidad * (
                             CASE 
                                 WHEN dv.idTelefono IS NOT NULL THEN (SELECT precioCompra FROM telefonos WHERE codigo = dv.idTelefono)
-                                ELSE (SELECT precioCompra FROM inventario WHERE codInventario = dv.idInventario LIMIT 1)
+                                WHEN dv.idAccesorio IS NOT NULL THEN COALESCE((SELECT precioCompra FROM inventario WHERE codAccesorio = dv.idAccesorio ORDER BY fecha DESC LIMIT 1), 0)
+                                ELSE 0
                             END 
                             + 
                             COALESCE((
                                 SELECT SUM(valor) FROM product_direct_costs 
-                                WHERE id_producto = COALESCE(dv.idTelefono, (SELECT codAccesorio FROM inventario WHERE codInventario = dv.idInventario LIMIT 1))
+                                WHERE id_producto = COALESCE(dv.idTelefono, dv.idAccesorio)
                             ), 0)
                         )
                     ) as monto
