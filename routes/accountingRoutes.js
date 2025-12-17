@@ -118,6 +118,7 @@ router.get('/accounting/report', authenticateToken, async (req, res) => {
 
         // 2. Calcular COSTOS ADICIONALES (COGS Extra) definidos en el módulo nuevo
         // Esto suma los costos extras (empaque, comision) por cada producto vendido en el periodo
+        // FIX: Usar idTelefono y idAccesorio, NO idInventario
         const extraCogsRes = await pool.query(`
             SELECT SUM(dv.cantidad * COALESCE(pdc.valor, 0)) as extra_cost
             FROM ventas v
@@ -265,10 +266,7 @@ router.get('/accounting/tracking/daily', authenticateToken, async (req, res) => 
     try {
         const { start, end } = req.query;
         
-        // CORRECCIÓN: Usar idAccesorio o idTelefono en lugar de idInventario
-        // Para costo base, usamos la aproximación o un JOIN simple si existe historial
-        // En un sistema ideal, el costo histórico está en detalleventa, pero usaremos el actual como fallback
-        
+        // CORRECCIÓN CRÍTICA: Usar idAccesorio o idTelefono en lugar de idInventario que no existe en detalleventa
         const query = `
             WITH ventas_dia AS (
                 SELECT 
@@ -326,7 +324,7 @@ router.get('/accounting/pnl', authenticateToken, async (req, res) => {
     try {
         const { year } = req.query;
         
-        // CORRECCIÓN: Misma lógica de corrección de columnas que en daily tracking
+        // CORRECCIÓN: Misma corrección de columnas idInventario -> idAccesorio
         const query = `
             WITH real_data AS (
                 SELECT 

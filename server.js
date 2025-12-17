@@ -97,9 +97,10 @@ const initDB = async () => {
                 UNIQUE(mes, anio, categoria)
             );
             
-            -- Migraciones seguras
+            -- MIGRACIONES SEGURAS (CORRECCION ERRORES 500)
             DO $$ 
             BEGIN 
+                -- 1. Columnas para Etiquetas
                 BEGIN
                     ALTER TABLE label_templates ADD COLUMN category VARCHAR(50) DEFAULT 'GENERAL';
                 EXCEPTION WHEN duplicate_column THEN NULL; END;
@@ -110,6 +111,27 @@ const initDB = async () => {
 
                 BEGIN
                     ALTER TABLE label_templates ADD COLUMN data_source VARCHAR(50) DEFAULT 'NONE';
+                EXCEPTION WHEN duplicate_column THEN NULL; END;
+
+                -- 2. Columnas CRÍTICAS para Cierre de Caja (Arregla error arqueo/close)
+                BEGIN
+                    ALTER TABLE arqueo ADD COLUMN saldoTigoFinal NUMERIC(10,2) DEFAULT 0;
+                EXCEPTION WHEN duplicate_column THEN NULL; END;
+
+                BEGIN
+                    ALTER TABLE arqueo ADD COLUMN saldoClaroFinal NUMERIC(10,2) DEFAULT 0;
+                EXCEPTION WHEN duplicate_column THEN NULL; END;
+
+                BEGIN
+                    ALTER TABLE arqueo ADD COLUMN totalCostos NUMERIC(10,2) DEFAULT 0;
+                EXCEPTION WHEN duplicate_column THEN NULL; END;
+                
+                BEGIN
+                    ALTER TABLE arqueo ADD COLUMN TotalGastos NUMERIC(10,2) DEFAULT 0;
+                EXCEPTION WHEN duplicate_column THEN NULL; END;
+
+                BEGIN
+                    ALTER TABLE arqueo ADD COLUMN ganancia NUMERIC(10,2) DEFAULT 0;
                 EXCEPTION WHEN duplicate_column THEN NULL; END;
             END $$;
 
