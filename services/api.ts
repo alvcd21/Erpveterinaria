@@ -119,8 +119,8 @@ export const CashService = {
   deleteIngreso: (id: string) => request(`/ingresos/${id}`, { method: 'DELETE' }),
 
   getEgresos: (idCaja: string, fecha?: string) => request<Egreso[]>(`/egresos?idCaja=${idCaja}${fecha ? `&fecha=${fecha}` : ''}`),
-  createEgreso: (data: { descripcion: string, monto: number, fechaCreacion?: string }) => request('/egresos', { method: 'POST', body: JSON.stringify(data) }),
-  updateEgreso: (id: string, data: { descripcion: string, monto: number }) => request(`/egresos/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  createEgreso: (data: { descripcion: string, monto: number, fechaCreacion?: string, categoria?: string }) => request('/egresos', { method: 'POST', body: JSON.stringify(data) }),
+  updateEgreso: (id: string, data: { descripcion: string, monto: number, categoria?: string }) => request(`/egresos/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteEgreso: (id: string) => request(`/egresos/${id}`, { method: 'DELETE' }),
 
   getSaldosToday: (fecha?: string) => request<Saldo[]>(`/saldos/today${fecha ? `?fecha=${fecha}` : ''}`),
@@ -174,20 +174,17 @@ export const ConfigService = {
 };
 
 export const AccountingService = {
-  // Existing
   getSocios: () => request<Socio[]>('/accounting/socios'),
   createSocio: (data: Partial<Socio>) => request('/accounting/socios', { method: 'POST', body: JSON.stringify(data) }),
   updateSocio: (id: number, data: Partial<Socio>) => request(`/accounting/socios/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteSocio: (id: number) => request(`/accounting/socios/${id}`, { method: 'DELETE' }),
 
-  getGastosContables: (startDate: string, endDate: string) => request<GastoContable[]>(`/accounting/gastos?start=${startDate}&end=${endDate}`),
-  createGastoContable: (data: Partial<GastoContable>) => request('/accounting/gastos', { method: 'POST', body: JSON.stringify(data) }),
-  updateGastoContable: (id: number, data: Partial<GastoContable>) => request(`/accounting/gastos/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  deleteGastoContable: (id: number) => request(`/accounting/gastos/${id}`, { method: 'DELETE' }),
+  getAuditTransactions: () => request<any[]>('/accounting/audit/transactions'),
+  updateAuditTransaction: (tipo: string, id: string, data: any) => request(`/accounting/audit/transactions/${tipo}/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteAuditTransaction: (tipo: string, id: string) => request(`/accounting/audit/transactions/${tipo}/${id}`, { method: 'DELETE' }),
 
-  getFinancialReport: (month: number, year: number) => request<ReporteFinanciero>(`/accounting/report?month=${month}&year=${year}`),
+  getProfitabilityReport: (date: string) => request<any>(`/accounting/report/profitability?date=${date}`),
 
-  // --- NEW ADVANCED METHODS ---
   getCostComponents: () => request<ComponenteCosto[]>('/accounting/cogs/components'),
   createCostComponent: (nombre: string, naturaleza: string) => request('/accounting/cogs/components', { method: 'POST', body: JSON.stringify({ nombre, naturaleza }) }),
   

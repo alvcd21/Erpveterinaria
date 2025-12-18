@@ -1,10 +1,70 @@
 
 const express = require('express');
 const router = express.Router();
-const { pool, handleDbError } = require('../config/db');
+const { pool, handleDbError, updateArqueoBalance } = require('../config/db');
 const { authenticateToken } = require('../middleware/auth');
 
-// --- SOCIOS (Existing) ---
+// --- AUDITORÍA DE MOVIMIENTOS (Caja e Ingresos Manuales) ---
+router.get('/accounting/audit/transactions', authenticateToken, async (req, res) => {
+    try {
+        const { start, end, idCaja } = req.query;
+        let query = `
+            (SELECT 
+                'INGRESO' as tipo, idIngreso as id, idCaja as "idCaja", descripcion, monto, costo, 
+                TO_CHAR(fechaCreacion, 'YYYY-MM-DD HH24:MI:SS') as fecha, estado, NULL as categoria
+             FROM ingresos WHERE 1=1)
+            UNION ALL
+            (SELECT 
+                'EGRESO' as tipo, idegresos as id, idCaja as "idCaja", descripcion, monto, 0 as costo, 
+                TO_CHAR(fechaCreacion, 'YYYY-MM-DD HH24:MI:SS') as fecha, estado, categoria
+             FROM egresos WHERE 1=1)
+            ORDER BY fecha DESC
+        `;
+        // Nota: En un sistema real añadiríamos filtros dinámicos de fecha aquí
+        const result = await pool.query(query);
+        res.json(result.rows);
+    } catch(e) { handleDbError(res, e); }
+});
+
+// Editar un movimiento desde Auditoría (Afecta Arqueo)
+router.put('/accounting/audit/transactions/:tipo/:id', authenticateToken, async (req, res) => {
+    try {
+        const { tipo, id } = req.params;
+        const { descripcion, monto, costo, categoria } = req.body;
+        let idCaja = null;
+
+        if (tipo === 'INGRESO') {
+            const r = await pool.query('UPDATE ingresos SET descripcion=$1, monto=$2, costo=$3 WHERE idIngreso=$4 RETURNING idCaja', [descripcion, monto, costo, id]);
+            idCaja = r.rows[0]?.idcaja;
+        } else {
+            const r = await pool.query('UPDATE egresos SET descripcion=$1, monto=$2, categoria=$3 WHERE idegresos=$4 RETURNING idCaja', [descripcion, monto, categoria, id]);
+            idCaja = r.rows[0]?.idcaja;
+        }
+
+        if (idCaja) await updateArqueoBalance(idCaja);
+        res.json({ message: 'Movimiento actualizado y caja sincronizada' });
+    } catch(e) { handleDbError(res, e); }
+});
+
+router.delete('/accounting/audit/transactions/:tipo/:id', authenticateToken, async (req, res) => {
+    try {
+        const { tipo, id } = req.params;
+        let idCaja = null;
+
+        if (tipo === 'INGRESO') {
+            const r = await pool.query('DELETE FROM ingresos WHERE idIngreso=$1 RETURNING idCaja', [id]);
+            idCaja = r.rows[0]?.idcaja;
+        } else {
+            const r = await pool.query('DELETE FROM egresos WHERE idegresos=$1 RETURNING idCaja', [id]);
+            idCaja = r.rows[0]?.idcaja;
+        }
+
+        if (idCaja) await updateArqueoBalance(idCaja);
+        res.json({ message: 'Movimiento eliminado y caja sincronizada' });
+    } catch(e) { handleDbError(res, e); }
+});
+
+// --- REPORTES FINANCIEROS Y SOCIOS ---
 router.get('/accounting/socios', authenticateToken, async (req, res) => {
     try {
         const result = await pool.query(`
@@ -44,351 +104,63 @@ router.delete('/accounting/socios/:id', authenticateToken, async (req, res) => {
     } catch(e) { handleDbError(res, e); }
 });
 
-// --- GASTOS CONTABLES (Existing) ---
-router.get('/accounting/gastos', authenticateToken, async (req, res) => {
+// REPORTE DE GANANCIA NETA REAL (DAILY/MONTHLY)
+router.get('/accounting/report/profitability', authenticateToken, async (req, res) => {
     try {
-        const { start, end } = req.query;
-        let query = `
-            SELECT 
-                g.id_gasto as "idGasto", g.descripcion, g.monto, TO_CHAR(g.fecha, 'YYYY-MM-DD') as "fecha", 
-                g.categoria, g.id_socio_asignado as "idSocioAsignado", g.origen_fondo as "origenFondo",
-                s.nombre as "nombreSocio"
-            FROM gastos_contables g
-            LEFT JOIN socios s ON g.id_socio_asignado = s.id_socio
-            WHERE 1=1
-        `;
-        const params = [];
-        if(start && end) {
-            query += ` AND g.fecha BETWEEN $1 AND $2`;
-            params.push(start, end);
+        const { date, month, year } = req.query;
+        let whereIngresos = `1=1`, whereEgresos = `1=1`;
+        let params = [];
+
+        if (date) {
+            whereIngresos += ` AND TO_CHAR(fechaCreacion, 'YYYY-MM-DD') = $1`;
+            whereEgresos += ` AND TO_CHAR(fechaCreacion, 'YYYY-MM-DD') = $1`;
+            params.push(date);
+        } else if (month && year) {
+            whereIngresos += ` AND EXTRACT(MONTH FROM fechaCreacion) = $1 AND EXTRACT(YEAR FROM fechaCreacion) = $2`;
+            whereEgresos += ` AND EXTRACT(MONTH FROM fechaCreacion) = $1 AND EXTRACT(YEAR FROM fechaCreacion) = $2`;
+            params.push(month, year);
         }
-        query += ` ORDER BY g.fecha DESC`;
-        const result = await pool.query(query, params);
-        res.json(result.rows);
-    } catch(e) { handleDbError(res, e); }
-});
 
-router.post('/accounting/gastos', authenticateToken, async (req, res) => {
-    try {
-        const { descripcion, monto, fecha, categoria, idSocioAsignado, origenFondo } = req.body;
-        await pool.query(
-            `INSERT INTO gastos_contables (descripcion, monto, fecha, categoria, id_socio_asignado, origen_fondo) 
-             VALUES ($1, $2, $3, $4, $5, $6)`,
-            [descripcion, monto, fecha, categoria, idSocioAsignado || null, origenFondo]
-        );
-        res.status(201).json({ message: 'Gasto registrado' });
-    } catch(e) { handleDbError(res, e); }
-});
+        const ingRes = await pool.query(`
+            SELECT 
+                COALESCE(SUM(monto), 0) as ingresos_totales,
+                COALESCE(SUM(costo), 0) as costo_productos,
+                COALESCE(SUM(monto - costo), 0) as utilidad_bruta
+            FROM ingresos WHERE ${whereIngresos}
+        `, params);
 
-router.put('/accounting/gastos/:id', authenticateToken, async (req, res) => {
-    try {
-        const { descripcion, monto, fecha, categoria, idSocioAsignado, origenFondo } = req.body;
-        await pool.query(
-            `UPDATE gastos_contables 
-             SET descripcion=$1, monto=$2, fecha=$3, categoria=$4, id_socio_asignado=$5, origen_fondo=$6 
-             WHERE id_gasto=$7`,
-            [descripcion, monto, fecha, categoria, idSocioAsignado || null, origenFondo, req.params.id]
-        );
-        res.json({ message: 'Gasto actualizado' });
-    } catch(e) { handleDbError(res, e); }
-});
+        const egrRes = await pool.query(`
+            SELECT 
+                COALESCE(SUM(monto), 0) as gastos_operativos
+            FROM egresos 
+            WHERE ${whereEgresos} AND categoria = 'Gasto Operativo'
+        `, params);
 
-router.delete('/accounting/gastos/:id', authenticateToken, async (req, res) => {
-    try {
-        await pool.query('DELETE FROM gastos_contables WHERE id_gasto=$1', [req.params.id]);
-        res.json({ message: 'Gasto eliminado' });
-    } catch(e) { handleDbError(res, e); }
-});
+        const invRes = await pool.query(`
+            SELECT 
+                COALESCE(SUM(monto), 0) as compras_inventario
+            FROM egresos 
+            WHERE ${whereEgresos} AND categoria = 'Compra de Producto'
+        `, params);
 
-// --- REPORTE FINANCIERO SIMPLE Y REPARTO DE UTILIDADES (CORREGIDO) ---
-router.get('/accounting/report', authenticateToken, async (req, res) => {
-    try {
-        const { month, year } = req.query; // e.g. month=10, year=2023
-        
-        // 1. Ingresos y Costos Base desde la tabla 'ingresos' (Ya tiene el costo de compra calculado al momento de la venta)
-        const ingresosRes = await pool.query(`
-            SELECT COALESCE(SUM(monto), 0) as total, COALESCE(SUM(costo), 0) as costo
-            FROM ingresos 
-            WHERE EXTRACT(MONTH FROM fechaCreacion) = $1 AND EXTRACT(YEAR FROM fechaCreacion) = $2
-            AND (descripcion LIKE 'Venta%' OR descripcion LIKE 'Recarga%') -- Asegurar que solo sean ventas operativas
-        `, [month, year]);
-        
-        let ingresosVentas = Number(ingresosRes.rows[0].total);
-        let costoVentasBase = Number(ingresosRes.rows[0].costo);
+        const data = {
+            ingresos: Number(ingRes.rows[0].ingresos_totales),
+            costoMercancia: Number(ingRes.rows[0].costo_productos),
+            utilidadBruta: Number(ingRes.rows[0].utilidad_bruta),
+            gastosOperativos: Number(egrRes.rows[0].gastos_operativos),
+            comprasInventario: Number(invRes.rows[0].compras_inventario),
+            utilidadNeta: Number(ingRes.rows[0].utilidad_bruta) - Number(egrRes.rows[0].gastos_operativos)
+        };
 
-        // 2. Calcular COSTOS ADICIONALES (COGS Extra) definidos en el módulo nuevo
-        // Esto suma los costos extras (empaque, comision) por cada producto vendido en el periodo
-        // FIX: Usar idTelefono y idAccesorio, NO idInventario
-        const extraCogsRes = await pool.query(`
-            SELECT SUM(dv.cantidad * COALESCE(pdc.valor, 0)) as extra_cost
-            FROM ventas v
-            JOIN detalleventa dv ON v.codVenta = dv.idVenta
-            LEFT JOIN product_direct_costs pdc ON 
-                (dv.idTelefono IS NOT NULL AND pdc.id_producto = dv.idTelefono) OR 
-                (dv.idAccesorio IS NOT NULL AND pdc.id_producto = dv.idAccesorio)
-            WHERE EXTRACT(MONTH FROM v.fecha) = $1 AND EXTRACT(YEAR FROM v.fecha) = $2
-            AND v.estado = 'Completada'
-        `, [month, year]);
-
-        const costoVentasExtra = Number(extraCogsRes.rows[0].extra_cost || 0);
-        const costoVentasTotal = costoVentasBase + costoVentasExtra;
-        
-        const utilidadBruta = ingresosVentas - costoVentasTotal;
-
-        // 3. Gastos Operativos (Excluyendo personales)
-        const gastosOpRes = await pool.query(`
-            SELECT COALESCE(SUM(monto), 0) as total
-            FROM gastos_contables
-            WHERE EXTRACT(MONTH FROM fecha) = $1 AND EXTRACT(YEAR FROM fecha) = $2
-            AND id_socio_asignado IS NULL
-        `, [month, year]);
-        
-        const gastosOperativos = Number(gastosOpRes.rows[0].total);
-        const utilidadNeta = utilidadBruta - gastosOperativos;
-
-        // 4. Distribución a Socios
-        const sociosRes = await pool.query('SELECT id_socio, nombre, porcentaje_participacion FROM socios WHERE estado = \'Activo\'');
-        
-        const distribucion = await Promise.all(sociosRes.rows.map(async (socio) => {
-            const porcentaje = Number(socio.porcentaje_participacion);
-            const utilidadCorrespondiente = (utilidadNeta * porcentaje) / 100;
-
-            const gastosPersonalesRes = await pool.query(`
-                SELECT COALESCE(SUM(monto), 0) as total
-                FROM gastos_contables
-                WHERE EXTRACT(MONTH FROM fecha) = $1 AND EXTRACT(YEAR FROM fecha) = $2
-                AND id_socio_asignado = $3
-            `, [month, year, socio.id_socio]);
-            
-            const gastosPersonales = Number(gastosPersonalesRes.rows[0].total);
-
-            return {
-                socio: socio.nombre,
-                porcentaje: porcentaje,
-                utilidadCorrespondiente: utilidadCorrespondiente,
-                gastosPersonalesDeducidos: gastosPersonales,
-                pagoFinal: utilidadCorrespondiente - gastosPersonales
-            };
+        // Distribución a socios basada en utilidad neta
+        const socios = await pool.query('SELECT nombre, porcentaje_participacion FROM socios WHERE estado = \'Activo\'');
+        data.distribucion = socios.rows.map(s => ({
+            socio: s.nombre,
+            porcentaje: s.porcentaje_participacion,
+            monto: (data.utilidadNeta * (s.porcentaje_participacion / 100))
         }));
 
-        res.json({
-            periodo: `${month}/${year}`,
-            ingresosVentas,
-            costoVentas: costoVentasTotal,
-            utilidadBruta,
-            gastosOperativos,
-            utilidadNeta,
-            distribucion
-        });
-
-    } catch(e) { handleDbError(res, e); }
-});
-
-// ==========================================
-// --- ADVANCED ACCOUNTING (COGS & P&L) ---
-// ==========================================
-
-// 1. GESTIÓN DE COSTOS DIRECTOS (COGS)
-router.get('/accounting/cogs/components', authenticateToken, async (req, res) => {
-    try {
-        const r = await pool.query('SELECT * FROM cost_components ORDER BY nombre');
-        res.json(r.rows);
-    } catch(e) { handleDbError(res, e); }
-});
-
-router.post('/accounting/cogs/components', authenticateToken, async (req, res) => {
-    try {
-        const { nombre, naturaleza } = req.body;
-        await pool.query('INSERT INTO cost_components (nombre, naturaleza) VALUES ($1, $2)', [nombre, naturaleza]);
-        res.status(201).json({ message: 'Componente creado' });
-    } catch(e) { handleDbError(res, e); }
-});
-
-router.get('/accounting/cogs/product/:id', authenticateToken, async (req, res) => {
-    try {
-        const r = await pool.query(`
-            SELECT pdc.id, pdc.id_producto as "idProducto", pdc.tipo_producto as "tipoProducto", 
-                   pdc.id_componente as "idComponente", pdc.valor, cc.nombre as "nombreComponente"
-            FROM product_direct_costs pdc
-            JOIN cost_components cc ON pdc.id_componente = cc.id
-            WHERE pdc.id_producto = $1
-        `, [req.params.id]);
-        res.json(r.rows);
-    } catch(e) { handleDbError(res, e); }
-});
-
-router.post('/accounting/cogs/product', authenticateToken, async (req, res) => {
-    try {
-        const { idProducto, tipoProducto, idComponente, valor } = req.body;
-        await pool.query(`
-            INSERT INTO product_direct_costs (id_producto, tipo_producto, id_componente, valor)
-            VALUES ($1, $2, $3, $4)
-            ON CONFLICT (id_producto, id_componente) DO UPDATE SET valor = $4
-        `, [idProducto, tipoProducto, idComponente, valor]);
-        res.json({ message: 'Costo asignado' });
-    } catch(e) { handleDbError(res, e); }
-});
-
-router.delete('/accounting/cogs/cost/:id', authenticateToken, async (req, res) => {
-    try {
-        await pool.query('DELETE FROM product_direct_costs WHERE id = $1', [req.params.id]);
-        res.json({ message: 'Costo eliminado' });
-    } catch(e) { handleDbError(res, e); }
-});
-
-// 2. PRESUPUESTOS (BUDGETS)
-router.get('/accounting/budgets', authenticateToken, async (req, res) => {
-    try {
-        const { year } = req.query;
-        const r = await pool.query(`
-            SELECT id, mes, anio, categoria, monto_base as "montoBase", monto_mejor as "montoMejor", monto_peor as "montoPeor"
-            FROM financial_budgets WHERE anio = $1
-        `, [year]);
-        res.json(r.rows);
-    } catch(e) { handleDbError(res, e); }
-});
-
-router.post('/accounting/budgets', authenticateToken, async (req, res) => {
-    try {
-        const { mes, anio, categoria, montoBase, montoMejor, montoPeor } = req.body;
-        await pool.query(`
-            INSERT INTO financial_budgets (mes, anio, categoria, monto_base, monto_mejor, monto_peor)
-            VALUES ($1, $2, $3, $4, $5, $6)
-            ON CONFLICT (mes, anio, categoria) DO UPDATE 
-            SET monto_base = $4, monto_mejor = $5, monto_peor = $6
-        `, [mes, anio, categoria, montoBase, montoMejor, montoPeor]);
-        res.json({ message: 'Presupuesto guardado' });
-    } catch(e) { handleDbError(res, e); }
-});
-
-// 3. REPORTES AVANZADOS: SALES TRACKING DIARIO (CORREGIDO)
-router.get('/accounting/tracking/daily', authenticateToken, async (req, res) => {
-    try {
-        const { start, end } = req.query;
-        
-        // CORRECCIÓN CRÍTICA: Usar idAccesorio o idTelefono en lugar de idInventario que no existe en detalleventa
-        const query = `
-            WITH ventas_dia AS (
-                SELECT 
-                    TO_CHAR(v.fecha, 'YYYY-MM-DD') as fecha,
-                    SUM(v.total) as venta_total,
-                    SUM(
-                        dv.cantidad * (
-                            -- 1. Costo Base (Compra)
-                            CASE 
-                                WHEN dv.idTelefono IS NOT NULL THEN (SELECT precioCompra FROM telefonos WHERE codigo = dv.idTelefono)
-                                WHEN dv.idAccesorio IS NOT NULL THEN COALESCE((SELECT precioCompra FROM inventario WHERE codAccesorio = dv.idAccesorio ORDER BY fecha DESC LIMIT 1), 0)
-                                ELSE 0
-                            END 
-                            + 
-                            -- 2. Costos Directos Adicionales (COGS Extra)
-                            COALESCE((
-                                SELECT SUM(valor) FROM product_direct_costs 
-                                WHERE id_producto = COALESCE(dv.idTelefono, dv.idAccesorio)
-                            ), 0)
-                        )
-                    ) as costo_real
-                FROM ventas v
-                JOIN detalleventa dv ON v.codVenta = dv.idVenta
-                WHERE v.fecha BETWEEN $1 AND $2 AND v.estado = 'Completada'
-                GROUP BY 1
-            ),
-            gastos_dia AS (
-                SELECT 
-                    TO_CHAR(fecha, 'YYYY-MM-DD') as fecha,
-                    SUM(monto) as gastos_operativos
-                FROM gastos_contables
-                WHERE fecha BETWEEN $1 AND $2 AND (categoria = 'Operativo' OR categoria = 'Administrativo' OR categoria = 'Ventas')
-                GROUP BY 1
-            )
-            SELECT 
-                COALESCE(v.fecha, g.fecha) as fecha,
-                TO_CHAR(COALESCE(v.fecha, g.fecha)::date, 'Day') as "diaSemana",
-                COALESCE(v.venta_total, 0) as "ventaTotal",
-                COALESCE(v.costo_real, 0) as "costosDirectos",
-                COALESCE(g.gastos_operativos, 0) as "gastosOperativos",
-                (COALESCE(v.venta_total, 0) - COALESCE(v.costo_real, 0)) as "gananciaBruta",
-                (COALESCE(v.venta_total, 0) - COALESCE(v.costo_real, 0) - COALESCE(g.gastos_operativos, 0)) as "gananciaNeta"
-            FROM ventas_dia v
-            FULL OUTER JOIN gastos_dia g ON v.fecha = g.fecha
-            ORDER BY 1 DESC
-        `;
-        
-        const result = await pool.query(query, [start, end]);
-        res.json(result.rows);
-    } catch(e) { handleDbError(res, e); }
-});
-
-// 4. REPORTES AVANZADOS: P&L (CORREGIDO)
-router.get('/accounting/pnl', authenticateToken, async (req, res) => {
-    try {
-        const { year } = req.query;
-        
-        // CORRECCIÓN: Misma corrección de columnas idInventario -> idAccesorio
-        const query = `
-            WITH real_data AS (
-                SELECT 
-                    'Ventas' as categoria, SUM(v.total) as monto
-                FROM ventas v WHERE EXTRACT(YEAR FROM v.fecha) = $1 AND v.estado = 'Completada'
-                UNION ALL
-                SELECT 
-                    'CostoVentas' as categoria,
-                    SUM(
-                        dv.cantidad * (
-                            CASE 
-                                WHEN dv.idTelefono IS NOT NULL THEN (SELECT precioCompra FROM telefonos WHERE codigo = dv.idTelefono)
-                                WHEN dv.idAccesorio IS NOT NULL THEN COALESCE((SELECT precioCompra FROM inventario WHERE codAccesorio = dv.idAccesorio ORDER BY fecha DESC LIMIT 1), 0)
-                                ELSE 0
-                            END 
-                            + 
-                            COALESCE((
-                                SELECT SUM(valor) FROM product_direct_costs 
-                                WHERE id_producto = COALESCE(dv.idTelefono, dv.idAccesorio)
-                            ), 0)
-                        )
-                    ) as monto
-                FROM ventas v JOIN detalleventa dv ON v.codVenta = dv.idVenta
-                WHERE EXTRACT(YEAR FROM v.fecha) = $1 AND v.estado = 'Completada'
-                UNION ALL
-                SELECT 
-                    'GastosOperativos' as categoria, SUM(monto) as monto
-                FROM gastos_contables
-                WHERE EXTRACT(YEAR FROM fecha) = $1 AND (categoria = 'Operativo' OR categoria = 'Administrativo' OR categoria = 'Ventas')
-            ),
-            budget_data AS (
-                SELECT categoria, SUM(monto_base) as presupuesto
-                FROM financial_budgets WHERE anio = $1
-                GROUP BY 1
-            )
-            SELECT 
-                COALESCE(r.categoria, b.categoria) as concepto,
-                COALESCE(r.monto, 0) as real,
-                COALESCE(b.presupuesto, 0) as presupuesto,
-                (COALESCE(r.monto, 0) - COALESCE(b.presupuesto, 0)) as diferencia
-            FROM real_data r
-            FULL OUTER JOIN budget_data b ON r.categoria = b.categoria
-        `;
-        
-        const result = await pool.query(query, [year]);
-        
-        // Post-processing to format P&L structure
-        const map = result.rows.reduce((acc, row) => ({...acc, [row.concepto]: row}), {});
-        
-        const ventas = map['Ventas'] || {real:0, presupuesto:0, diferencia:0};
-        const cogs = map['CostoVentas'] || {real:0, presupuesto:0, diferencia:0};
-        const gastos = map['GastosOperativos'] || {real:0, presupuesto:0, diferencia:0};
-        
-        const pnl = [
-            { concepto: 'Ingreso por Ventas', ...ventas },
-            { concepto: '(-) Costo de Ventas (COGS)', real: cogs.real, presupuesto: cogs.presupuesto, diferencia: cogs.diferencia },
-            { concepto: '(=) Utilidad Bruta', real: ventas.real - cogs.real, presupuesto: ventas.presupuesto - cogs.presupuesto, diferencia: (ventas.real-cogs.real)-(ventas.presupuesto-cogs.presupuesto), isTotal: true },
-            { concepto: '(-) Gastos Operativos', ...gastos },
-            { concepto: '(=) UTILIDAD NETA', real: (ventas.real-cogs.real)-gastos.real, presupuesto: (ventas.presupuesto-cogs.presupuesto)-gastos.presupuesto, diferencia: 0, isTotal: true }
-        ];
-        // Recalc diff for Net Profit
-        pnl[4].diferencia = pnl[4].real - pnl[4].presupuesto;
-
-        res.json(pnl);
+        res.json(data);
     } catch(e) { handleDbError(res, e); }
 });
 

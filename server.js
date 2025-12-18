@@ -97,10 +97,15 @@ const initDB = async () => {
                 UNIQUE(mes, anio, categoria)
             );
             
-            -- MIGRACIONES SEGURAS (CORRECCION ERRORES 500)
+            -- MIGRACIONES SEGURAS (CORRECCION ERRORES 500 Y MEJORAS)
             DO $$ 
             BEGIN 
-                -- 1. Columnas para Etiquetas
+                -- 1. Columnas para Egresos (Categorización solicitada)
+                BEGIN
+                    ALTER TABLE egresos ADD COLUMN categoria VARCHAR(50) DEFAULT 'Gasto Operativo';
+                EXCEPTION WHEN duplicate_column THEN NULL; END;
+
+                -- 2. Columnas para Etiquetas
                 BEGIN
                     ALTER TABLE label_templates ADD COLUMN category VARCHAR(50) DEFAULT 'GENERAL';
                 EXCEPTION WHEN duplicate_column THEN NULL; END;
@@ -113,7 +118,7 @@ const initDB = async () => {
                     ALTER TABLE label_templates ADD COLUMN data_source VARCHAR(50) DEFAULT 'NONE';
                 EXCEPTION WHEN duplicate_column THEN NULL; END;
 
-                -- 2. Columnas CRÍTICAS para Cierre de Caja (Arregla error arqueo/close)
+                -- 3. Columnas CRÍTICAS para Cierre de Caja (Arregla error arqueo/close)
                 BEGIN
                     ALTER TABLE arqueo ADD COLUMN saldoTigoFinal NUMERIC(10,2) DEFAULT 0;
                 EXCEPTION WHEN duplicate_column THEN NULL; END;
