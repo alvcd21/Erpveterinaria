@@ -38,57 +38,56 @@ export const AdminService = {
   createUser: (data: any) => request('/users', { method: 'POST', body: JSON.stringify(data) }),
   updateUser: (id: string, data: any) => request(`/users/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteUser: (id: string) => request(`/users/${id}`, { method: 'DELETE' }),
-
   getEmpleados: () => request<Empleado[]>('/empleados'),
+  // Add missing Empleado CRUD methods
   createEmpleado: (data: any) => request('/empleados', { method: 'POST', body: JSON.stringify(data) }),
   updateEmpleado: (id: string, data: any) => request(`/empleados/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteEmpleado: (id: string) => request(`/empleados/${id}`, { method: 'DELETE' }),
-
   getRoles: () => request<Rol[]>('/roles'),
+  // Add missing Rol CRUD methods
   createRol: (data: any) => request('/roles', { method: 'POST', body: JSON.stringify(data) }),
   updateRol: (id: string, data: any) => request(`/roles/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteRol: (id: string) => request(`/roles/${id}`, { method: 'DELETE' }),
-
   getCajas: () => request<Caja[]>('/cajas'),
+  // Add missing Caja CRUD methods
   createCaja: (nombre: string) => request('/cajas', { method: 'POST', body: JSON.stringify({ nombre }) }),
   updateCaja: (id: string, data: any) => request(`/cajas/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteCaja: (id: string) => request(`/cajas/${id}`, { method: 'DELETE' }),
-
   getPermisos: () => request<Permiso[]>('/permisos'),
   getSchema: () => request<any>('/schema'),
 };
 
 export const InventoryService = {
   getTelefonos: () => request<Telefono[]>('/inventory/telefonos'),
+  // Add missing Telefono CRUD methods
   createTelefono: (data: any) => request('/inventory/telefonos', { method: 'POST', body: JSON.stringify(data) }),
   updateTelefono: (id: string, data: any) => request(`/inventory/telefonos/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteTelefono: (id: string) => request(`/inventory/telefonos/${id}`, { method: 'DELETE' }),
-
   getStockAccesorios: () => request<Inventario[]>('/inventory/stock'),
+  // Add missing Stock CRUD methods
   createStock: (data: any) => request('/inventory/stock', { method: 'POST', body: JSON.stringify(data) }),
   updateStock: (id: string, data: any) => request(`/inventory/stock/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteStock: (id: string) => request(`/inventory/stock/${id}`, { method: 'DELETE' }),
-
   getAccesoriosMaster: () => request<Accesorio[]>('/inventory/accesorios-master'),
+  // Add missing AccesorioMaster CRUD methods
   createAccesorioMaster: (data: any) => request('/inventory/accesorios-master', { method: 'POST', body: JSON.stringify(data) }),
   updateAccesorioMaster: (id: string, data: any) => request(`/inventory/accesorios-master/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteAccesorioMaster: (id: string) => request(`/inventory/accesorios-master/${id}`, { method: 'DELETE' }),
-
   getCategorias: () => request<Categoria[]>('/inventory/categorias'),
+  // Add missing Categoria CRUD methods
   createCategoria: (data: any) => request('/inventory/categorias', { method: 'POST', body: JSON.stringify(data) }),
   updateCategoria: (id: string, data: any) => request(`/inventory/categorias/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteCategoria: (id: string) => request(`/inventory/categorias/${id}`, { method: 'DELETE' }),
-
   getUbicaciones: () => request<Ubicacion[]>('/inventory/ubicaciones'),
+  // Add missing Ubicacion CRUD methods
   createUbicacion: (data: any) => request('/inventory/ubicaciones', { method: 'POST', body: JSON.stringify(data) }),
   updateUbicacion: (id: string, data: any) => request(`/inventory/ubicaciones/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteUbicacion: (id: string) => request(`/inventory/ubicaciones/${id}`, { method: 'DELETE' }),
-
   getProveedores: () => request<Proveedor[]>('/proveedores'),
+  // Add missing Proveedor CRUD methods
   createProveedor: (data: any) => request('/proveedores', { method: 'POST', body: JSON.stringify(data) }),
   updateProveedor: (id: string, data: any) => request(`/proveedores/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteProveedor: (id: string) => request(`/proveedores/${id}`, { method: 'DELETE' }),
-
   getUnifiedProducts: () => request<ProductoUnified[]>('/productos/unificados'),
 };
 
@@ -110,91 +109,71 @@ export const SalesService = {
 
 export const CashService = {
   getActiveArqueo: () => request<Arqueo | null>('/arqueo/active'),
-  openCaja: (data: { montoInicial: number, saldoTigoInicial?: number, saldoClaroInicial?: number, fechaLocal?: string }) => request('/arqueo/open', { method: 'POST', body: JSON.stringify(data) }),
+  openCaja: (data: any) => request('/arqueo/open', { method: 'POST', body: JSON.stringify(data) }),
   closeCaja: (idArqueo: string) => request<{resumen: any}>('/arqueo/close', { method: 'POST', body: JSON.stringify({ idArqueo }) }),
-
   getIngresos: (idCaja: string, fecha?: string) => request<Ingreso[]>(`/ingresos?idCaja=${idCaja}${fecha ? `&fecha=${fecha}` : ''}`),
-  createIngreso: (data: { descripcion: string, monto: number, costo?: number, fechaCreacion?: string }) => request('/ingresos', { method: 'POST', body: JSON.stringify(data) }),
-  updateIngreso: (id: string, data: { descripcion: string, monto: number, costo?: number }) => request(`/ingresos/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  deleteIngreso: (id: string) => request(`/ingresos/${id}`, { method: 'DELETE' }),
-
   getEgresos: (idCaja: string, fecha?: string) => request<Egreso[]>(`/egresos?idCaja=${idCaja}${fecha ? `&fecha=${fecha}` : ''}`),
-  createEgreso: (data: { descripcion: string, monto: number, fechaCreacion?: string, categoria?: string }) => request('/egresos', { method: 'POST', body: JSON.stringify(data) }),
-  updateEgreso: (id: string, data: { descripcion: string, monto: number, categoria?: string }) => request(`/egresos/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  deleteEgreso: (id: string) => request(`/egresos/${id}`, { method: 'DELETE' }),
-
   getSaldosToday: (fecha?: string) => request<Saldo[]>(`/saldos/today${fecha ? `?fecha=${fecha}` : ''}`),
-  getSaldosStatus: (fecha?: string) => request<{tigo: boolean, claro: boolean}>(`/saldos/status${fecha ? `?fecha=${fecha}` : ''} `),
-  buySaldo: (data: { red: string, montoPagado: number, montoRecibido: number, fechaLocal?: string }) => request('/saldos/buy', { method: 'POST', body: JSON.stringify(data) }),
-  createRecarga: (data: { red: string, tipo: string, descripcion: string, precioCobrado: number, precioPagado: number, fechaLocal?: string }) => request('/recargas', { method: 'POST', body: JSON.stringify(data) }),
-
+  getSaldosStatus: (fecha?: string) => request<any>(`/saldos/status${fecha ? `?fecha=${fecha}` : ''}`),
+  createIngreso: (data: any) => request('/ingresos', { method: 'POST', body: JSON.stringify(data) }),
+  updateIngreso: (id: string, data: any) => request(`/ingresos/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteIngreso: (id: string) => request(`/ingresos/${id}`, { method: 'DELETE' }),
+  createEgreso: (data: any) => request('/egresos', { method: 'POST', body: JSON.stringify(data) }),
+  updateEgreso: (id: string, data: any) => request(`/egresos/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteEgreso: (id: string) => request(`/egresos/${id}`, { method: 'DELETE' }),
+  buySaldo: (data: any) => request('/saldos/buy', { method: 'POST', body: JSON.stringify(data) }),
+  createRecarga: (data: any) => request('/recargas', { method: 'POST', body: JSON.stringify(data) }),
   getAdminBoxesStatus: () => request<any[]>('/admin/boxes/status'),
   reopenBox: (idArqueo: string) => request(`/arqueo/${idArqueo}/reopen`, { method: 'PUT' }),
-  getSessionDetails: (idArqueo: string) => request<{arqueo: Arqueo, ingresos: Ingreso[], egresos: Egreso[]}>(`/arqueo/${idArqueo}/details`),
+  getSessionDetails: (idArqueo: string) => request<any>(`/arqueo/${idArqueo}/details`),
   updateInitialAmount: (idArqueo: string, monto: number) => request(`/arqueo/${idArqueo}/initial`, { method: 'PUT', body: JSON.stringify({ montoInicial: monto }) }),
-
   getSaldosByDate: (fecha: string) => request<Saldo[]>(`/admin/saldos?fecha=${fecha}`),
-  updateSaldo: (id: string, data: { saldoInicio: number, saldoFinal: number }) => request(`/admin/saldos/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  updateSaldo: (id: string, data: any) => request(`/admin/saldos/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
 };
 
+export const AccountingService = {
+  getSocios: () => request<Socio[]>('/accounting/socios'),
+  getAuditTransactions: (date?: string) => request<any[]>(`/accounting/audit/transactions${date ? `?date=${date}` : ''}`),
+  updateAuditTransaction: (tipo: string, id: string, data: any) => request(`/accounting/audit/transactions/${tipo}/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  getProfitabilityReport: (date: string) => request<any>(`/accounting/report/profitability?date=${date}`),
+};
+
+// Add missing CostsService
 export const CostsService = {
   getAll: () => request<Costo[]>('/costs'),
-  create: (data: Partial<Costo>) => request('/costs', { method: 'POST', body: JSON.stringify(data) }),
-  update: (id: string, data: Partial<Costo>) => request(`/costs/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  create: (data: any) => request('/costs', { method: 'POST', body: JSON.stringify(data) }),
+  update: (id: string, data: any) => request(`/costs/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   delete: (id: string) => request(`/costs/${id}`, { method: 'DELETE' }),
 };
 
 export const PackagesService = {
   getAll: () => request<Paquete[]>('/paquetes'),
-  create: (data: Partial<Paquete>) => request('/paquetes', { method: 'POST', body: JSON.stringify(data) }),
-  update: (id: string, data: Partial<Paquete>) => request(`/paquetes/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  // Add missing Package CRUD methods
+  create: (data: any) => request('/paquetes', { method: 'POST', body: JSON.stringify(data) }),
+  update: (id: string, data: any) => request(`/paquetes/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   delete: (id: string) => request(`/paquetes/${id}`, { method: 'DELETE' }),
 };
 
 export const ReportsService = {
+  // Add missing Report calculation methods
   getSalesTrend: (year: number) => request<any[]>(`/reports/sales-trend?year=${year}`),
+  getDailySales: (startDate: string, endDate: string) => request<any[]>(`/reports/daily-sales?startDate=${startDate}&endDate=${endDate}`),
   getTopProducts: (startDate: string, endDate: string) => request<any[]>(`/reports/top-products?startDate=${startDate}&endDate=${endDate}`),
   getRechargesProfit: (year: number) => request<any[]>(`/reports/recharges-profit?year=${year}`),
-  getInventoryValuation: () => request<any[]>(`/reports/inventory-valuation`),
+  getInventoryValuation: () => request<any[]>('/reports/inventory-valuation'),
   getTopClients: (startDate: string, endDate: string) => request<any[]>(`/reports/top-clients?startDate=${startDate}&endDate=${endDate}`),
-  getDailySales: (startDate: string, endDate: string) => request<any[]>(`/reports/daily-sales?startDate=${startDate}&endDate=${endDate}`),
 };
 
 export const LabelService = {
-  getAll: () => request<LabelTemplate[]>('/labels'),
   getDefault: (category: string) => request<LabelTemplate | null>(`/labels/default?category=${category}`),
-  create: (data: LabelTemplate) => request('/labels', { method: 'POST', body: JSON.stringify(data) }),
-  update: (id: string, data: LabelTemplate) => request(`/labels/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  getAll: () => request<LabelTemplate[]>('/labels'),
+  // Add missing Label CRUD methods
+  create: (data: any) => request('/labels', { method: 'POST', body: JSON.stringify(data) }),
+  update: (id: string, data: any) => request(`/labels/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   delete: (id: string) => request(`/labels/${id}`, { method: 'DELETE' }),
 };
 
 export const ConfigService = {
   get: () => request<EmpresaConfig>('/config'),
   update: (data: EmpresaConfig) => request('/config', { method: 'PUT', body: JSON.stringify(data) }),
-};
-
-export const AccountingService = {
-  getSocios: () => request<Socio[]>('/accounting/socios'),
-  createSocio: (data: Partial<Socio>) => request('/accounting/socios', { method: 'POST', body: JSON.stringify(data) }),
-  updateSocio: (id: number, data: Partial<Socio>) => request(`/accounting/socios/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  deleteSocio: (id: number) => request(`/accounting/socios/${id}`, { method: 'DELETE' }),
-
-  getAuditTransactions: (date?: string) => request<any[]>(`/accounting/audit/transactions${date ? `?date=${date}` : ''}`),
-  updateAuditTransaction: (tipo: string, id: string, data: any) => request(`/accounting/audit/transactions/${tipo}/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  deleteAuditTransaction: (tipo: string, id: string) => request(`/accounting/audit/transactions/${tipo}/${id}`, { method: 'DELETE' }),
-
-  getProfitabilityReport: (date: string) => request<any>(`/accounting/report/profitability?date=${date}`),
-
-  getCostComponents: () => request<ComponenteCosto[]>('/accounting/cogs/components'),
-  createCostComponent: (nombre: string, naturaleza: string) => request('/accounting/cogs/components', { method: 'POST', body: JSON.stringify({ nombre, naturaleza }) }),
-  
-  getProductDirectCosts: (idProducto: string) => request<CostoProducto[]>(`/accounting/cogs/product/${idProducto}`),
-  addProductDirectCost: (data: Partial<CostoProducto>) => request('/accounting/cogs/product', { method: 'POST', body: JSON.stringify(data) }),
-  deleteProductDirectCost: (id: number) => request(`/accounting/cogs/cost/${id}`, { method: 'DELETE' }),
-
-  getBudgets: (year: number) => request<PresupuestoMensual[]>(`/accounting/budgets?year=${year}`),
-  upsertBudget: (data: Partial<PresupuestoMensual>) => request('/accounting/budgets', { method: 'POST', body: JSON.stringify(data) }),
-
-  getDailyTracking: (startDate: string, endDate: string) => request<DailyTrackingRow[]>(`/accounting/tracking/daily?start=${startDate}&end=${endDate}`),
-  getPnLStatement: (year: number) => request<PnLRow[]>(`/accounting/pnl?year=${year}`),
 };

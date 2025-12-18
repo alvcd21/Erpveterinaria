@@ -250,7 +250,44 @@ router.delete('/egresos/:id', authenticateToken, async (req, res) => {
 });
 
 // ==========================================
-// 3. SALDOS Y RECARGAS
+// 3. COSTOS (DEFINICIÓN DE GASTOS FIJOS/VARIABLES)
+// ==========================================
+
+router.get('/costs', authenticateToken, async (req, res) => {
+    try {
+        const r = await pool.query('SELECT codCostos as "codCostos", tipo, descripcion, monto, estado FROM costos');
+        res.json(r.rows);
+    } catch (e) { handleDbError(res, e); }
+});
+
+router.post('/costs', authenticateToken, async (req, res) => {
+    try {
+        const { tipo, descripcion, monto, estado } = req.body;
+        const id = await generateNextId('costos', 'codCostos', 'COST');
+        await pool.query('INSERT INTO costos (codCostos, tipo, descripcion, monto, estado) VALUES ($1, $2, $3, $4, $5)',
+            [id, tipo, descripcion, monto, estado || 'Activo']);
+        res.status(201).json({ message: 'Costo registrado', codCostos: id });
+    } catch (e) { handleDbError(res, e); }
+});
+
+router.put('/costs/:id', authenticateToken, async (req, res) => {
+    try {
+        const { tipo, descripcion, monto, estado } = req.body;
+        await pool.query('UPDATE costos SET tipo=$1, descripcion=$2, monto=$3, estado=$4 WHERE codCostos=$5',
+            [tipo, descripcion, monto, estado, req.params.id]);
+        res.json({ message: 'Costo actualizado' });
+    } catch (e) { handleDbError(res, e); }
+});
+
+router.delete('/costs/:id', authenticateToken, async (req, res) => {
+    try {
+        await pool.query('DELETE FROM costos WHERE codCostos=$1', [req.params.id]);
+        res.json({ message: 'Costo eliminado' });
+    } catch (e) { handleDbError(res, e); }
+});
+
+// ==========================================
+// 4. SALDOS Y RECARGAS
 // ==========================================
 
 router.get('/saldos/today', authenticateToken, async (req, res) => {
@@ -336,7 +373,7 @@ router.post('/recargas', authenticateToken, async (req, res) => {
 });
 
 // ==========================================
-// 4. ADMIN DASHBOARD DE CAJAS
+// 5. ADMIN DASHBOARD DE CAJAS
 // ==========================================
 
 router.get('/admin/boxes/status', authenticateToken, async (req, res) => {

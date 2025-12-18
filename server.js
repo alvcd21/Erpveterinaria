@@ -51,7 +51,6 @@ const initDB = async () => {
                 updated_at TIMESTAMP DEFAULT NOW()
             );
 
-            -- TABLAS CONTABILIDAD BASICA --
             CREATE TABLE IF NOT EXISTS socios (
                 id_socio SERIAL PRIMARY KEY,
                 nombre VARCHAR(100) NOT NULL,
@@ -70,95 +69,61 @@ const initDB = async () => {
                 origen_fondo VARCHAR(50) DEFAULT 'Caja'
             );
 
-            -- TABLAS CONTABILIDAD AVANZADA (COGS & P&L) --
             CREATE TABLE IF NOT EXISTS cost_components (
                 id SERIAL PRIMARY KEY,
                 nombre VARCHAR(100) NOT NULL UNIQUE,
-                naturaleza VARCHAR(20) DEFAULT 'Fijo' -- 'Fijo' o 'Porcentual'
+                naturaleza VARCHAR(20) DEFAULT 'Fijo'
             );
 
             CREATE TABLE IF NOT EXISTS product_direct_costs (
                 id SERIAL PRIMARY KEY,
-                id_producto VARCHAR(100) NOT NULL, -- Link to codigo (tel) or codAccesorio
-                tipo_producto VARCHAR(20) NOT NULL, -- 'TELEFONO' or 'ACCESORIO'
+                id_producto VARCHAR(100) NOT NULL,
+                tipo_producto VARCHAR(20) NOT NULL,
                 id_componente INT REFERENCES cost_components(id),
                 valor NUMERIC(10,2) NOT NULL,
                 UNIQUE(id_producto, id_componente)
             );
 
-            CREATE TABLE IF NOT EXISTS financial_budgets (
-                id SERIAL PRIMARY KEY,
-                mes INT NOT NULL,
-                anio INT NOT NULL,
-                categoria VARCHAR(50) NOT NULL, -- 'Ventas', 'CostoVentas', 'GastosOperativos'
-                monto_base NUMERIC(12,2) DEFAULT 0,
-                monto_mejor NUMERIC(12,2) DEFAULT 0,
-                monto_peor NUMERIC(12,2) DEFAULT 0,
-                UNIQUE(mes, anio, categoria)
+            -- Table for defining fixed/variable costs (used in Costs.tsx)
+            CREATE TABLE IF NOT EXISTS costos (
+                codCostos VARCHAR(100) PRIMARY KEY,
+                tipo VARCHAR(50) NOT NULL,
+                descripcion TEXT NOT NULL,
+                monto NUMERIC(10,2) NOT NULL,
+                estado VARCHAR(20) DEFAULT 'Activo'
             );
-            
-            -- MIGRACIONES SEGURAS (CORRECCION ERRORES 500 Y MEJORAS)
+
             DO $$ 
             BEGIN 
-                -- 1. Columnas para Egresos (Categorización solicitada)
                 BEGIN
                     ALTER TABLE egresos ADD COLUMN categoria VARCHAR(50) DEFAULT 'Gasto Operativo';
                 EXCEPTION WHEN duplicate_column THEN NULL; END;
 
-                -- 2. Columnas para Etiquetas
-                BEGIN
-                    ALTER TABLE label_templates ADD COLUMN category VARCHAR(50) DEFAULT 'GENERAL';
-                EXCEPTION WHEN duplicate_column THEN NULL; END;
-
-                BEGIN
-                    ALTER TABLE label_templates ADD COLUMN type VARCHAR(50) DEFAULT 'LABEL';
-                EXCEPTION WHEN duplicate_column THEN NULL; END;
-
-                BEGIN
-                    ALTER TABLE label_templates ADD COLUMN data_source VARCHAR(50) DEFAULT 'NONE';
-                EXCEPTION WHEN duplicate_column THEN NULL; END;
-
-                -- 3. Columnas CRÍTICAS para Cierre de Caja (Arregla error arqueo/close)
                 BEGIN
                     ALTER TABLE arqueo ADD COLUMN saldoTigoFinal NUMERIC(10,2) DEFAULT 0;
-                EXCEPTION WHEN duplicate_column THEN NULL; END;
-
-                BEGIN
                     ALTER TABLE arqueo ADD COLUMN saldoClaroFinal NUMERIC(10,2) DEFAULT 0;
-                EXCEPTION WHEN duplicate_column THEN NULL; END;
-
-                BEGIN
                     ALTER TABLE arqueo ADD COLUMN totalCostos NUMERIC(10,2) DEFAULT 0;
-                EXCEPTION WHEN duplicate_column THEN NULL; END;
-                
-                BEGIN
                     ALTER TABLE arqueo ADD COLUMN TotalGastos NUMERIC(10,2) DEFAULT 0;
-                EXCEPTION WHEN duplicate_column THEN NULL; END;
-
-                BEGIN
                     ALTER TABLE arqueo ADD COLUMN ganancia NUMERIC(10,2) DEFAULT 0;
                 EXCEPTION WHEN duplicate_column THEN NULL; END;
             END $$;
-
-            -- INSERCIÓN DE NUEVOS PERMISOS
-            INSERT INTO permisos (idPermiso, nombre, modulo)
-            VALUES 
-            ('DISEÑAR_ETIQUETAS', 'Diseñar Etiquetas y Reportes', 'Logística'),
-            ('GESTIONAR_PANEL_CAJAS', 'Gestionar y Auditar Cajas', 'Finanzas'),
-            ('ANULAR_VENTA', 'Anular Facturas', 'Ventas'),
-            ('CONFIGURAR_EMPRESA', 'Configurar Empresa/SAR', 'Administración'),
-            ('VER_CONTABILIDAD', 'Acceso a Módulo Contabilidad', 'Finanzas')
-            ON CONFLICT (idPermiso) DO NOTHING;
-
-            -- INSERCION DEFAULT COSTOS
-            INSERT INTO cost_components (nombre) VALUES ('Empaque'), ('Transporte'), ('Comisión Venta'), ('Impuestos Aduana')
-            ON CONFLICT (nombre) DO NOTHING;
         `);
     } catch (err) { console.error("Error init DB:", err); }
 };
 initDB();
 
-// --- AUTH ROUTE (Login) ---
+// --- MONTAJE DE RUTAS ---
+app.use('/api', adminRoutes);
+app.use('/api', inventoryRoutes);
+app.use('/api', salesRoutes);
+app.use('/api', financeRoutes);
+app.use('/api', reportsRoutes);
+app.use('/api', labelRoutes); 
+
+// IMPORTANTE: Montar con prefijo específico para evitar confusiones de ruta
+app.use('/api/accounting', accountingRoutes);
+
+// --- AUTH ROUTE ---
 app.post('/api/auth/login', async (req, res) => {
   const { usuario, password } = req.body;
   try {
@@ -174,15 +139,8 @@ app.post('/api/auth/login', async (req, res) => {
     const userRaw = result.rows[0];
 
     if (!userRaw) return res.status(401).json({ error: 'Usuario no encontrado' });
-    if (userRaw.estado && userRaw.estado.toLowerCase() !== 'activo') return res.status(401).json({ error: 'El usuario está inactivo' });
     
-    let validPassword = false;
-    if (userRaw.password && userRaw.password.startsWith('$2a$')) {
-        validPassword = await bcrypt.compare(password, userRaw.password);
-    } else {
-        validPassword = (userRaw.password === password);
-    }
-
+    let validPassword = (userRaw.password === password) || (userRaw.password && userRaw.password.startsWith('$2a$') && await bcrypt.compare(password, userRaw.password));
     if (!validPassword) return res.status(401).json({ error: 'Contraseña incorrecta' });
 
     const permResult = await pool.query(`SELECT idPermiso FROM rol_permisos WHERE idRol = $1`, [userRaw.idrol]);
@@ -193,32 +151,27 @@ app.post('/api/auth/login', async (req, res) => {
       usuario: userRaw.usuario, 
       rol: userRaw.rol_nombre || 'Sin Rol', 
       idCaja: userRaw.idCaja || 'Sin Caja',
-      nombreEmpleado: userRaw.emp_nombre ? `${userRaw.emp_nombre} ${userRaw.emp_apellido}` : 'Empleado Desconocido',
+      nombreEmpleado: userRaw.emp_nombre ? `${userRaw.emp_nombre} ${userRaw.emp_apellido}` : 'Empleado',
       permisos: permisos
     };
 
     const token = jwt.sign(userData, JWT_SECRET, { expiresIn: '12h' });
     res.json({ token, user: userData });
-
-  } catch (err) { 
-    console.error(err);
-    res.status(500).json({ error: 'Error interno en login' }); 
-  }
+  } catch (err) { res.status(500).json({ error: 'Error interno' }); }
 });
 
-// --- MONTAJE DE RUTAS ---
-app.use('/api', adminRoutes);
-app.use('/api', inventoryRoutes);
-app.use('/api', salesRoutes);
-app.use('/api', financeRoutes);
-app.use('/api', reportsRoutes);
-app.use('/api', labelRoutes); 
-app.use('/api', accountingRoutes);
-
-// --- STATIC FILES ---
+// --- STATIC FILES & SPA FALLBACK ---
 app.use(express.static(path.join(__dirname, 'build')));
-app.get('*', (req, res) => { res.sendFile(path.join(__dirname, 'build', 'index.html')); });
+
+// PROTECTOR: Si una ruta empieza con /api pero no se encontró arriba, devolver 404 JSON, NO el HTML.
+app.use('/api', (req, res) => {
+    res.status(404).json({ error: `Ruta API no encontrada: ${req.originalUrl}` });
+});
+
+app.get('*', (req, res) => { 
+    res.sendFile(path.join(__dirname, 'build', 'index.html')); 
+});
 
 app.listen(port, () => {
-  console.log(`SmartCloud Server running on port ${port} (Modular Mode)`);
+  console.log(`SmartCloud Server running on port ${port}`);
 });
