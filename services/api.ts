@@ -124,7 +124,7 @@ export const CashService = {
   deleteEgreso: (id: string) => request(`/egresos/${id}`, { method: 'DELETE' }),
 
   getSaldosToday: (fecha?: string) => request<Saldo[]>(`/saldos/today${fecha ? `?fecha=${fecha}` : ''}`),
-  getSaldosStatus: (fecha?: string) => request<{tigo: boolean, claro: boolean}>(`/saldos/status${fecha ? `?fecha=${fecha}` : ''}`),
+  getSaldosStatus: (fecha?: string) => request<{tigo: boolean, claro: boolean}>(`/saldos/status${fecha ? `?fecha=${fecha}` : ''} `),
   buySaldo: (data: { red: string, montoPagado: number, montoRecibido: number, fechaLocal?: string }) => request('/saldos/buy', { method: 'POST', body: JSON.stringify(data) }),
   createRecarga: (data: { red: string, tipo: string, descripcion: string, precioCobrado: number, precioPagado: number, fechaLocal?: string }) => request('/recargas', { method: 'POST', body: JSON.stringify(data) }),
 
@@ -179,7 +179,7 @@ export const AccountingService = {
   updateSocio: (id: number, data: Partial<Socio>) => request(`/accounting/socios/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteSocio: (id: number) => request(`/accounting/socios/${id}`, { method: 'DELETE' }),
 
-  getAuditTransactions: () => request<any[]>('/accounting/audit/transactions'),
+  getAuditTransactions: (date?: string) => request<any[]>(`/accounting/audit/transactions${date ? `?date=${date}` : ''}`),
   updateAuditTransaction: (tipo: string, id: string, data: any) => request(`/accounting/audit/transactions/${tipo}/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteAuditTransaction: (tipo: string, id: string) => request(`/accounting/audit/transactions/${tipo}/${id}`, { method: 'DELETE' }),
 
