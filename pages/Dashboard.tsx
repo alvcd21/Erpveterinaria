@@ -13,6 +13,7 @@ import {
   ReportsService, 
   SalesService
 } from '../services/api';
+// Re-verified useNavigate is exported from react-router-dom v6
 import { useNavigate } from 'react-router-dom';
 
 const COLORS = ['#4f46e5', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];

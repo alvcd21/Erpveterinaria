@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { AccountingService, SalesService } from '../services/api';
 import { Socio, DetalleVenta } from '../types';
 import { 
-  Calculator, Users, Search, Edit2, Trash2, X, ArrowUpRight, DollarSign, PieChart, Activity, ShoppingBag, Calendar, Eye, RefreshCw, Layers, TrendingUp, ArrowRightLeft, FileText, Download, UserCheck
+  Calculator, Users, Search, Edit2, Trash2, X, ArrowUpRight, DollarSign, PieChart, Activity, ShoppingBag, Calendar, Eye, RefreshCw, Layers, TrendingUp, ArrowRightLeft, FileText, Download, UserCheck, AlertCircle
 } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { jsPDF } from 'jspdf';
@@ -62,12 +62,17 @@ const Accounting: React.FC = () => {
         ]);
         setReport(pData);
         setPartners(sData);
+        
         if (activeTab === 'TRANSACTIONS') {
             const auditData = await AccountingService.getAuditTransactions(selectedDate);
-            setTransactions(auditData);
+            setTransactions(auditData || []);
         }
-    } catch (e) { console.error(e); }
-    finally { setLoading(false); }
+    } catch (e) { 
+        console.error(e); 
+        setTransactions([]);
+    } finally { 
+        setLoading(false); 
+    }
   };
 
   const handleEditTx = (tx: AuditTransaction) => {
@@ -131,6 +136,10 @@ const Accounting: React.FC = () => {
       doc.save(`Reporte_Rentabilidad_${date}.pdf`);
   };
 
+  const filteredTransactions = transactions.filter(t => 
+    t.descripcion.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
   return (
     <div className="space-y-6 h-full flex flex-col pb-10">
         {/* HEADER */}
@@ -176,7 +185,7 @@ const Accounting: React.FC = () => {
                                 <div className="w-10 h-10 bg-indigo-50 rounded-full flex items-center justify-center text-indigo-600 mb-4"><Users size={20}/></div>
                                 <h4 className="text-lg font-bold text-slate-800 mb-4">{d.socio}</h4>
                                 <div className="space-y-3">
-                                    <div className="flex justify-between text-xs font-medium"><span className="text-slate-500 uppercase">Util. Bruta (Hoy):</span><span className="text-slate-800 font-bold">L. {d.gananciaDia.toLocaleString()}</span></div>
+                                    <div className="flex justify-between text-xs font-medium"><span className="text-slate-500 uppercase">Util. Bruta (Hoy):</span><span className="text-slate-800 font-bold">L. {(report.daily.utilNetaNegocio * (d.porcentaje/100)).toLocaleString()}</span></div>
                                     <div className="flex justify-between text-xs font-medium"><span className="text-red-500 uppercase">Deducción Pers:</span><span className="text-red-600 font-bold">- L. {d.deduccionDia.toLocaleString()}</span></div>
                                     <div className="border-t border-slate-100 pt-3 flex justify-between items-center"><span className="text-xs font-black text-indigo-600 uppercase">Pago Final:</span><span className="text-xl font-black text-emerald-600">L. {d.gananciaDia.toLocaleString()}</span></div>
                                     <div className="grid grid-cols-2 gap-2 mt-4 pt-2 border-t border-slate-50">
@@ -194,30 +203,43 @@ const Accounting: React.FC = () => {
                 <div className="flex flex-col h-full bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden animate-fade-in">
                     <div className="p-4 bg-slate-50 border-b flex justify-between items-center">
                         <div className="relative w-64"><Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/><input className="w-full pl-9 pr-3 py-2 bg-white border border-slate-200 rounded-lg text-xs outline-none focus:ring-2 focus:ring-indigo-500/20" placeholder="Buscar..." value={searchTerm} onChange={e=>setSearchTerm(e.target.value)} /></div>
-                        <p className="text-xs text-slate-400 italic">Lista de ingresos y egresos registrados en caja.</p>
+                        <p className="text-xs text-slate-400 italic">Historial consolidado de caja del día seleccionado.</p>
                     </div>
                     <div className="flex-1 overflow-auto">
-                        <table className="w-full text-left text-xs">
-                            <thead className="bg-slate-50 text-slate-500 font-bold uppercase sticky top-0 z-10 border-b">
-                                <tr><th className="p-4">Caja / Hora</th><th className="p-4">Descripción</th><th className="p-4">Impacto Contable / Socio</th><th className="p-4 text-right">Monto</th><th className="p-4 text-center">Acciones</th></tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-100">
-                                {transactions.filter(t => t.descripcion.toLowerCase().includes(searchTerm.toLowerCase())).map(tx => (
-                                    <tr key={`${tx.tipo}-${tx.id}`} className="hover:bg-slate-50 transition-colors group">
-                                        <td className="p-4"><p className="font-bold text-slate-700">{tx.idCaja}</p><p className="text-[10px] text-slate-400 font-mono">{tx.fecha.split(' ')[1]}</p></td>
-                                        <td className="p-4"><span className="font-medium text-slate-600">{tx.descripcion}</span></td>
-                                        <td className="p-4">
-                                            <div className="flex flex-col gap-1">
-                                                <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase w-fit ${tx.categoria === 'Gasto Operativo' ? 'bg-red-100 text-red-700' : tx.categoria === 'Compra de Producto' ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700'}`}>{tx.categoria}</span>
-                                                {tx.nombre_socio && <span className="flex items-center gap-1 text-[10px] text-indigo-600 font-bold"><UserCheck size={10}/> Personal: {tx.nombre_socio}</span>}
-                                            </div>
-                                        </td>
-                                        <td className={`p-4 text-right font-bold text-sm ${tx.tipo === 'INGRESO' ? 'text-emerald-600' : 'text-slate-800'}`}>{tx.tipo === 'INGRESO' ? '+' : '-'} L. {tx.monto.toLocaleString()}</td>
-                                        <td className="p-4 text-center"><button onClick={() => handleEditTx(tx)} className="p-1.5 text-blue-500 hover:bg-blue-50 rounded opacity-0 group-hover:opacity-100 transition-all"><Edit2 size={14}/></button></td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
+                        {loading ? (
+                            <div className="flex flex-col items-center justify-center p-20 text-slate-400 gap-3">
+                                <RefreshCw className="animate-spin" size={32}/>
+                                <p className="font-bold">Cargando auditoría...</p>
+                            </div>
+                        ) : filteredTransactions.length === 0 ? (
+                            <div className="flex flex-col items-center justify-center p-20 text-slate-400 gap-3">
+                                <AlertCircle size={48} className="opacity-20"/>
+                                <p className="font-bold">No se encontraron movimientos para esta fecha.</p>
+                                <p className="text-xs">Intenta seleccionar otro día en el calendario.</p>
+                            </div>
+                        ) : (
+                            <table className="w-full text-left text-xs">
+                                <thead className="bg-slate-50 text-slate-500 font-bold uppercase sticky top-0 z-10 border-b">
+                                    <tr><th className="p-4">Caja / Hora</th><th className="p-4">Descripción</th><th className="p-4">Impacto Contable / Socio</th><th className="p-4 text-right">Monto</th><th className="p-4 text-center">Acciones</th></tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100">
+                                    {filteredTransactions.map(tx => (
+                                        <tr key={`${tx.tipo}-${tx.id}`} className="hover:bg-slate-50 transition-colors group">
+                                            <td className="p-4"><p className="font-bold text-slate-700">{tx.idCaja}</p><p className="text-[10px] text-slate-400 font-mono">{tx.fecha.split(' ')[1]}</p></td>
+                                            <td className="p-4"><span className="font-medium text-slate-600">{tx.descripcion}</span></td>
+                                            <td className="p-4">
+                                                <div className="flex flex-col gap-1">
+                                                    <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase w-fit ${tx.categoria === 'Gasto Operativo' ? 'bg-red-100 text-red-700' : tx.categoria === 'Compra de Producto' ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700'}`}>{tx.categoria}</span>
+                                                    {tx.nombre_socio && <span className="flex items-center gap-1 text-[10px] text-indigo-600 font-bold"><UserCheck size={10}/> Personal: {tx.nombre_socio}</span>}
+                                                </div>
+                                            </td>
+                                            <td className={`p-4 text-right font-bold text-sm ${tx.tipo === 'INGRESO' ? 'text-emerald-600' : 'text-slate-800'}`}>{tx.tipo === 'INGRESO' ? '+' : '-'} L. {tx.monto.toLocaleString()}</td>
+                                            <td className="p-4 text-center"><button onClick={() => handleEditTx(tx)} className="p-1.5 text-blue-500 hover:bg-blue-50 rounded opacity-0 group-hover:opacity-100 transition-all"><Edit2 size={14}/></button></td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        )}
                     </div>
                 </div>
             )}

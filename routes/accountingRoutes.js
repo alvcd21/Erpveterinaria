@@ -4,28 +4,51 @@ const router = express.Router();
 const { pool, handleDbError, updateArqueoBalance } = require('../config/db');
 const { authenticateToken } = require('../middleware/auth');
 
-// --- AUDITORÍA DE MOVIMIENTOS ---
+// --- AUDITORÍA DE MOVIMIENTOS (FIX: Ambigüedad de columnas) ---
 router.get('/audit/transactions', authenticateToken, async (req, res) => {
     try {
         const { date } = req.query;
-        let where = "1=1";
+        let whereIngresos = "1=1";
+        let whereEgresos = "1=1";
         const params = [];
-        if (date) { where = "TO_CHAR(fechaCreacion, 'YYYY-MM-DD') = $1"; params.push(date); }
+
+        if (date) { 
+            whereIngresos = "TO_CHAR(i.fechaCreacion, 'YYYY-MM-DD') = $1"; 
+            whereEgresos = "TO_CHAR(e.fechaCreacion, 'YYYY-MM-DD') = $1"; 
+            params.push(date); 
+        }
 
         const query = `
             (SELECT 
-                'INGRESO' as tipo, idIngreso as id, idCaja as "idCaja", descripcion, monto, costo, 
-                TO_CHAR(fechaCreacion, 'YYYY-MM-DD HH24:MI:SS') as fecha, estado, 'Venta/Servicio' as categoria,
-                NULL as id_socio_asignado, NULL as nombre_socio
-             FROM ingresos WHERE ${where})
+                'INGRESO' as tipo, 
+                i.idIngreso as id, 
+                i.idCaja as "idCaja", 
+                i.descripcion, 
+                i.monto, 
+                i.costo, 
+                TO_CHAR(i.fechaCreacion, 'YYYY-MM-DD HH24:MI:SS') as fecha, 
+                i.estado as estado, 
+                'Venta/Servicio' as categoria,
+                NULL::integer as id_socio_asignado, 
+                NULL::text as nombre_socio
+             FROM ingresos i 
+             WHERE ${whereIngresos})
             UNION ALL
             (SELECT 
-                'EGRESO' as tipo, idegresos as id, idCaja as "idCaja", descripcion, monto, 0 as costo, 
-                TO_CHAR(fechaCreacion, 'YYYY-MM-DD HH24:MI:SS') as fecha, estado, categoria,
-                e.id_socio_asignado, s.nombre as nombre_socio
+                'EGRESO' as tipo, 
+                e.idegresos as id, 
+                e.idCaja as "idCaja", 
+                e.descripcion, 
+                e.monto, 
+                0 as costo, 
+                TO_CHAR(e.fechaCreacion, 'YYYY-MM-DD HH24:MI:SS') as fecha, 
+                e.estado as estado, 
+                e.categoria,
+                e.id_socio_asignado, 
+                s.nombre as nombre_socio
              FROM egresos e
              LEFT JOIN socios s ON e.id_socio_asignado = s.id_socio
-             WHERE ${where})
+             WHERE ${whereEgresos})
             ORDER BY fecha DESC
         `;
         const result = await pool.query(query, params);
@@ -33,7 +56,7 @@ router.get('/audit/transactions', authenticateToken, async (req, res) => {
     } catch(e) { handleDbError(res, e); }
 });
 
-// --- REPORTE DE RENTABILIDAD POR PERIODOS ---
+// --- REPORTE DE RENTABILIDAD ---
 router.get('/report/profitability', authenticateToken, async (req, res) => {
     try {
         const { date } = req.query; 
@@ -41,14 +64,8 @@ router.get('/report/profitability', authenticateToken, async (req, res) => {
 
         const getMetrics = async (start, end) => {
             const ing = await pool.query(`SELECT COALESCE(SUM(monto),0) as ing, COALESCE(SUM(costo),0) as cst FROM ingresos WHERE fechaCreacion BETWEEN $1 AND $2`, [start, end]);
-            
-            // Gastos Operativos (Generales del negocio - Sin socio asignado)
-            const opexGeneral = await pool.query(`SELECT COALESCE(SUM(monto),0) as tot FROM egresos WHERE categoria = 'Gasto Operativo' AND id_socio_asignado IS NULL AND fechaCreacion BETWEEN $1 AND $2`, [start, end]);
-            
-            // Inversiones (No afectan ganancia)
+            const opexGeneral = await pool.query(`SELECT COALESCE(SUM(monto),0) as tot FROM egresos WHERE (categoria = 'Gasto Operativo' OR categoria IS NULL) AND id_socio_asignado IS NULL AND fechaCreacion BETWEEN $1 AND $2`, [start, end]);
             const inv = await pool.query(`SELECT COALESCE(SUM(monto),0) as tot FROM egresos WHERE categoria = 'Compra de Producto' AND fechaCreacion BETWEEN $1 AND $2`, [start, end]);
-
-            // Gastos por Socio (Para deducción individual)
             const opexSocios = await pool.query(`SELECT id_socio_asignado, COALESCE(SUM(monto),0) as total FROM egresos WHERE id_socio_asignado IS NOT NULL AND fechaCreacion BETWEEN $1 AND $2 GROUP BY 1`, [start, end]);
 
             const ingresos = Number(ing.rows[0].ing);
@@ -112,7 +129,7 @@ router.put('/audit/transactions/:tipo/:id', authenticateToken, async (req, res) 
             idCaja = r.rows[0]?.idcaja;
         }
         if (idCaja) await updateArqueoBalance(idCaja);
-        res.json({ message: 'Sincronizado con éxito' });
+        res.json({ message: 'Actualizado correctamente' });
     } catch(e) { handleDbError(res, e); }
 });
 

@@ -1,5 +1,6 @@
 
 import React, { useState } from 'react';
+// Verified Link, useLocation and useNavigate are standard exports of react-router-dom v6
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { 

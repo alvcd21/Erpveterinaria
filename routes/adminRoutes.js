@@ -5,10 +5,36 @@ const bcrypt = require('bcryptjs');
 const { pool, generateNextId, handleDbError } = require('../config/db');
 const { authenticateToken } = require('../middleware/auth');
 
-// --- ESQUEMA DE BASE DE DATOS (PARA DISEÑADOR) ---
+// --- PANEL DE CONTROL DE CAJAS (ENDPOINT RESTAURADO) ---
+router.get('/admin/boxes/status', authenticateToken, async (req, res) => {
+    try {
+        const query = `
+            SELECT 
+                c.idCaja as "idCaja", 
+                c.nombre as "nombreCaja", 
+                a.idArqueo as "idArqueo", 
+                a.estado as "estadoArqueo", 
+                a.montoInicial as "montoInicial", 
+                a.montoFinal as "montoFinal", 
+                a.ganancia as "ganancia", 
+                a.fechaApertura as "fechaApertura", 
+                a.fechaCierre as "fechaCierre",
+                u.usuario,
+                (e.nombre || ' ' || e.apellido) as "nombreEmpleado"
+            FROM caja c
+            LEFT JOIN arqueo a ON c.idCaja = a.idCaja AND a.estado = 'Activo'
+            LEFT JOIN usuarios u ON a.idUsuario = u.codUsuario
+            LEFT JOIN empleado e ON u.identidad = e.identidad
+            ORDER BY c.idCaja ASC
+        `;
+        const result = await pool.query(query);
+        res.json(result.rows);
+    } catch(e) { handleDbError(res, e); }
+});
+
+// --- ESQUEMA DE BASE DE DATOS ---
 router.get('/schema', authenticateToken, async (req, res) => {
     try {
-        // 1. Obtener Columnas
         const colsQuery = `
             SELECT table_name, column_name, data_type 
             FROM information_schema.columns 
@@ -17,48 +43,24 @@ router.get('/schema', authenticateToken, async (req, res) => {
             ORDER BY table_name, ordinal_position;
         `;
         const colsResult = await pool.query(colsQuery);
-
-        // 2. Obtener Relaciones (Foreign Keys)
         const relsQuery = `
-            SELECT
-                tc.table_name, 
-                kcu.column_name, 
-                ccu.table_name AS foreign_table_name,
-                ccu.column_name AS foreign_column_name 
+            SELECT tc.table_name, kcu.column_name, ccu.table_name AS foreign_table_name, ccu.column_name AS foreign_column_name 
             FROM information_schema.table_constraints AS tc 
-            JOIN information_schema.key_column_usage AS kcu
-              ON tc.constraint_name = kcu.constraint_name
-              AND tc.table_schema = kcu.table_schema
-            JOIN information_schema.constraint_column_usage AS ccu
-              ON ccu.constraint_name = tc.constraint_name
-              AND ccu.table_schema = tc.table_schema
+            JOIN information_schema.key_column_usage AS kcu ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema
+            JOIN information_schema.constraint_column_usage AS ccu ON ccu.constraint_name = tc.constraint_name AND ccu.table_schema = tc.table_schema
             WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema='public';
         `;
         const relsResult = await pool.query(relsQuery);
-
-        // 3. Estructurar Datos
         const schema = colsResult.rows.reduce((acc, row) => {
-            if (!acc[row.table_name]) {
-                acc[row.table_name] = { columns: [], relations: [] };
-            }
-            acc[row.table_name].columns.push({
-                name: row.column_name,
-                type: row.data_type
-            });
+            if (!acc[row.table_name]) acc[row.table_name] = { columns: [], relations: [] };
+            acc[row.table_name].columns.push({ name: row.column_name, type: row.data_type });
             return acc;
         }, {});
-
-        // Integrar relaciones
         relsResult.rows.forEach(rel => {
             if (schema[rel.table_name]) {
-                schema[rel.table_name].relations.push({
-                    column: rel.column_name,
-                    foreignTable: rel.foreign_table_name,
-                    foreignColumn: rel.foreign_column_name
-                });
+                schema[rel.table_name].relations.push({ column: rel.column_name, foreignTable: rel.foreign_table_name, foreignColumn: rel.foreign_column_name });
             }
         });
-
         res.json(schema);
     } catch(e) { handleDbError(res, e); }
 });
@@ -67,10 +69,8 @@ router.get('/schema', authenticateToken, async (req, res) => {
 router.get('/users', authenticateToken, async (req, res) => {
     try {
         const result = await pool.query(`
-            SELECT 
-                u.codUsuario as "codUsuario", u.usuario, u.identidad, u.idCaja as "idCaja", u.idrol, u.estado,
-                e.nombre || ' ' || e.apellido as "nombreEmpleado",
-                r.nombre as "nombreRol"
+            SELECT u.codUsuario as "codUsuario", u.usuario, u.identidad, u.idCaja as "idCaja", u.idrol, u.estado,
+            e.nombre || ' ' || e.apellido as "nombreEmpleado", r.nombre as "nombreRol"
             FROM usuarios u
             LEFT JOIN empleado e ON u.identidad = e.identidad
             LEFT JOIN roles r ON u.idrol = r.idrol
@@ -84,12 +84,8 @@ router.post('/users', authenticateToken, async (req, res) => {
         const { usuario, password, identidad, idrol, idCaja, estado } = req.body;
         const codUsuario = await generateNextId('usuarios', 'codUsuario', 'USER');
         const hashedPassword = await bcrypt.hash(password, 10);
-        
-        await pool.query(
-            `INSERT INTO usuarios (codUsuario, usuario, password, identidad, idCaja, idrol, estado, fechaCreacion)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())`,
-            [codUsuario, usuario, hashedPassword, identidad, idCaja, idrol, estado]
-        );
+        await pool.query(`INSERT INTO usuarios (codUsuario, usuario, password, identidad, idCaja, idrol, estado, fechaCreacion) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())`,
+            [codUsuario, usuario, hashedPassword, identidad, idCaja, idrol, estado]);
         res.status(201).json({ message: 'Usuario creado', codUsuario });
     } catch(e) { handleDbError(res, e); }
 });
@@ -99,16 +95,13 @@ router.put('/users/:id', authenticateToken, async (req, res) => {
         const { usuario, password, identidad, idrol, idCaja, estado } = req.body;
         let query = `UPDATE usuarios SET usuario=$1, identidad=$2, idrol=$3, idCaja=$4, estado=$5`;
         let params = [usuario, identidad, idrol, idCaja, estado];
-        
         if (password && password.trim() !== '') {
             const hashedPassword = await bcrypt.hash(password, 10);
             query += `, password=$${params.length + 1}`;
             params.push(hashedPassword);
         }
-        
         query += ` WHERE codUsuario=$${params.length + 1}`;
         params.push(req.params.id);
-
         await pool.query(query, params);
         res.json({ message: 'Usuario actualizado' });
     } catch(e) { handleDbError(res, e); }
@@ -132,10 +125,8 @@ router.get('/empleados', authenticateToken, async (req, res) => {
 router.post('/empleados', authenticateToken, async (req, res) => {
     try {
         const { identidad, nombre, apellido, direccion, telefono, estado } = req.body;
-        await pool.query(
-            'INSERT INTO empleado (identidad, nombre, apellido, direccion, telefono, estado, fechaCreacion) VALUES ($1,$2,$3,$4,$5,$6, NOW())',
-            [identidad, nombre, apellido, direccion, telefono, estado]
-        );
+        await pool.query('INSERT INTO empleado (identidad, nombre, apellido, direccion, telefono, estado, fechaCreacion) VALUES ($1,$2,$3,$4,$5,$6, NOW())',
+            [identidad, nombre, apellido, direccion, telefono, estado]);
         res.status(201).json({ message: 'Empleado creado' });
     } catch(e) { handleDbError(res, e); }
 });
@@ -143,10 +134,8 @@ router.post('/empleados', authenticateToken, async (req, res) => {
 router.put('/empleados/:id', authenticateToken, async (req, res) => {
     try {
         const { nombre, apellido, direccion, telefono, estado } = req.body;
-        await pool.query(
-            'UPDATE empleado SET nombre=$1, apellido=$2, direccion=$3, telefono=$4, estado=$5 WHERE identidad=$6',
-            [nombre, apellido, direccion, telefono, estado, req.params.id]
-        );
+        await pool.query('UPDATE empleado SET nombre=$1, apellido=$2, direccion=$3, telefono=$4, estado=$5 WHERE identidad=$6',
+            [nombre, apellido, direccion, telefono, estado, req.params.id]);
         res.json({ message: 'Empleado actualizado' });
     } catch(e) { handleDbError(res, e); }
 });
@@ -177,7 +166,6 @@ router.post('/roles', authenticateToken, async (req, res) => {
         await client.query('BEGIN');
         const idRol = await generateNextId('roles', 'idrol', 'ROL', client);
         await client.query('INSERT INTO roles (idrol, nombre, estado) VALUES ($1, $2, $3)', [idRol, nombre, estado]);
-        
         if (permisos && Array.isArray(permisos)) {
             for (const pid of permisos) {
                 await client.query('INSERT INTO rol_permisos (idRol, idPermiso) VALUES ($1, $2)', [idRol, pid]);
@@ -185,10 +173,7 @@ router.post('/roles', authenticateToken, async (req, res) => {
         }
         await client.query('COMMIT');
         res.status(201).json({ message: 'Rol creado' });
-    } catch(e) { 
-        await client.query('ROLLBACK');
-        handleDbError(res, e); 
-    } finally { client.release(); }
+    } catch(e) { await client.query('ROLLBACK'); handleDbError(res, e); } finally { client.release(); }
 });
 
 router.put('/roles/:id', authenticateToken, async (req, res) => {
@@ -197,7 +182,6 @@ router.put('/roles/:id', authenticateToken, async (req, res) => {
         const { nombre, estado, permisos } = req.body;
         await client.query('BEGIN');
         await client.query('UPDATE roles SET nombre=$1, estado=$2 WHERE idrol=$3', [nombre, estado, req.params.id]);
-        
         await client.query('DELETE FROM rol_permisos WHERE idRol=$1', [req.params.id]);
         if (permisos && Array.isArray(permisos)) {
             for (const pid of permisos) {
@@ -206,10 +190,7 @@ router.put('/roles/:id', authenticateToken, async (req, res) => {
         }
         await client.query('COMMIT');
         res.json({ message: 'Rol actualizado' });
-    } catch(e) {
-        await client.query('ROLLBACK');
-        handleDbError(res, e);
-    } finally { client.release(); }
+    } catch(e) { await client.query('ROLLBACK'); handleDbError(res, e); } finally { client.release(); }
 });
 
 router.delete('/roles/:id', authenticateToken, async (req, res) => {
@@ -226,7 +207,7 @@ router.get('/permisos', authenticateToken, async (req, res) => {
     } catch(e) { handleDbError(res, e); }
 });
 
-// --- CAJAS (Entidad Administrativa) ---
+// --- CAJAS ---
 router.get('/cajas', authenticateToken, async (req, res) => {
     try {
         const r = await pool.query('SELECT idCaja as "idCaja", nombre, estado FROM caja');
@@ -238,7 +219,6 @@ router.post('/cajas', authenticateToken, async (req, res) => {
     try {
         const { nombre } = req.body;
         const idCaja = await generateNextId('caja', 'idCaja', 'CAJA');
-        // ESTANDARIZACIÓN: 'Activo' (Singular Masculino)
         await pool.query('INSERT INTO caja (idCaja, nombre, estado) VALUES ($1, $2, $3)', [idCaja, nombre, 'Activo']);
         res.status(201).json({ message: 'Caja creada', idCaja });
     } catch(e) { handleDbError(res, e); }
@@ -259,25 +239,10 @@ router.delete('/cajas/:id', authenticateToken, async (req, res) => {
     } catch(e) { handleDbError(res, e); }
 });
 
-// --- CONFIGURACIÓN EMPRESA (NUEVO) ---
+// --- CONFIGURACIÓN EMPRESA ---
 router.get('/config', authenticateToken, async (req, res) => {
     try {
-        // Usamos alias para asegurar camelCase en frontend
-        const r = await pool.query(`
-            SELECT 
-                nombreEmpresa as "nombreEmpresa", 
-                rtn, 
-                direccion, 
-                telefono, 
-                correo, 
-                cai, 
-                rangoInicial as "rangoInicial", 
-                rangoFinal as "rangoFinal", 
-                TO_CHAR(fechaLimite, 'YYYY-MM-DD') as "fechaLimite",
-                isv,
-                mensajeFinal as "mensajeFinal"
-            FROM configuracion LIMIT 1
-        `);
+        const r = await pool.query(`SELECT nombreEmpresa as "nombreEmpresa", rtn, direccion, telefono, correo, cai, rangoInicial as "rangoInicial", rangoFinal as "rangoFinal", TO_CHAR(fechaLimite, 'YYYY-MM-DD') as "fechaLimite", isv, mensajeFinal as "mensajeFinal" FROM configuracion LIMIT 1`);
         res.json(r.rows[0]);
     } catch(e) { handleDbError(res, e); }
 });
@@ -285,26 +250,15 @@ router.get('/config', authenticateToken, async (req, res) => {
 router.put('/config', authenticateToken, async (req, res) => {
     try {
         const { nombreEmpresa, rtn, direccion, telefono, correo, cai, rangoInicial, rangoFinal, fechaLimite, isv, mensajeFinal } = req.body;
-        
-        // Check if row exists
         const check = await pool.query('SELECT 1 FROM configuracion LIMIT 1');
-        
         if (check.rows.length === 0) {
-            await pool.query(`
-                INSERT INTO configuracion 
-                (nombreEmpresa, rtn, direccion, telefono, correo, cai, rangoInicial, rangoFinal, fechaLimite, isv, mensajeFinal)
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-                [nombreEmpresa, rtn, direccion, telefono, correo, cai, rangoInicial, rangoFinal, fechaLimite, isv, mensajeFinal]
-            );
+            await pool.query(`INSERT INTO configuracion (nombreEmpresa, rtn, direccion, telefono, correo, cai, rangoInicial, rangoFinal, fechaLimite, isv, mensajeFinal) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+                [nombreEmpresa, rtn, direccion, telefono, correo, cai, rangoInicial, rangoFinal, fechaLimite, isv, mensajeFinal]);
         } else {
-            await pool.query(`
-                UPDATE configuracion 
-                SET nombreEmpresa=$1, rtn=$2, direccion=$3, telefono=$4, correo=$5, cai=$6, rangoInicial=$7, rangoFinal=$8, fechaLimite=$9, isv=$10, mensajeFinal=$11`,
-                [nombreEmpresa, rtn, direccion, telefono, correo, cai, rangoInicial, rangoFinal, fechaLimite, isv, mensajeFinal]
-            );
+            await pool.query(`UPDATE configuracion SET nombreEmpresa=$1, rtn=$2, direccion=$3, telefono=$4, correo=$5, cai=$6, rangoInicial=$7, rangoFinal=$8, fechaLimite=$9, isv=$10, mensajeFinal=$11`,
+                [nombreEmpresa, rtn, direccion, telefono, correo, cai, rangoInicial, rangoFinal, fechaLimite, isv, mensajeFinal]);
         }
-        
-        res.json({ message: 'Configuración guardada correctamente' });
+        res.json({ message: 'Configuración guardada' });
     } catch(e) { handleDbError(res, e); }
 });
 
