@@ -1,10 +1,9 @@
-
 const express = require('express');
 const router = express.Router();
 const { pool, handleDbError, updateArqueoBalance } = require('../config/db');
 const { authenticateToken } = require('../middleware/auth');
 
-// --- AUDITORÍA DE MOVIMIENTOS (FIX: Ambigüedad de columnas) ---
+// --- AUDITORÍA DE MOVIMIENTOS ---
 router.get('/audit/transactions', authenticateToken, async (req, res) => {
     try {
         const { date } = req.query;

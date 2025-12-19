@@ -1,4 +1,3 @@
-
 import {
   Usuario, Empleado, Rol, Caja, Permiso,
   Cliente, Proveedor, Categoria, Ubicacion, Telefono, Accesorio, Inventario, ProductoUnified,
@@ -90,7 +89,7 @@ export const ClientService = {
 };
 
 export const SalesService = {
-  getVentasDiarias: (fecha?: string) => request<Venta[]>(`/ventas/historial${fecha ? `?fecha=${fecha}` : ''}`),
+  getVentasDiDaily: (fecha?: string) => request<Venta[]>(`/ventas/historial${fecha ? `?fecha=${fecha}` : ''}`),
   getVenta: (id: string) => request<Venta>(`/ventas/${id}`),
   createVenta: (data: VentaPayload) => request<{codVenta: string}>('/ventas', { method: 'POST', body: JSON.stringify(data) }),
   updateVenta: (id: string, data: VentaPayload) => request<{codVenta: string}>(`/ventas/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
