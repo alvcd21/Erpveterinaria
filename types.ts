@@ -1,5 +1,4 @@
 
-
 export type EstadoGeneral = 'Activo' | 'Inactivo' | 'Disponible' | 'Vendido' | 'Completada' | 'Anulada' | 'Cerrada' | 'Registrado';
 
 export interface Usuario {
@@ -135,6 +134,8 @@ export interface ProductoUnified {
   stock: number;
   imei?: string;
   ubicacion: string;
+  marca?: string;       // Added for POS filtering
+  categoria?: string;   // Added for POS filtering
 }
 
 export interface DetalleVenta {
@@ -163,7 +164,6 @@ export interface Venta {
   isv?: number;
   descuento?: number;
   detalles?: DetalleVenta[];
-  // Campos calculados o del vendedor para impresión
   nombreVendedor?: string; 
   direccionCliente?: string;
 }
@@ -208,7 +208,6 @@ export interface Egreso {
   monto: number;
   fechaCreacion?: string;
   estado: string;
-  // Added missing properties to support categorization and partner assignment
   categoria?: string;
   idSocioAsignado?: number | null;
 }
@@ -241,7 +240,6 @@ export interface Costo {
   estado: EstadoGeneral;
 }
 
-// --- CONFIGURACION EMPRESA (SAR) ---
 export interface EmpresaConfig {
   id?: number;
   nombreEmpresa: string;
@@ -257,7 +255,6 @@ export interface EmpresaConfig {
   mensajeFinal: string;
 }
 
-// --- CONTABILIDAD Y SOCIOS ---
 export interface Socio {
   idSocio: number;
   nombre: string;
@@ -272,7 +269,7 @@ export interface GastoContable {
   monto: number;
   fecha: string;
   categoria: 'Operativo' | 'Administrativo' | 'Ventas' | 'Personal' | 'Financiero';
-  idSocioAsignado?: number | null; // Null si es gasto de empresa, ID si es gasto personal de socio
+  idSocioAsignado?: number | null; 
   nombreSocio?: string;
   origenFondo: 'Caja' | 'Banco' | 'Tarjeta';
 }
@@ -293,17 +290,15 @@ export interface ReporteFinanciero {
   }[];
 }
 
-// --- CONTABILIDAD AVANZADA (COGS & P&L) ---
-
 export interface ComponenteCosto {
   id: number;
-  nombre: string; // e.g., 'Empaque', 'Transporte'
+  nombre: string; 
   naturaleza: 'Fijo' | 'Porcentual';
 }
 
 export interface CostoProducto {
   id: number;
-  idProducto: string; // Link to Telefono.codigo or Accesorio.codAccesorio
+  idProducto: string; 
   tipoProducto: 'TELEFONO' | 'ACCESORIO';
   idComponente: number;
   valor: number;
@@ -314,7 +309,7 @@ export interface PresupuestoMensual {
   id?: number;
   mes: number;
   anio: number;
-  categoria: string; // 'Ventas', 'CostoVentas', 'GastosOperativos'
+  categoria: string; 
   montoBase: number;
   montoMejor: number;
   montoPeor: number;
@@ -324,7 +319,7 @@ export interface DailyTrackingRow {
   fecha: string;
   diaSemana: string;
   ventaTotal: number;
-  costosDirectos: number; // Calculated COGS
+  costosDirectos: number; 
   gastosOperativos: number;
   gananciaBruta: number;
   gananciaNeta: number;
@@ -338,59 +333,44 @@ export interface PnLRow {
   isTotal?: boolean;
 }
 
-// --- LABEL DESIGNER TYPES ---
-
 export type ElementType = 'TEXT' | 'BARCODE' | 'QR' | 'IMAGE' | 'SHAPE' | 'DETAIL_TABLE';
 
 export interface LabelElement {
   id: string;
   type: ElementType;
-  x: number; // units (mm or cm)
-  y: number; // units
-  width: number; // units
-  height: number; // units
-  rotation: number; // degrees
-  
-  // Content & Variables
-  content: string; // Puede contener texto estático y variables: "Precio: {{PRECIO}} {{MONEDA}}"
-  variableField?: string; // DEPRECATED: Use content template string instead
-  
-  // Text Styling
+  x: number; 
+  y: number; 
+  width: number; 
+  height: number; 
+  rotation: number; 
+  content: string; 
+  variableField?: string; 
   fontFamily?: string;
-  fontSize?: number; // pt
-  fontWeight?: string; // 'bold', 'normal'
-  color?: string; // hex
+  fontSize?: number; 
+  fontWeight?: string; 
+  color?: string; 
   textAlign?: 'left' | 'center' | 'right';
-  
-  // Advanced Text Properties
-  isMultiline?: boolean; // Permitir salto de línea
+  isMultiline?: boolean; 
   lineHeight?: number; 
-  isStretchWithOverflow?: boolean; // NUEVO: Si true, el elemento empuja a los de abajo
-  
-  // Shape/Image specific
+  isStretchWithOverflow?: boolean; 
   shapeType?: 'RECTANGLE' | 'LINE' | 'CIRCLE';
   fill?: string;
   stroke?: string;
   strokeWidth?: number;
   borderRadius?: number;
-  
-  // Barcode specific
-  barcodeFormat?: string; // 'CODE128', 'EAN13'
+  barcodeFormat?: string; 
   displayValue?: boolean;
 }
 
 export interface LabelTemplate {
-  id: string; // UUID
+  id: string; 
   name: string;
-  
-  // Strict Categories for Logic Separation
   category?: 'GENERAL' | 'TELEPHONE' | 'ACCESSORY' | 'INVOICE' | 'REPORT'; 
-  type?: 'LABEL' | 'DOCUMENT'; // LABEL uses mm, DOCUMENT uses cm
+  type?: 'LABEL' | 'DOCUMENT'; 
   dataSource?: 'NONE' | 'TELEPHONES' | 'INVENTORY_ACCESSORIES' | 'SALES' | 'CLIENTS' | 'FULL_DB';
-  
   isDefault: boolean;
-  width: number; // units based on type
-  height: number; // units based on type
+  width: number; 
+  height: number; 
   elements: LabelElement[];
   createdAt?: string;
 }

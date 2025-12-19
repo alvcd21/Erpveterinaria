@@ -16,7 +16,9 @@ router.get('/productos/unificados', authenticateToken, async (req, res) => {
                 precioVenta as "precioVenta", 
                 1 as stock, 
                 imei1 as imei, 
-                idubicacion as ubicacion 
+                idubicacion as ubicacion,
+                marca as marca,
+                NULL as categoria
             FROM telefonos WHERE estado = 'Disponible'
             UNION ALL
             SELECT 
@@ -27,9 +29,12 @@ router.get('/productos/unificados', authenticateToken, async (req, res) => {
                 i.precioVenta as "precioVenta", 
                 i.cantidad as stock, 
                 NULL as imei, 
-                i.idubicacion as ubicacion
+                i.idubicacion as ubicacion,
+                NULL as marca,
+                c.tipo as categoria
             FROM inventario i
             JOIN accesorios a ON i.codAccesorio = a.codAccesorio
+            LEFT JOIN categoria c ON a.codCategoria = c.codCategoria
             WHERE i.cantidad > 0 AND (i.estado = 'Disponible' OR i.estado = 'Activo')
         `;
         const result = await pool.query(query);
@@ -59,10 +64,7 @@ router.get('/inventory/telefonos', authenticateToken, async (req, res) => {
 router.post('/inventory/telefonos', authenticateToken, async (req, res) => {
     try {
         const { imei1, imei2, marca, modelo, precioCompra, precioVenta, codProveedor, fecha, idubicacion } = req.body;
-        
-        // CORRECCION: Validar imei2 para evitar error NOT NULL
         const safeImei2 = imei2 || ''; 
-
         const codigo = await generateNextId('telefonos', 'codigo', 'TEL');
         await pool.query(
             `INSERT INTO telefonos (codigo, imei1, imei2, marca, modelo, precioCompra, precioVenta, codProveedor, fecha, idubicacion, estado)
@@ -76,10 +78,7 @@ router.post('/inventory/telefonos', authenticateToken, async (req, res) => {
 router.put('/inventory/telefonos/:id', authenticateToken, async (req, res) => {
     try {
         const { imei1, imei2, marca, modelo, precioCompra, precioVenta, codProveedor, fecha, idubicacion } = req.body;
-        
-        // CORRECCION: Validar imei2 para evitar error NOT NULL
         const safeImei2 = imei2 || '';
-
         await pool.query(
             `UPDATE telefonos SET imei1=$1, imei2=$2, marca=$3, modelo=$4, precioCompra=$5, precioVenta=$6, codProveedor=$7, fecha=$8, idubicacion=$9 
              WHERE codigo=$10`,
@@ -125,7 +124,6 @@ router.get('/inventory/stock', authenticateToken, async (req, res) => {
 router.post('/inventory/stock', authenticateToken, async (req, res) => {
     try {
         const { codAccesorio, cantidad, precioCompra, precioVenta, codProveedor, fecha, idubicacion, estado } = req.body;
-        // Prefijo INVT para inventario
         const codInventario = await generateNextId('inventario', 'codInventario', 'INVT');
         await pool.query(
             `INSERT INTO inventario (codInventario, codAccesorio, cantidad, precioCompra, precioVenta, codProveedor, fecha, idubicacion, estado)
@@ -169,7 +167,6 @@ router.get('/inventory/accesorios-master', authenticateToken, async (req, res) =
 router.post('/inventory/accesorios-master', authenticateToken, async (req, res) => {
     try {
         const { codCategoria, descripcion } = req.body;
-        // Prefijo ACCS para accesorios
         const id = await generateNextId('accesorios', 'codAccesorio', 'ACCS');
         await pool.query('INSERT INTO accesorios VALUES ($1, $2, $3)', [id, codCategoria, descripcion]);
         res.status(201).json({ message: 'Accesorio creado' });
@@ -201,7 +198,6 @@ router.get('/inventory/categorias', authenticateToken, async (req, res) => {
 
 router.post('/inventory/categorias', authenticateToken, async (req, res) => {
     try {
-        // CAMBIO SOLICITADO: Prefijo CATG
         const id = await generateNextId('categoria', 'codCategoria', 'CATG');
         await pool.query('INSERT INTO categoria VALUES ($1, $2)', [id, req.body.tipo]);
         res.status(201).json({ message: 'Categoría creada' });
@@ -289,7 +285,7 @@ router.delete('/proveedores/:id', authenticateToken, async (req, res) => {
     } catch(e) { handleDbError(res, e); }
 });
 
-// --- PAQUETES (NUEVO) ---
+// --- PAQUETES ---
 router.get('/paquetes', authenticateToken, async (req, res) => {
     try {
         const r = await pool.query('SELECT idPaquete as "idPaquete", red, nombre, precio, costo, estado FROM paquetes');
