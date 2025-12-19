@@ -32,39 +32,6 @@ router.get('/admin/boxes/status', authenticateToken, async (req, res) => {
     } catch(e) { handleDbError(res, e); }
 });
 
-// --- ESQUEMA DE BASE DE DATOS ---
-router.get('/schema', authenticateToken, async (req, res) => {
-    try {
-        const colsQuery = `
-            SELECT table_name, column_name, data_type 
-            FROM information_schema.columns 
-            WHERE table_schema = 'public' 
-            AND table_name IN ('ventas', 'detalleventa', 'clientes', 'telefonos', 'inventario', 'proveedores', 'usuarios', 'caja', 'ingresos', 'egresos', 'accesorios', 'categoria', 'ubicacion')
-            ORDER BY table_name, ordinal_position;
-        `;
-        const colsResult = await pool.query(colsQuery);
-        const relsQuery = `
-            SELECT tc.table_name, kcu.column_name, ccu.table_name AS foreign_table_name, ccu.column_name AS foreign_column_name 
-            FROM information_schema.table_constraints AS tc 
-            JOIN information_schema.key_column_usage AS kcu ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema
-            JOIN information_schema.constraint_column_usage AS ccu ON ccu.constraint_name = tc.constraint_name AND ccu.table_schema = tc.table_schema
-            WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema='public';
-        `;
-        const relsResult = await pool.query(relsQuery);
-        const schema = colsResult.rows.reduce((acc, row) => {
-            if (!acc[row.table_name]) acc[row.table_name] = { columns: [], relations: [] };
-            acc[row.table_name].columns.push({ name: row.column_name, type: row.data_type });
-            return acc;
-        }, {});
-        relsResult.rows.forEach(rel => {
-            if (schema[rel.table_name]) {
-                schema[rel.table_name].relations.push({ column: rel.column_name, foreignTable: rel.foreign_table_name, foreignColumn: rel.foreign_column_name });
-            }
-        });
-        res.json(schema);
-    } catch(e) { handleDbError(res, e); }
-});
-
 // --- USUARIOS ---
 router.get('/users', authenticateToken, async (req, res) => {
     try {
@@ -239,7 +206,15 @@ router.delete('/cajas/:id', authenticateToken, async (req, res) => {
     } catch(e) { handleDbError(res, e); }
 });
 
-// --- CONFIGURACIÓN EMPRESA ---
+// --- SCHEMA & CONFIG ---
+router.get('/schema', authenticateToken, async (req, res) => {
+    try {
+        const colsQuery = `SELECT table_name, column_name, data_type FROM information_schema.columns WHERE table_schema = 'public' ORDER BY table_name`;
+        const result = await pool.query(colsQuery);
+        res.json(result.rows);
+    } catch(e) { handleDbError(res, e); }
+});
+
 router.get('/config', authenticateToken, async (req, res) => {
     try {
         const r = await pool.query(`SELECT nombreEmpresa as "nombreEmpresa", rtn, direccion, telefono, correo, cai, rangoInicial as "rangoInicial", rangoFinal as "rangoFinal", TO_CHAR(fechaLimite, 'YYYY-MM-DD') as "fechaLimite", isv, mensajeFinal as "mensajeFinal" FROM configuracion LIMIT 1`);
@@ -250,14 +225,8 @@ router.get('/config', authenticateToken, async (req, res) => {
 router.put('/config', authenticateToken, async (req, res) => {
     try {
         const { nombreEmpresa, rtn, direccion, telefono, correo, cai, rangoInicial, rangoFinal, fechaLimite, isv, mensajeFinal } = req.body;
-        const check = await pool.query('SELECT 1 FROM configuracion LIMIT 1');
-        if (check.rows.length === 0) {
-            await pool.query(`INSERT INTO configuracion (nombreEmpresa, rtn, direccion, telefono, correo, cai, rangoInicial, rangoFinal, fechaLimite, isv, mensajeFinal) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-                [nombreEmpresa, rtn, direccion, telefono, correo, cai, rangoInicial, rangoFinal, fechaLimite, isv, mensajeFinal]);
-        } else {
-            await pool.query(`UPDATE configuracion SET nombreEmpresa=$1, rtn=$2, direccion=$3, telefono=$4, correo=$5, cai=$6, rangoInicial=$7, rangoFinal=$8, fechaLimite=$9, isv=$10, mensajeFinal=$11`,
-                [nombreEmpresa, rtn, direccion, telefono, correo, cai, rangoInicial, rangoFinal, fechaLimite, isv, mensajeFinal]);
-        }
+        await pool.query(`UPDATE configuracion SET nombreEmpresa=$1, rtn=$2, direccion=$3, telefono=$4, correo=$5, cai=$6, rangoInicial=$7, rangoFinal=$8, fechaLimite=$9, isv=$10, mensajeFinal=$11`,
+            [nombreEmpresa, rtn, direccion, telefono, correo, cai, rangoInicial, rangoFinal, fechaLimite, isv, mensajeFinal]);
         res.json({ message: 'Configuración guardada' });
     } catch(e) { handleDbError(res, e); }
 });
