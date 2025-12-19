@@ -1,7 +1,6 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { InventoryService, ClientService, SalesService, CashService, ConfigService } from '../services/api';
-import { ProductoUnified, DetalleVenta, Cliente, EmpresaConfig, VentaPayload } from '../types';
+import { ProductoUnified, DetalleVenta, Cliente, EmpresaConfig, VentaPayload, Venta } from '../types';
 import { Search, ShoppingCart, Trash2, CreditCard, Smartphone, Zap, RefreshCw, List, LayoutGrid, UserPlus, X, Plus, Minus } from 'lucide-react';
 import Swal from 'sweetalert2';
 // Re-verified useNavigate and useLocation imports from react-router-dom v6
@@ -9,7 +8,6 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import 'jspdf-autotable';
 
-// Fix for Error in file pages/POS.tsx on line 14: Completed the function to return a string and added logic for currency format.
 // Helper robusto para números a letras (Soporta miles y millones)
 const numeroALetras = (num: number): string => {
     const unidades = ['', 'UNO', 'DOS', 'TRES', 'CUATRO', 'CINCO', 'SEIS', 'SIETE', 'OCHO', 'NUEVE'];
@@ -62,7 +60,6 @@ const numeroALetras = (num: number): string => {
     return `${result.trim()} LEMPIRAS CON ${decimalPart.toString().padStart(2, '0')}/100 CENTAVOS`;
 };
 
-// Fix for Error in file App.tsx on line 9: Defined and exported POS as default to satisfy the import requirement.
 const POS: React.FC = () => {
     const navigate = useNavigate();
     const location = useLocation();
@@ -94,9 +91,32 @@ const POS: React.FC = () => {
                     setIsvPercentage(cfg.isv || 15);
                 }
 
-                // Handle custom item from CashRegister redirect if present
+                // --- Lógica de Edición y Carga de Estado ---
                 const state = location.state as any;
-                if (state?.customItem) {
+                
+                if (state?.editSaleId && state?.saleData) {
+                    const sale = state.saleData as Venta;
+                    // Poblar cliente, tipo pago y descuento
+                    const foundClient = clis.find(c => c.identidad === sale.identidadCliente);
+                    setSelectedClient(foundClient || { identidad: sale.identidadCliente, nombre: sale.nombreCliente || 'Cliente', apellido: '', direccion: '', telefono: '' } as Cliente);
+                    setPaymentType(sale.tipoCompra);
+                    setDiscount(Number(sale.descuento || 0));
+
+                    // Cargar detalles específicos de la venta para el carrito
+                    const details = await SalesService.getDetallesVenta(state.editSaleId);
+                    setCart(details);
+                    
+                    Swal.fire({
+                        title: 'Modo Edición',
+                        text: `Editando Factura #${state.editSaleId}`,
+                        icon: 'info',
+                        toast: true,
+                        position: 'top-end',
+                        timer: 3000,
+                        showConfirmButton: false
+                    });
+                } 
+                else if (state?.customItem) {
                     const item = state.customItem;
                     setCart([{
                         idInventario: 'CUSTOM',
@@ -154,28 +174,42 @@ const POS: React.FC = () => {
         if (!selectedClient) return Swal.fire('Error', 'Seleccione un cliente.', 'error');
         if (cart.length === 0) return;
 
+        const state = location.state as any;
+        const isEditing = !!state?.editSaleId;
+
         const result = await Swal.fire({
-            title: '¿Finalizar Venta?',
+            title: isEditing ? '¿Guardar Cambios?' : '¿Finalizar Venta?',
             text: `Total: L. ${total.toLocaleString()}`,
             icon: 'question',
             showCancelButton: true,
-            confirmButtonText: 'Procesar',
+            confirmButtonText: isEditing ? 'Actualizar' : 'Procesar',
             cancelButtonText: 'Cancelar'
         });
 
         if (result.isConfirmed) {
             try {
-                await SalesService.createVenta({
+                const payload: VentaPayload = {
                     identidadCliente: selectedClient.identidad,
                     tipoCompra: paymentType,
                     total: total,
                     isv: subtotal * (isvPercentage / 100),
                     descuento: discount,
                     detalles: cart
-                });
-                Swal.fire('Venta Realizada', 'El registro se guardó correctamente.', 'success');
+                };
+
+                if (isEditing) {
+                    await SalesService.updateVenta(state.editSaleId, payload);
+                    Swal.fire('Actualizada', 'La factura ha sido modificada correctamente.', 'success');
+                } else {
+                    await SalesService.createVenta(payload);
+                    Swal.fire('Venta Realizada', 'El registro se guardó correctamente.', 'success');
+                }
+
                 setCart([]);
                 setSelectedClient(null);
+                setDiscount(0);
+                // Limpiar el estado de navegación para salir del modo edición
+                navigate('/pos', { state: {}, replace: true });
                 const updatedProds = await InventoryService.getUnifiedProducts();
                 setProducts(updatedProds);
             } catch (error: any) {
@@ -292,7 +326,7 @@ const POS: React.FC = () => {
                         disabled={cart.length === 0}
                         className="w-full mt-4 py-4 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white font-black rounded-2xl shadow-lg transition-all flex items-center justify-center gap-2 uppercase tracking-widest text-sm"
                     >
-                        <CreditCard size={18}/> Procesar Pago
+                        <CreditCard size={18}/> {location.state?.editSaleId ? 'Actualizar Factura' : 'Procesar Pago'}
                     </button>
                 </div>
             </div>
