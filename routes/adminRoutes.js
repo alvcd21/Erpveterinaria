@@ -5,7 +5,7 @@ const bcrypt = require('bcryptjs');
 const { pool, generateNextId, handleDbError } = require('../config/db');
 const { authenticateToken } = require('../middleware/auth');
 
-// --- PANEL DE CONTROL DE CAJAS (ENDPOINT RESTAURADO) ---
+// --- PANEL DE CONTROL DE CAJAS ---
 router.get('/admin/boxes/status', authenticateToken, async (req, res) => {
     try {
         const query = `
@@ -14,9 +14,9 @@ router.get('/admin/boxes/status', authenticateToken, async (req, res) => {
                 c.nombre as "nombreCaja", 
                 a.idArqueo as "idArqueo", 
                 a.estado as "estadoArqueo", 
-                a.montoInicial as "montoInicial", 
-                a.montoFinal as "montoFinal", 
-                a.ganancia as "ganancia", 
+                COALESCE(a.montoInicial, 0) as "montoInicial", 
+                COALESCE(a.montoFinal, 0) as "montoFinal", 
+                COALESCE(a.ganancia, 0) as "ganancia", 
                 a.fechaApertura as "fechaApertura", 
                 a.fechaCierre as "fechaCierre",
                 u.usuario,
@@ -53,7 +53,7 @@ router.post('/users', authenticateToken, async (req, res) => {
         const hashedPassword = await bcrypt.hash(password, 10);
         await pool.query(`INSERT INTO usuarios (codUsuario, usuario, password, identidad, idCaja, idrol, estado, fechaCreacion) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())`,
             [codUsuario, usuario, hashedPassword, identidad, idCaja, idrol, estado]);
-        res.status(201).json({ message: 'Usuario creado', codUsuario });
+        res.status(201).json({ message: 'OK', codUsuario });
     } catch(e) { handleDbError(res, e); }
 });
 
@@ -70,14 +70,14 @@ router.put('/users/:id', authenticateToken, async (req, res) => {
         query += ` WHERE codUsuario=$${params.length + 1}`;
         params.push(req.params.id);
         await pool.query(query, params);
-        res.json({ message: 'Usuario actualizado' });
+        res.json({ message: 'OK' });
     } catch(e) { handleDbError(res, e); }
 });
 
 router.delete('/users/:id', authenticateToken, async (req, res) => {
     try {
         await pool.query('DELETE FROM usuarios WHERE codUsuario=$1', [req.params.id]);
-        res.json({ message: 'Usuario eliminado' });
+        res.json({ message: 'OK' });
     } catch(e) { handleDbError(res, e); }
 });
 
@@ -94,7 +94,7 @@ router.post('/empleados', authenticateToken, async (req, res) => {
         const { identidad, nombre, apellido, direccion, telefono, estado } = req.body;
         await pool.query('INSERT INTO empleado (identidad, nombre, apellido, direccion, telefono, estado, fechaCreacion) VALUES ($1,$2,$3,$4,$5,$6, NOW())',
             [identidad, nombre, apellido, direccion, telefono, estado]);
-        res.status(201).json({ message: 'Empleado creado' });
+        res.status(201).json({ message: 'OK' });
     } catch(e) { handleDbError(res, e); }
 });
 
@@ -103,14 +103,14 @@ router.put('/empleados/:id', authenticateToken, async (req, res) => {
         const { nombre, apellido, direccion, telefono, estado } = req.body;
         await pool.query('UPDATE empleado SET nombre=$1, apellido=$2, direccion=$3, telefono=$4, estado=$5 WHERE identidad=$6',
             [nombre, apellido, direccion, telefono, estado, req.params.id]);
-        res.json({ message: 'Empleado actualizado' });
+        res.json({ message: 'OK' });
     } catch(e) { handleDbError(res, e); }
 });
 
 router.delete('/empleados/:id', authenticateToken, async (req, res) => {
     try {
         await pool.query('DELETE FROM empleado WHERE identidad=$1', [req.params.id]);
-        res.json({ message: 'Empleado eliminado' });
+        res.json({ message: 'OK' });
     } catch(e) { handleDbError(res, e); }
 });
 
@@ -139,7 +139,7 @@ router.post('/roles', authenticateToken, async (req, res) => {
             }
         }
         await client.query('COMMIT');
-        res.status(201).json({ message: 'Rol creado' });
+        res.status(201).json({ message: 'OK' });
     } catch(e) { await client.query('ROLLBACK'); handleDbError(res, e); } finally { client.release(); }
 });
 
@@ -156,14 +156,14 @@ router.put('/roles/:id', authenticateToken, async (req, res) => {
             }
         }
         await client.query('COMMIT');
-        res.json({ message: 'Rol actualizado' });
+        res.json({ message: 'OK' });
     } catch(e) { await client.query('ROLLBACK'); handleDbError(res, e); } finally { client.release(); }
 });
 
 router.delete('/roles/:id', authenticateToken, async (req, res) => {
     try {
         await pool.query('DELETE FROM roles WHERE idrol=$1', [req.params.id]);
-        res.json({ message: 'Rol eliminado' });
+        res.json({ message: 'OK' });
     } catch(e) { handleDbError(res, e); }
 });
 
@@ -187,7 +187,7 @@ router.post('/cajas', authenticateToken, async (req, res) => {
         const { nombre } = req.body;
         const idCaja = await generateNextId('caja', 'idCaja', 'CAJA');
         await pool.query('INSERT INTO caja (idCaja, nombre, estado) VALUES ($1, $2, $3)', [idCaja, nombre, 'Activo']);
-        res.status(201).json({ message: 'Caja creada', idCaja });
+        res.status(201).json({ message: 'OK', idCaja });
     } catch(e) { handleDbError(res, e); }
 });
 
@@ -195,26 +195,18 @@ router.put('/cajas/:id', authenticateToken, async (req, res) => {
     try {
         const { nombre, estado } = req.body;
         await pool.query('UPDATE caja SET nombre=$1, estado=$2 WHERE idCaja=$3', [nombre, estado, req.params.id]);
-        res.json({ message: 'Caja actualizada' });
+        res.json({ message: 'OK' });
     } catch(e) { handleDbError(res, e); }
 });
 
 router.delete('/cajas/:id', authenticateToken, async (req, res) => {
     try {
         await pool.query('DELETE FROM caja WHERE idCaja=$1', [req.params.id]);
-        res.json({ message: 'Caja eliminada' });
+        res.json({ message: 'OK' });
     } catch(e) { handleDbError(res, e); }
 });
 
-// --- SCHEMA & CONFIG ---
-router.get('/schema', authenticateToken, async (req, res) => {
-    try {
-        const colsQuery = `SELECT table_name, column_name, data_type FROM information_schema.columns WHERE table_schema = 'public' ORDER BY table_name`;
-        const result = await pool.query(colsQuery);
-        res.json(result.rows);
-    } catch(e) { handleDbError(res, e); }
-});
-
+// --- CONFIGURACIÓN EMPRESA ---
 router.get('/config', authenticateToken, async (req, res) => {
     try {
         const r = await pool.query(`SELECT nombreEmpresa as "nombreEmpresa", rtn, direccion, telefono, correo, cai, rangoInicial as "rangoInicial", rangoFinal as "rangoFinal", TO_CHAR(fechaLimite, 'YYYY-MM-DD') as "fechaLimite", isv, mensajeFinal as "mensajeFinal" FROM configuracion LIMIT 1`);
@@ -225,9 +217,34 @@ router.get('/config', authenticateToken, async (req, res) => {
 router.put('/config', authenticateToken, async (req, res) => {
     try {
         const { nombreEmpresa, rtn, direccion, telefono, correo, cai, rangoInicial, rangoFinal, fechaLimite, isv, mensajeFinal } = req.body;
-        await pool.query(`UPDATE configuracion SET nombreEmpresa=$1, rtn=$2, direccion=$3, telefono=$4, correo=$5, cai=$6, rangoInicial=$7, rangoFinal=$8, fechaLimite=$9, isv=$10, mensajeFinal=$11`,
-            [nombreEmpresa, rtn, direccion, telefono, correo, cai, rangoInicial, rangoFinal, fechaLimite, isv, mensajeFinal]);
-        res.json({ message: 'Configuración guardada' });
+        const check = await pool.query('SELECT 1 FROM configuracion LIMIT 1');
+        if (check.rows.length === 0) {
+            await pool.query(`INSERT INTO configuracion (nombreEmpresa, rtn, direccion, telefono, correo, cai, rangoInicial, rangoFinal, fechaLimite, isv, mensajeFinal) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+                [nombreEmpresa, rtn, direccion, telefono, correo, cai, rangoInicial, rangoFinal, fechaLimite, isv, mensajeFinal]);
+        } else {
+            await pool.query(`UPDATE configuracion SET nombreEmpresa=$1, rtn=$2, direccion=$3, telefono=$4, correo=$5, cai=$6, rangoInicial=$7, rangoFinal=$8, fechaLimite=$9, isv=$10, mensajeFinal=$11`,
+                [nombreEmpresa, rtn, direccion, telefono, correo, cai, rangoInicial, rangoFinal, fechaLimite, isv, mensajeFinal]);
+        }
+        res.json({ message: 'OK' });
+    } catch(e) { handleDbError(res, e); }
+});
+
+// --- SCHEMA ---
+router.get('/schema', authenticateToken, async (req, res) => {
+    try {
+        const colsQuery = `
+            SELECT table_name, column_name, data_type 
+            FROM information_schema.columns 
+            WHERE table_schema = 'public' 
+            ORDER BY table_name, ordinal_position;
+        `;
+        const colsResult = await pool.query(colsQuery);
+        const schema = colsResult.rows.reduce((acc, row) => {
+            if (!acc[row.table_name]) acc[row.table_name] = { columns: [], relations: [] };
+            acc[row.table_name].columns.push({ name: row.column_name, type: row.data_type });
+            return acc;
+        }, {});
+        res.json(schema);
     } catch(e) { handleDbError(res, e); }
 });
 
