@@ -251,14 +251,15 @@ router.put('/ventas/:id/anular', authenticateToken, async (req, res) => {
         if(openBox.rows.length === 0) return res.status(400).json({ error: "Caja cerrada. No se puede anular venta." });
 
         await client.query('BEGIN');
-        const localTimestamp = getLocalTimestamp();
+        
         const ventaRes = await client.query('SELECT total, estado FROM ventas WHERE codVenta = $1', [codVenta]);
         if(ventaRes.rows.length === 0) throw new Error("Venta no encontrada");
         if(ventaRes.rows[0].estado === 'Anulada') throw new Error("Venta ya anulada");
         
-        const totalDevolver = parseFloat(ventaRes.rows[0].total);
-        const detallesRes = await client.query('SELECT idTelefono, idAccesorio, cantidad FROM detalleventa WHERE idVenta = $1', [codVenta]);
+        const detallesRes = await client.query('SELECT idTelefono, idAccesorio, idIngreso, cantidad FROM detalleventa WHERE idVenta = $1', [codVenta]);
         
+        let idIngresoAEliminar = null;
+
         for (const det of detallesRes.rows) {
             if(det.idtelefono) {
                 await client.query("UPDATE telefonos SET estado = 'Disponible' WHERE codigo = $1", [det.idtelefono]);
@@ -266,18 +267,20 @@ router.put('/ventas/:id/anular', authenticateToken, async (req, res) => {
                 // Revertimos stock usando idaccesorio que almacena el codInventario
                 await client.query("UPDATE inventario SET cantidad = cantidad + $1 WHERE codInventario = $2", [det.cantidad, det.idaccesorio]);
             }
+            if (det.idingreso) idIngresoAEliminar = det.idingreso;
         }
 
+        // MARCAR VENTA COMO ANULADA
         await client.query("UPDATE ventas SET estado = 'Anulada' WHERE codVenta = $1", [codVenta]);
-        const idegresos = await generateNextId('egresos', 'idegresos', 'EGRE', client);
-        await client.query(
-            `INSERT INTO egresos (idegresos, idCaja, descripcion, monto, fechaCreacion, estado) VALUES ($1, $2, $3, $4, $5, 'Anulación Venta')`,
-            [idegresos, idCaja, `Devolución/Anulación Fac #${codVenta}`, totalDevolver, localTimestamp]
-        );
+
+        // ELIMINAR EL INGRESO ORIGINAL (En lugar de crear un egreso)
+        if (idIngresoAEliminar) {
+            await client.query("DELETE FROM ingresos WHERE idIngreso = $1", [idIngresoAEliminar]);
+        }
 
         await updateArqueoBalance(idCaja, client);
         await client.query('COMMIT');
-        res.json({ message: 'Venta anulada y stock revertido' });
+        res.json({ message: 'Venta anulada e ingreso eliminado correctamente' });
     } catch(err) { await client.query('ROLLBACK'); handleDbError(res, err); } finally { client.release(); }
 });
 
