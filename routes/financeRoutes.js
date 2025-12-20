@@ -21,7 +21,7 @@ router.get('/arqueo/active', authenticateToken, async (req, res) => {
 router.post('/arqueo/open', authenticateToken, async (req, res) => {
     const client = await pool.connect();
     try {
-        const { montoInicial, saldoTigoInicial, saldoClaroInicial, fechaLocal } = req.body;
+        const { montoInicial, saldoTigoInicial, saldoClaroInicial } = req.body;
         const { idCaja, codUsuario } = req.user;
 
         const active = await client.query(`SELECT 1 FROM arqueo WHERE idCaja = $1 AND estado = 'Activo'`, [idCaja]);
@@ -29,7 +29,9 @@ router.post('/arqueo/open', authenticateToken, async (req, res) => {
 
         await client.query('BEGIN');
         const idArqueo = await generateNextId('arqueo', 'idArqueo', 'ARQ', client);
-        const fecha = fechaLocal ? `${fechaLocal} ${new Date().toLocaleTimeString('en-US', {hour12:false})}` : getLocalTimestamp();
+        
+        // CORRECCIÓN: Siempre usar el timestamp del servidor para evitar desfases con el cliente
+        const fecha = getLocalTimestamp();
 
         await client.query(
             `INSERT INTO arqueo (idArqueo, idCaja, idUsuario, fechaApertura, montoInicial, estado) 
@@ -37,8 +39,7 @@ router.post('/arqueo/open', authenticateToken, async (req, res) => {
             [idArqueo, idCaja, codUsuario, fecha, montoInicial]
         );
 
-        // Inicializar saldos de recargas
-        const today = fechaLocal || new Date().toISOString().split('T')[0];
+        const today = fecha.substring(0, 10);
         const reds = ['TIGO', 'CLARO'];
         for (const red of reds) {
             const initialVal = red === 'TIGO' ? (saldoTigoInicial || 0) : (saldoClaroInicial || 0);
@@ -84,19 +85,30 @@ router.get('/arqueo/:id/details', authenticateToken, async (req, res) => {
         const arqRes = await pool.query(`SELECT * FROM arqueo WHERE idArqueo = $1`, [id]);
         if (arqRes.rows.length === 0) return res.status(404).json({ error: 'Sesión no encontrada' });
         const arq = arqRes.rows[0];
+        
+        // Margen de tolerancia para capturar ventas realizadas en el mismo minuto/segundo o con desfase UTC
         const fechaIni = arq.fechaapertura;
-        // Para sesiones cerradas, limitar al momento del cierre
         const fechaFin = arq.fechacierre || '9999-12-31';
 
         const ingRes = await pool.query(
             `SELECT idIngreso as "idIngreso", descripcion, monto, costo, fechaCreacion as "fechaCreacion" 
-             FROM ingresos WHERE idCaja = $1 AND fechaCreacion >= $2 AND fechaCreacion <= $3 ORDER BY fechaCreacion ASC`,
+             FROM ingresos 
+             WHERE idCaja = $1 
+             AND fechaCreacion >= ($2::timestamp - interval '12 hours')
+             AND fechaCreacion <= $3
+             AND TO_CHAR(fechaCreacion, 'YYYY-MM-DD') = TO_CHAR($2::timestamp, 'YYYY-MM-DD')
+             ORDER BY fechaCreacion ASC`,
             [arq.idcaja, fechaIni, fechaFin]
         );
 
         const egrRes = await pool.query(
             `SELECT idegresos as "idegresos", descripcion, monto, fechaCreacion as "fechaCreacion" 
-             FROM egresos WHERE idCaja = $1 AND fechaCreacion >= $2 AND fechaCreacion <= $3 ORDER BY fechaCreacion ASC`,
+             FROM egresos 
+             WHERE idCaja = $1 
+             AND fechaCreacion >= ($2::timestamp - interval '12 hours')
+             AND fechaCreacion <= $3
+             AND TO_CHAR(fechaCreacion, 'YYYY-MM-DD') = TO_CHAR($2::timestamp, 'YYYY-MM-DD')
+             ORDER BY fechaCreacion ASC`,
             [arq.idcaja, fechaIni, fechaFin]
         );
 

@@ -66,10 +66,7 @@ async function generateNextId(table, column, prefix, client = pool) {
 
 // Función CRÍTICA: Actualizar balance en tiempo real
 async function updateArqueoBalance(idCaja, client = pool) {
-    // console.log(`[DEBUG] Iniciando recálculo para caja: ${idCaja}`);
     try {
-        // 1. Obtener datos de la sesión activa
-        // IMPORTANTE: Usamos TO_CHAR para evitar que Node convierta la fecha a UTC y cambie el día
         const arqRes = await client.query(
             `SELECT idArqueo as "idArqueo", montoInicial as "montoInicial", 
              TO_CHAR(fechaApertura, 'YYYY-MM-DD HH24:MI:SS') as "fechaAperturaStr"
@@ -84,19 +81,22 @@ async function updateArqueoBalance(idCaja, client = pool) {
 
         const { idArqueo, montoInicial, fechaAperturaStr } = arqRes.rows[0];
         
-        // 2. Calcular sumatorias (Ingresos)
-        // Comparamos strings de fechas (YYYY-MM-DD HH:MM:SS) que es seguro en Postgres para TIMESTAMP sin zona
+        // CORRECCIÓN DE ZONA HORARIA: Se añade un buffer de 12 horas al inicio de la sesión
+        // para capturar movimientos que pudieran tener desajuste de hora servidor vs local.
         const ingRes = await client.query(`
             SELECT COALESCE(SUM(monto), 0) as total, COALESCE(SUM(costo), 0) as costo
             FROM ingresos 
-            WHERE idCaja = $1 AND fechaCreacion >= $2::timestamp
+            WHERE idCaja = $1 
+            AND fechaCreacion >= ($2::timestamp - interval '12 hours')
+            AND TO_CHAR(fechaCreacion, 'YYYY-MM-DD') = TO_CHAR($2::timestamp, 'YYYY-MM-DD')
         `, [idCaja, fechaAperturaStr]);
 
-        // 3. Calcular sumatorias (Egresos)
         const egrRes = await client.query(`
             SELECT COALESCE(SUM(monto), 0) as total
             FROM egresos 
-            WHERE idCaja = $1 AND fechaCreacion >= $2::timestamp
+            WHERE idCaja = $1 
+            AND fechaCreacion >= ($2::timestamp - interval '12 hours')
+            AND TO_CHAR(fechaCreacion, 'YYYY-MM-DD') = TO_CHAR($2::timestamp, 'YYYY-MM-DD')
         `, [idCaja, fechaAperturaStr]);
 
         const totalIngresos = Number(ingRes.rows[0].total);
@@ -104,11 +104,9 @@ async function updateArqueoBalance(idCaja, client = pool) {
         const totalEgresos = Number(egrRes.rows[0].total);
         const baseInicial = Number(montoInicial);
 
-        // Fórmula: Caja Final = Lo que había al inicio + Lo que entró - Lo que salió
         const montoFinal = (baseInicial + totalIngresos) - totalEgresos;
         const ganancia = totalIngresos - totalCostos;
 
-        // 3. Impactar en base de datos
         await client.query(`
             UPDATE arqueo 
             SET 
