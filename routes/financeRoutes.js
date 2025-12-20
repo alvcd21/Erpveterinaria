@@ -30,7 +30,6 @@ router.post('/arqueo/open', authenticateToken, async (req, res) => {
         await client.query('BEGIN');
         const idArqueo = await generateNextId('arqueo', 'idArqueo', 'ARQ', client);
         
-        // CORRECCIÓN: Siempre usar el timestamp del servidor para evitar desfases con el cliente
         const fecha = getLocalTimestamp();
 
         await client.query(
@@ -86,7 +85,6 @@ router.get('/arqueo/:id/details', authenticateToken, async (req, res) => {
         if (arqRes.rows.length === 0) return res.status(404).json({ error: 'Sesión no encontrada' });
         const arq = arqRes.rows[0];
         
-        // Margen de tolerancia para capturar ventas realizadas en el mismo minuto/segundo o con desfase UTC
         const fechaIni = arq.fechaapertura;
         const fechaFin = arq.fechacierre || '9999-12-31';
 
@@ -185,8 +183,8 @@ router.get('/ingresos', authenticateToken, async (req, res) => {
 
 router.post('/ingresos', authenticateToken, async (req, res) => {
     try {
-        const { descripcion, monto, costo, fechaCreacion } = req.body;
-        const { idCaja } = req.user;
+        const { descripcion, monto, costo, fechaCreacion, idCaja: bodyIdCaja } = req.body;
+        const idCaja = bodyIdCaja || req.user.idCaja;
         const id = await generateNextId('ingresos', 'idIngreso', 'INGR');
         await pool.query(`INSERT INTO ingresos (idIngreso, idCaja, descripcion, monto, costo, fechaCreacion, estado) VALUES ($1,$2,$3,$4,$5,$6,'Registrado')`,
             [id, idCaja, descripcion, monto, costo || 0, fechaCreacion || getLocalTimestamp()]);
@@ -227,8 +225,8 @@ router.get('/egresos', authenticateToken, async (req, res) => {
 
 router.post('/egresos', authenticateToken, async (req, res) => {
     try {
-        const { descripcion, monto, fechaCreacion } = req.body;
-        const { idCaja } = req.user;
+        const { descripcion, monto, fechaCreacion, idCaja: bodyIdCaja } = req.body;
+        const idCaja = bodyIdCaja || req.user.idCaja;
         const id = await generateNextId('egresos', 'idegresos', 'EGRE');
         await pool.query(`INSERT INTO egresos (idegresos, idCaja, descripcion, monto, fechaCreacion, estado) VALUES ($1,$2,$3,$4,$5,'Registrado')`,
             [id, idCaja, descripcion, monto, fechaCreacion || getLocalTimestamp()]);
