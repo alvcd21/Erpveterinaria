@@ -2,7 +2,7 @@
 import React, { useEffect, useState } from 'react';
 import { CashService, SalesService } from '../services/api';
 import { Arqueo, Ingreso, Egreso, Saldo, DetalleVenta } from '../types';
-import { Activity, Lock, Unlock, RefreshCw, AlertTriangle, Eye, ArrowUpCircle, ArrowDownCircle, Settings, X, Save, Edit2, Trash2, FileText, Smartphone, Printer, History, Calendar, Ticket } from 'lucide-react';
+import { Activity, Lock, Unlock, RefreshCw, AlertTriangle, Eye, ArrowUpCircle, ArrowDownCircle, Settings, X, Save, Edit2, Trash2, FileText, Smartphone, Printer, History, Calendar, Ticket, Info } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
@@ -33,7 +33,7 @@ const AdminCashDashboard: React.FC = () => {
   const [sessionsHistory, setSessionsHistory] = useState<any[]>([]);
   const [activeTab, setActiveTab] = useState<'MOVIMIENTOS' | 'CONFIG'>('MOVIMIENTOS');
   
-  // Calculated Totals (Local State to avoid NaN)
+  // Calculated Totals
   const [localTotals, setLocalTotals] = useState({ totalIngresos: 0, totalEgresos: 0, finalCalculado: 0 });
 
   // Edit States
@@ -41,7 +41,7 @@ const AdminCashDashboard: React.FC = () => {
   const [editForm, setEditForm] = useState({ descripcion: '', monto: '', costo: '' });
   const [newMontoInicial, setNewMontoInicial] = useState<string>('');
 
-  // NEW: Saldos Management
+  // Saldos Management
   const [saldosSession, setSaldosSession] = useState<Saldo[]>([]);
   const [editingSaldo, setEditingSaldo] = useState<Saldo | null>(null);
 
@@ -51,7 +51,6 @@ const AdminCashDashboard: React.FC = () => {
 
   useEffect(() => {
       if (sessionDetails) {
-          // Robust mapping para evitar problemas de mayúsculas/minúsculas de la BD
           const ingresos = sessionDetails.ingresos.reduce((acc, curr) => acc + Number(curr.monto || (curr as any).Monto || 0), 0);
           const egresos = sessionDetails.egresos.reduce((acc, curr) => acc + Number(curr.monto || (curr as any).Monto || 0), 0);
           const inicial = Number(sessionDetails.arqueo.montoInicial ?? (sessionDetails.arqueo as any).montoinicial ?? 0);
@@ -83,7 +82,6 @@ const AdminCashDashboard: React.FC = () => {
           const details = await CashService.getSessionDetails(idArqueo);
           setSessionDetails(details);
           
-          // Actualizar info del "selectedBox" para que refleje la sesión histórica en la UI
           const historicalBoxInfo: BoxStatus = {
               ...boxInfo,
               idArqueo: details.arqueo.idArqueo,
@@ -105,18 +103,16 @@ const AdminCashDashboard: React.FC = () => {
           }
       } catch (error) {
           console.error(error);
-          Swal.fire('Error', 'No se pudo cargar la sesión solicitada', 'error');
+          Swal.fire('Error', 'No se pudo cargar la sesión. Verifique la conexión con el servidor.', 'error');
       }
   };
 
   const openManager = async (box: BoxStatus) => {
       setLoading(true);
       try {
-          // 1. Cargar historial de sesiones para este terminal
           const history = await CashService.getBoxHistory(box.idCaja);
           setSessionsHistory(history || []);
           
-          // 2. Cargar detalles de la sesión actual (o última)
           if (box.idArqueo) {
               await loadSessionById(box.idArqueo, box);
           } else {
@@ -138,7 +134,6 @@ const AdminCashDashboard: React.FC = () => {
       loadSessionById(idArq, selectedBox);
   };
 
-  // Función para extraer el ID de factura de la descripción y navegar al POS
   const handleEditInvoice = (descripcion: string) => {
       const match = descripcion.match(/#(FACT-\d+)/);
       if (match && match[1]) {
@@ -148,7 +143,6 @@ const AdminCashDashboard: React.FC = () => {
       }
   };
 
-  // Nueva función para ver los productos de una factura sin salir del dashboard
   const handleViewInvoiceDetails = async (descripcion: string) => {
       const match = descripcion.match(/#(FACT-\d+)/);
       if (!match || !match[1]) return;
@@ -156,7 +150,7 @@ const AdminCashDashboard: React.FC = () => {
       const saleId = match[1];
       
       Swal.fire({
-          title: 'Cargando detalle...',
+          title: 'Cargando detalle de venta...',
           allowOutsideClick: false,
           didOpen: () => { Swal.showLoading(); }
       });
@@ -166,20 +160,20 @@ const AdminCashDashboard: React.FC = () => {
           Swal.close();
 
           const tableHtml = `
-            <div class="overflow-x-auto mt-4">
-              <table class="w-full text-left text-xs border-collapse">
+            <div class="overflow-x-auto mt-4 text-left">
+              <table class="w-full text-xs border-collapse">
                 <thead>
                   <tr class="bg-slate-100">
                     <th class="p-2 border font-bold">Cant.</th>
-                    <th class="p-2 border font-bold">Producto/Servicio</th>
+                    <th class="p-2 border font-bold">Descripción</th>
                     <th class="p-2 border font-bold text-right">Precio</th>
-                    <th class="p-2 border font-bold text-right">Subtotal</th>
+                    <th class="p-2 border font-bold text-right">Total</th>
                   </tr>
                 </thead>
                 <tbody>
                   ${detalles.map(d => `
                     <tr>
-                      <td class="p-2 border">${d.cantidad}</td>
+                      <td class="p-2 border text-center">${d.cantidad}</td>
                       <td class="p-2 border font-medium">${d.descripcionProducto}</td>
                       <td class="p-2 border text-right">L. ${Number(d.precioVenta).toFixed(2)}</td>
                       <td class="p-2 border text-right font-bold">L. ${(Number(d.cantidad) * Number(d.precioVenta)).toFixed(2)}</td>
@@ -191,19 +185,18 @@ const AdminCashDashboard: React.FC = () => {
           `;
 
           Swal.fire({
-              title: `<span class="text-indigo-600">Detalle: ${saleId}</span>`,
+              title: `<div class="flex items-center gap-2 text-indigo-600"><Ticket size={24}/> <span>Factura: ${saleId}</span></div>`,
               html: tableHtml,
-              width: '600px',
-              confirmButtonText: 'Cerrar',
+              width: '650px',
+              confirmButtonText: 'Entendido',
               confirmButtonColor: '#4f46e5'
           });
 
       } catch (error) {
-          Swal.fire('Error', 'No se pudo obtener el detalle de la factura', 'error');
+          Swal.fire('Error', 'No se pudo obtener el detalle de los productos de esta factura.', 'error');
       }
   };
 
-  // --- PDF GENERATOR ---
   const generateClosingReportPDF = (excludeRecharges: boolean = false) => {
       if (!selectedBox || !sessionDetails) return;
 
@@ -216,7 +209,7 @@ const AdminCashDashboard: React.FC = () => {
       
       let ingresosList = ingresosRaw;
       if (excludeRecharges) {
-          // MODIFICADO: Ahora solo filtra lo que contenga estrictamente "RECARGA"
+          // CORRECCIÓN: Filtro estricto basado en el acrónimo RECARGA solicitado
           ingresosList = ingresosRaw.filter(i => {
               const desc = (i.descripcion || "").toUpperCase();
               return !desc.includes('RECARGA');
@@ -226,7 +219,7 @@ const AdminCashDashboard: React.FC = () => {
       const tIngresosPDF = ingresosList.reduce((acc, curr) => acc + Number(curr.monto || 0), 0);
       const tGastosPDF = sessionDetails.egresos.reduce((acc, curr) => acc + Number(curr.monto || 0), 0);
       const mFinalPDF = (mInicial + tIngresosPDF) - tGastosPDF;
-      const gananciaPDF = sessionDetails.ingresos.reduce((acc, curr) => acc + (Number(curr.monto || 0) - Number(curr.costo || 0)), 0);
+      const gananciaPDF = ingresosList.reduce((acc, curr) => acc + (Number(curr.monto || 0) - Number(curr.costo || 0)), 0);
 
       // HEADER
       doc.setFillColor(30, 41, 59);
@@ -324,7 +317,7 @@ const AdminCashDashboard: React.FC = () => {
       // @ts-ignore
       doc.autoTable({ startY: finalY + 3, head: [['Descripción', 'Monto']], body: expenseRows, theme: 'striped', headStyles: { fillColor: [239, 68, 68] }, columnStyles: { 1: { halign: 'right', fontStyle: 'bold' } } });
 
-      const fileName = excludeRecharges ? `Reporte_Ventas_Sin_Recargas_${arqueo.idArqueo}.pdf` : `Reporte_Completo_${arqueo.idArqueo}.pdf`;
+      const fileName = excludeRecharges ? `Reporte_Sin_RECARGAS_${arqueo.idArqueo}.pdf` : `Reporte_Completo_${arqueo.idArqueo}.pdf`;
       doc.save(fileName);
   };
 
@@ -506,16 +499,16 @@ const AdminCashDashboard: React.FC = () => {
                            <button 
                                onClick={() => generateClosingReportPDF(true)}
                                className="flex-1 md:flex-none bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2 rounded-lg text-xs font-bold flex items-center justify-center gap-2 shadow-sm transition-colors"
-                               title="Reporte sin incluir recargas"
+                               title="Genera reporte excluyendo descripciones con la palabra RECARGA"
                            >
-                               <Printer size={16}/> Ventas Sin Recargas
+                               <Printer size={16}/> Reporte Sin RECARGAS
                            </button>
                            <button 
                                onClick={() => generateClosingReportPDF(false)}
                                className="flex-1 md:flex-none bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-lg text-xs font-bold flex items-center justify-center gap-2 shadow-sm transition-colors"
-                               title="Reporte completo de cierre"
+                               title="Reporte completo de todos los movimientos de la sesión"
                            >
-                               <FileText size={16}/> Ventas con Recargas
+                               <FileText size={16}/> Reporte Completo
                            </button>
                        </div>
                    </div>
@@ -533,7 +526,6 @@ const AdminCashDashboard: React.FC = () => {
                                </button>
                            </div>
 
-                           {/* SESSION HISTORY SELECTOR (AUDITORIA ANTERIOR) */}
                            <div className="p-4 border-t border-slate-200">
                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">Sesiones Anteriores</label>
                                <div className="relative">
@@ -553,7 +545,7 @@ const AdminCashDashboard: React.FC = () => {
                                        <Calendar size={12}/>
                                    </div>
                                </div>
-                               <p className="text-[9px] text-slate-400 mt-2 italic">Selecciona una sesión para auditar movimientos de días anteriores.</p>
+                               <p className="text-[9px] text-slate-400 mt-2 italic">Selecciona una sesión para auditar movimientos específicos.</p>
                            </div>
                            
                            <div className="hidden md:block flex-1"></div>
@@ -579,6 +571,11 @@ const AdminCashDashboard: React.FC = () => {
                                    <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
                                        <div className="p-3 bg-emerald-50 border-b border-emerald-100 flex justify-between items-center">
                                            <h3 className="font-bold text-emerald-800 flex items-center gap-2 text-sm md:text-base"><ArrowUpCircle size={18}/> Ingresos y Ventas ({sessionDetails.ingresos.length})</h3>
+                                           {sessionDetails.ingresos.length === 0 && (
+                                                <button onClick={() => selectedBox && openManager(selectedBox)} className="text-[10px] font-bold text-emerald-600 flex items-center gap-1 hover:underline">
+                                                    <RefreshCw size={10}/> Recargar Datos
+                                                </button>
+                                           )}
                                        </div>
                                        <div className="overflow-x-auto">
                                            <table className="w-full text-[10px] md:text-sm text-left min-w-[500px]">
@@ -592,8 +589,10 @@ const AdminCashDashboard: React.FC = () => {
                                                    </tr>
                                                </thead>
                                                <tbody>
-                                                   {sessionDetails.ingresos.map(ing => {
-                                                       const isInvoice = ing.descripcion.includes('Factura #');
+                                                   {sessionDetails.ingresos.length === 0 ? (
+                                                       <tr><td colSpan={5} className="p-8 text-center text-slate-400 italic">No se encontraron ingresos para esta sesión.</td></tr>
+                                                   ) : sessionDetails.ingresos.map(ing => {
+                                                       const isInvoice = ing.descripcion.toLowerCase().includes('factura #');
                                                        return (
                                                            <tr key={ing.idIngreso} className="border-b hover:bg-slate-50 group">
                                                                <td className="p-3 text-xs text-slate-400 font-mono whitespace-nowrap">{ing.fechaCreacion ? new Date(ing.fechaCreacion).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : '-'}</td>
@@ -601,7 +600,14 @@ const AdminCashDashboard: React.FC = () => {
                                                                    {editingItem.id === ing.idIngreso ? (
                                                                        <input className="border p-1 rounded w-full bg-slate-50 text-xs" value={editForm.descripcion} onChange={e=>setEditForm({...editForm, descripcion: e.target.value})} />
                                                                    ) : (
-                                                                       <span className="line-clamp-1 font-medium">{ing.descripcion}</span>
+                                                                       <div className="flex items-center gap-2">
+                                                                           <span className="line-clamp-1 font-medium">{ing.descripcion}</span>
+                                                                           {isInvoice && (
+                                                                               <button onClick={() => handleViewInvoiceDetails(ing.descripcion)} className="p-1 text-indigo-600 bg-indigo-50 rounded hover:bg-indigo-100" title="Ver que productos lleva esta factura">
+                                                                                   <Eye size={12}/>
+                                                                               </button>
+                                                                           )}
+                                                                       </div>
                                                                    )}
                                                                </td>
                                                                <td className="p-3 text-slate-500 italic">
@@ -627,14 +633,9 @@ const AdminCashDashboard: React.FC = () => {
                                                                    ) : (
                                                                        <div className="flex justify-end gap-1">
                                                                            {isInvoice && (
-                                                                               <>
-                                                                                   <button onClick={() => handleViewInvoiceDetails(ing.descripcion)} className="text-blue-600 hover:bg-blue-50 p-1 rounded transition-colors" title="Ver Detalle de Productos">
-                                                                                       <Eye size={16}/>
-                                                                                   </button>
-                                                                                   <button onClick={() => handleEditInvoice(ing.descripcion)} className="text-indigo-600 hover:bg-indigo-50 p-1 rounded transition-colors" title="Modificar Factura en POS">
-                                                                                       <Ticket size={16}/>
-                                                                                   </button>
-                                                                               </>
+                                                                               <button onClick={() => handleEditInvoice(ing.descripcion)} className="text-indigo-600 hover:bg-indigo-50 p-1 rounded transition-colors" title="Modificar Factura en POS">
+                                                                                   <Ticket size={16}/>
+                                                                               </button>
                                                                            )}
                                                                            <button onClick={() => startEdit(ing, 'INGRESO')} className="text-slate-400 hover:text-blue-500 p-1 rounded transition-colors" title="Editar Auditoría"><Edit2 size={16}/></button>
                                                                            <button onClick={() => deleteTransaction(ing.idIngreso, 'INGRESO')} className="text-slate-400 hover:text-red-500 p-1 rounded transition-colors" title="Eliminar"><Trash2 size={16}/></button>
@@ -657,7 +658,9 @@ const AdminCashDashboard: React.FC = () => {
                                            <table className="w-full text-[10px] md:text-sm text-left min-w-[500px]">
                                                <thead className="bg-slate-50 text-slate-500 text-[10px] uppercase"><tr><th className="p-3">Hora</th><th className="p-3">Descripción</th><th className="p-3">Monto</th><th className="p-3 text-right">Acción</th></tr></thead>
                                                <tbody>
-                                                   {sessionDetails.egresos.map(egr => (
+                                                   {sessionDetails.egresos.length === 0 ? (
+                                                       <tr><td colSpan={4} className="p-8 text-center text-slate-400 italic">No se encontraron gastos para esta sesión.</td></tr>
+                                                   ) : sessionDetails.egresos.map(egr => (
                                                        <tr key={egr.idegresos} className="border-b hover:bg-slate-50 group">
                                                            <td className="p-3 text-xs text-slate-400 font-mono whitespace-nowrap">{egr.fechaCreacion ? new Date(egr.fechaCreacion).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : '-'}</td>
                                                            <td className="p-3 min-w-[150px]">
