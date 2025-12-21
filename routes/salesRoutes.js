@@ -32,16 +32,22 @@ router.put('/clientes/:id', authenticateToken, async (req, res) => {
 router.get('/ventas/historial', authenticateToken, async (req, res) => {
     try {
         const { fecha } = req.query; 
-        const { codUsuario } = req.user;
+        const { codUsuario } = req.user; // Filtrar por el usuario actual para evitar ver otras cajas
+        
         let query = `
             SELECT v.codVenta as "codVenta", v.fecha, v.total, v.estado, v.identidadCliente as "identidadCliente",
             c.nombre || ' ' || c.apellido as "nombreCliente"
             FROM ventas v
             JOIN clientes c ON v.identidadCliente = c.identidad
-            WHERE 1=1
+            WHERE v.codVendedor = $1
         `;
-        const params = [];
-        if (fecha) { query += ` AND TO_CHAR(v.fecha, 'YYYY-MM-DD') = $${params.length + 1}`; params.push(fecha); }
+        const params = [codUsuario];
+        
+        if (fecha) { 
+            query += ` AND TO_CHAR(v.fecha, 'YYYY-MM-DD') = $${params.length + 1}`; 
+            params.push(fecha); 
+        }
+        
         query += ` ORDER BY v.codVenta DESC`;
         const result = await pool.query(query, params);
         res.json(result.rows);
@@ -91,18 +97,16 @@ router.post('/ventas', authenticateToken, async (req, res) => {
 
     const idIngreso = await generateNextId('ingresos', 'idIngreso', 'INGR', client);
     
-    // LÓGICA ESPECIAL: En KrediYa, el monto que entra a caja es la PRIMA. 
-    // El resto queda en "tránsito/bancos" contablemente.
+    // CORRECCIÓN VALOR ENUM: Se usa 'Venta Producto Externo' en lugar de 'Venta POS'
     const montoIngresoCaja = tipoCompra === 'KrediYa' ? Number(montoPrima) : Number(total);
-    const subtipoMovimiento = tipoCompra === 'KrediYa' ? 'KrediYa_Prima' : 'Venta POS';
+    const subtipoMovimiento = tipoCompra === 'KrediYa' ? 'KrediYa_Prima' : 'Venta Producto Externo';
     
     await client.query(
       `INSERT INTO ingresos (idIngreso, idCaja, descripcion, monto, costo, fechaCreacion, estado, subtipo_movimiento) 
-       VALUES ($1, $2, $3, $4, $5, $6, 'Venta POS', $7)`,
-      [idIngreso, idCaja, `Venta Factura #${codVenta}${tipoCompra === 'KrediYa' ? ' (KrediYa)' : ''}`, montoIngresoCaja, totalCosto, hndTime, subtipoMovimiento]
+       VALUES ($1, $2, $3, $4, $5, $6, 'Completada', $7)`,
+      [idIngreso, idCaja, `Venta Factura #${codVenta}${tipoCompra === 'KrediYa' ? ' (Prima KrediYa)' : ''}`, montoIngresoCaja, totalCosto, hndTime, subtipoMovimiento]
     );
 
-    // Guardamos la venta con los campos de financiamiento
     await client.query(
       `INSERT INTO ventas (codVenta, fecha, codVendedor, identidadCliente, total, estado, tipoCompra, isv, descuento, monto_prima, monto_financiamiento) 
        VALUES ($1, $2, $3, $4, $5, 'Completada', $6, $7, $8, $9, $10)`,
@@ -164,8 +168,9 @@ router.put('/ventas/:id', authenticateToken, async (req, res) => {
         }
 
         if (idIngreso) {
+            // CORRECCIÓN VALOR ENUM: Se usa 'Venta Producto Externo' en lugar de 'Venta POS'
             const montoActualizadoCaja = tipoCompra === 'KrediYa' ? Number(montoPrima) : Number(total);
-            const subtipoActualizado = tipoCompra === 'KrediYa' ? 'KrediYa_Prima' : 'Venta POS';
+            const subtipoActualizado = tipoCompra === 'KrediYa' ? 'KrediYa_Prima' : 'Venta Producto Externo';
             await client.query('UPDATE ingresos SET monto = $1, costo = $2, subtipo_movimiento = $3 WHERE idIngreso = $4', [montoActualizadoCaja, totalCosto, subtipoActualizado, idIngreso]);
         }
         

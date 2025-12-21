@@ -8,7 +8,7 @@ const { authenticateToken } = require('../middleware/auth');
 
 router.get('/arqueo/active', authenticateToken, async (req, res) => {
     try {
-        const { idCaja } = req.user;
+        const { idCaja } = req.user; // Filtrado obligatorio por la caja del usuario logueado
         const query = `
             SELECT idArqueo as "idArqueo", idCaja as "idCaja", montoInicial as "montoInicial", 
             montoFinal as "montoFinal", totalVentas as "totalVentas", TotalGastos as "TotalGastos", ganancia, estado,
@@ -76,8 +76,8 @@ router.post('/arqueo/close', authenticateToken, async (req, res) => {
                 fechaCierre = $1, 
                 saldoTigoFinal = $2, 
                 saldoClaroFinal = $3 
-             WHERE idArqueo = $4`,
-            [hndTime, sTigo.rows[0]?.saldofinal || 0, sClaro.rows[0]?.saldofinal || 0, idArqueo]
+             WHERE idArqueo = $4 AND idCaja = $5`,
+            [hndTime, sTigo.rows[0]?.saldofinal || 0, sClaro.rows[0]?.saldofinal || 0, idArqueo, idCaja]
         );
 
         const resArq = await client.query("SELECT * FROM arqueo WHERE idArqueo = $1", [idArqueo]);
@@ -134,12 +134,14 @@ router.put('/arqueo/:id/initial', authenticateToken, async (req, res) => {
 router.get('/ingresos', authenticateToken, async (req, res) => {
     try {
         const { idCaja, fecha } = req.query;
+        const targetCaja = idCaja || req.user.idCaja;
+        
         const r = await pool.query(`
             SELECT idIngreso as "idIngreso", descripcion, monto, costo, subtipo_movimiento as "subtipo_movimiento",
             TO_CHAR(fechaCreacion, 'YYYY-MM-DD HH24:MI:SS') as "fechaCreacion", estado
             FROM ingresos WHERE idCaja = $1 AND TO_CHAR(fechaCreacion, 'YYYY-MM-DD') = $2
             ORDER BY fechaCreacion DESC
-        `, [idCaja, fecha]);
+        `, [targetCaja, fecha]);
         res.json(r.rows);
     } catch(e) { handleDbError(res, e); }
 });
@@ -147,12 +149,14 @@ router.get('/ingresos', authenticateToken, async (req, res) => {
 router.get('/egresos', authenticateToken, async (req, res) => {
     try {
         const { idCaja, fecha } = req.query;
+        const targetCaja = idCaja || req.user.idCaja;
+
         const r = await pool.query(`
             SELECT idegresos as "idegresos", descripcion, monto, categoria as "subtipo_egreso", id_socio_asignado,
             TO_CHAR(fechaCreacion, 'YYYY-MM-DD HH24:MI:SS') as "fechaCreacion", estado
             FROM egresos WHERE idCaja = $1 AND TO_CHAR(fechaCreacion, 'YYYY-MM-DD') = $2
             ORDER BY fechaCreacion DESC
-        `, [idCaja, fecha]);
+        `, [targetCaja, fecha]);
         res.json(r.rows);
     } catch(e) { handleDbError(res, e); }
 });
