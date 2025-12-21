@@ -1,9 +1,8 @@
 
 import React, { useEffect, useState } from 'react';
-import { CashService, SalesService } from '../services/api';
-import { Arqueo, Ingreso, Egreso, Saldo, DetalleVenta } from '../types';
-// Added ArrowUpRight to the imports from lucide-react
-import { Activity, Lock, Unlock, RefreshCw, AlertTriangle, Eye, ArrowUpCircle, ArrowDownCircle, Settings, X, Save, Edit2, Trash2, FileText, Smartphone, Printer, History, Calendar, Ticket, Info, PlusCircle, ArrowUpRight } from 'lucide-react';
+import { CashService, SalesService, AccountingService, PackagesService } from '../services/api';
+import { Arqueo, Ingreso, Egreso, Saldo, Socio, SubtipoIngreso, SubtipoEgreso } from '../types';
+import { Activity, Lock, Unlock, RefreshCw, AlertTriangle, Eye, ArrowUpCircle, ArrowDownCircle, Settings, X, Save, Edit2, Trash2, FileText, Smartphone, Printer, History, Calendar, Ticket, Info, PlusCircle, ArrowUpRight, UserCheck } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
@@ -27,6 +26,7 @@ const AdminCashDashboard: React.FC = () => {
   const navigate = useNavigate();
   const [boxes, setBoxes] = useState<BoxStatus[]>([]);
   const [loading, setLoading] = useState(false);
+  const [partners, setPartners] = useState<Socio[]>([]);
   
   // Manager Modal State
   const [selectedBox, setSelectedBox] = useState<BoxStatus | null>(null);
@@ -42,9 +42,15 @@ const AdminCashDashboard: React.FC = () => {
   const [editForm, setEditForm] = useState({ descripcion: '', monto: '', costo: '' });
   const [newMontoInicial, setNewMontoInicial] = useState<string>('');
 
-  // Creation Modals
+  // Creation Modals (Updated to match CashRegister)
   const [showNewModal, setShowNewModal] = useState<'INGRESO' | 'EGRESO' | null>(null);
-  const [newForm, setNewForm] = useState({ descripcion: '', monto: '', costo: '0' });
+  const [newForm, setNewForm] = useState({ 
+      descripcion: '', 
+      monto: '', 
+      costo: '0', 
+      subtipo: '' as string,
+      idSocio: '' as string 
+  });
 
   // Saldos Management
   const [saldosSession, setSaldosSession] = useState<Saldo[]>([]);
@@ -52,21 +58,21 @@ const AdminCashDashboard: React.FC = () => {
 
   useEffect(() => {
     loadData();
+    loadPartners();
   }, []);
+
+  const loadPartners = async () => {
+      try { const data = await AccountingService.getSocios(); setPartners(data || []); } catch(e) { console.error(e); }
+  };
 
   useEffect(() => {
       if (sessionDetails) {
-          const ingresos = sessionDetails.ingresos.reduce((acc, curr) => acc + Number(curr.monto || (curr as any).Monto || 0), 0);
-          const egresos = sessionDetails.egresos.reduce((acc, curr) => acc + Number(curr.monto || (curr as any).Monto || 0), 0);
-          const inicial = Number(sessionDetails.arqueo.montoInicial ?? (sessionDetails.arqueo as any).montoinicial ?? 0);
-          
+          const ingresos = sessionDetails.ingresos.reduce((acc, curr) => acc + Number(curr.monto || 0), 0);
+          const egresos = sessionDetails.egresos.reduce((acc, curr) => acc + Number(curr.monto || 0), 0);
+          const inicial = Number(sessionDetails.arqueo.montoInicial ?? 0);
           const finalCalculado = (inicial + ingresos) - egresos;
           
-          setLocalTotals({
-              totalIngresos: ingresos,
-              totalEgresos: egresos,
-              finalCalculado: finalCalculado
-          });
+          setLocalTotals({ totalIngresos: ingresos, totalEgresos: egresos, finalCalculado: finalCalculado });
       }
   }, [sessionDetails]);
 
@@ -117,14 +123,8 @@ const AdminCashDashboard: React.FC = () => {
       try {
           const history = await CashService.getBoxHistory(box.idCaja);
           setSessionsHistory(history || []);
-          
-          if (box.idArqueo) {
-              await loadSessionById(box.idArqueo, box);
-          } else {
-              setSelectedBox(box);
-              setSessionDetails(null);
-              setSaldosSession([]);
-          }
+          if (box.idArqueo) await loadSessionById(box.idArqueo, box);
+          else { setSelectedBox(box); setSessionDetails(null); setSaldosSession([]); }
       } catch (error) {
           console.error(error);
           Swal.fire('Error', 'No se pudieron cargar los datos de auditoría', 'error');
@@ -141,12 +141,10 @@ const AdminCashDashboard: React.FC = () => {
 
   const handleCreateManualTransaction = async () => {
     if (!selectedBox || !sessionDetails) return;
-    if (!newForm.descripcion || !newForm.monto) return Swal.fire('Error', 'Complete los campos requeridos', 'error');
+    if (!newForm.descripcion || !newForm.monto || !newForm.subtipo) return Swal.fire('Error', 'Complete los campos requeridos', 'error');
 
     try {
-        // Obtenemos la fecha del arqueo seleccionado (parte YYYY-MM-DD)
         const arqDate = sessionDetails.arqueo.fechaApertura.substring(0, 10);
-        // Creamos un timestamp ficticio dentro de ese día para que SQL lo capture en el arqueo correspondiente
         const manualTimestamp = `${arqDate} 12:00:00`;
 
         if (showNewModal === 'INGRESO') {
@@ -155,6 +153,7 @@ const AdminCashDashboard: React.FC = () => {
                 descripcion: `(ADMIN) ${newForm.descripcion}`,
                 monto: Number(newForm.monto),
                 costo: Number(newForm.costo),
+                subtipo_movimiento: newForm.subtipo as SubtipoIngreso,
                 fechaCreacion: manualTimestamp
             });
         } else {
@@ -162,101 +161,118 @@ const AdminCashDashboard: React.FC = () => {
                 idCaja: selectedBox.idCaja,
                 descripcion: `(ADMIN) ${newForm.descripcion}`,
                 monto: Number(newForm.monto),
+                subtipo_egreso: newForm.subtipo as SubtipoEgreso,
+                id_socio_asignado: newForm.idSocio ? Number(newForm.idSocio) : null,
                 fechaCreacion: manualTimestamp
             });
         }
 
         setShowNewModal(null);
-        setNewForm({ descripcion: '', monto: '', costo: '0' });
+        setNewForm({ descripcion: '', monto: '', costo: '0', subtipo: '', idSocio: '' });
         await openManager(selectedBox);
         loadData();
-        Swal.fire('Éxito', 'Movimiento registrado y balance actualizado.', 'success');
-    } catch (e: any) {
-        Swal.fire('Error', e.message, 'error');
-    }
+        Swal.fire('Éxito', 'Movimiento registrado correctamente.', 'success');
+    } catch (e: any) { Swal.fire('Error', e.message, 'error'); }
   };
 
   const handleEditInvoice = (descripcion: string) => {
       const match = descripcion.match(/#(FACT-\d+)/);
-      if (match && match[1]) {
-          navigate('/pos', { state: { editSaleId: match[1] } });
-      } else {
-          Swal.fire('Info', 'No se pudo identificar un número de factura válido.', 'info');
-      }
+      if (match && match[1]) navigate('/pos', { state: { editSaleId: match[1] } });
+      else Swal.fire('Info', 'No se pudo identificar un número de factura válido.', 'info');
   };
 
   const handleViewInvoiceDetails = async (descripcion: string) => {
       const match = descripcion.match(/#(FACT-\d+)/);
       if (!match || !match[1]) return;
       const saleId = match[1];
-      
       Swal.fire({ title: 'Cargando detalle...', allowOutsideClick: false, didOpen: () => { Swal.showLoading(); } });
       try {
           const detalles = await SalesService.getDetallesVenta(saleId);
           Swal.close();
-          const tableHtml = `
-            <div class="overflow-x-auto mt-4 text-left">
-              <table class="w-full text-xs border-collapse">
-                <thead><tr class="bg-slate-100"><th class="p-2 border font-bold">Cant.</th><th class="p-2 border font-bold">Descripción</th><th class="p-2 border font-bold text-right">Total</th></tr></thead>
-                <tbody>${detalles.map(d => `<tr><td class="p-2 border text-center">${d.cantidad}</td><td class="p-2 border font-medium">${d.descripcionProducto}</td><td class="p-2 border text-right font-bold">L. ${(Number(d.cantidad) * Number(d.precioVenta)).toFixed(2)}</td></tr>`).join('')}</tbody>
-              </table>
-            </div>
-          `;
+          const tableHtml = `<div class="overflow-x-auto mt-4 text-left"><table class="w-full text-xs border-collapse"><thead><tr class="bg-slate-100"><th class="p-2 border font-bold">Cant.</th><th class="p-2 border font-bold">Descripción</th><th class="p-2 border font-bold text-right">Total</th></tr></thead><tbody>${detalles.map(d => `<tr><td class="p-2 border text-center">${d.cantidad}</td><td class="p-2 border font-medium">${d.descripcionProducto}</td><td class="p-2 border text-right font-bold">L. ${(Number(d.cantidad) * Number(d.precioVenta)).toFixed(2)}</td></tr>`).join('')}</tbody></table></div>`;
           Swal.fire({ title: `Factura: ${saleId}`, html: tableHtml, width: '600px', confirmButtonColor: '#4f46e5' });
       } catch (error) { Swal.fire('Error', 'No se pudo obtener el detalle.', 'error'); }
   };
 
+  // --- REPORTE PDF MEJORADO (TOTALES Y ESPACIADO) ---
   const generateClosingReportPDF = (excludeRecharges: boolean = false) => {
       if (!selectedBox || !sessionDetails) return;
       const doc = new jsPDF();
       const date = new Date().toLocaleString();
       const arqueo = sessionDetails.arqueo;
-      const mInicial = Number(arqueo.montoInicial ?? (arqueo as any).montoinicial ?? 0);
-      const ingresosRaw = sessionDetails.ingresos;
-      let ingresosList = ingresosRaw;
-      if (excludeRecharges) {
-          ingresosList = ingresosRaw.filter(i => !(i.descripcion || "").toUpperCase().includes('RECARGA'));
-      }
-      const tIngresosPDF = ingresosList.reduce((acc, curr) => acc + Number(curr.monto || 0), 0);
-      const tGastosPDF = sessionDetails.egresos.reduce((acc, curr) => acc + Number(curr.monto || 0), 0);
-      const mFinalPDF = (mInicial + tIngresosPDF) - tGastosPDF;
-      const gananciaPDF = ingresosList.reduce((acc, curr) => acc + (Number(curr.monto || 0) - Number(curr.costo || 0)), 0);
-
-      doc.setFillColor(30, 41, 59); doc.rect(0, 0, 210, 30, 'F');
-      doc.setTextColor(255); doc.setFontSize(18); doc.setFont('helvetica', 'bold');
-      doc.text(excludeRecharges ? "REPORTE DE VENTAS (SIN RECARGAS)" : "REPORTE COMPLETO DE CAJA", 105, 12, { align: 'center' });
-      doc.setFontSize(10); doc.setFont('helvetica', 'normal');
-      doc.text(`Generado: ${date} | Sesión: ${arqueo.idArqueo}`, 105, 22, { align: 'center' });
-      doc.text(`Terminal: ${selectedBox.nombreCaja} | Cajero: ${selectedBox.nombreEmpleado}`, 105, 27, { align: 'center' });
-
-      const tigo = saldosSession.find(s => s.red === 'TIGO');
-      const claro = saldosSession.find(s => s.red === 'CLARO');
-      const sTigo = tigo ? Number(tigo.saldoFinal) : 0;
-      const sClaro = claro ? Number(claro.saldoFinal) : 0;
-      const summaryData = [['Monto Inicial', `L. ${mInicial.toFixed(2)}`], ['(+) Total Ingresos', `L. ${tIngresosPDF.toFixed(2)}`], ['(-) Total Gastos', `L. ${tGastosPDF.toFixed(2)}`], ['(=) Efectivo Calculado', `L. ${mFinalPDF.toFixed(2)}`], ['Ganancia Estimada', `L. ${gananciaPDF.toFixed(2)}`]];
-      // @ts-ignore
-      doc.autoTable({ startY: 45, head: [['Concepto', 'Monto']], body: summaryData, theme: 'grid', headStyles: { fillColor: [79, 70, 229] }, margin: { right: 110 } });
-      // @ts-ignore
-      doc.autoTable({ startY: 45, head: [['Plataforma', 'Saldo Final']], body: [['TIGO', `L. ${sTigo.toFixed(2)}`], ['CLARO', `L. ${sClaro.toFixed(2)}`]], theme: 'grid', headStyles: { fillColor: [15, 23, 42] }, margin: { left: 110 } });
+      const mInicial = Number(arqueo.montoInicial ?? 0);
       
-      let finalY = (doc as any).lastAutoTable.finalY + 15;
+      let ingresosList = sessionDetails.ingresos;
+      if (excludeRecharges) ingresosList = ingresosList.filter(i => !(i.descripcion || "").toUpperCase().includes('RECARGA'));
+
+      const tCostoIn = ingresosList.reduce((a, b) => a + Number(b.costo || 0), 0);
+      const tVentaIn = ingresosList.reduce((a, b) => a + Number(b.monto || 0), 0);
+      const tGananciaIn = tVentaIn - tCostoIn;
+      const tGastos = sessionDetails.egresos.reduce((a, b) => a + Number(b.monto || 0), 0);
+      const mFinal = (mInicial + tVentaIn) - tGastos;
+
+      // Header
+      doc.setFillColor(30, 41, 59); doc.rect(0, 0, 210, 35, 'F');
+      doc.setTextColor(255); doc.setFontSize(18); doc.setFont('helvetica', 'bold');
+      doc.text("REPORTE DE CIERRE DE CAJA (ADMIN)", 105, 12, { align: 'center' });
+      doc.setFontSize(9); doc.setFont('helvetica', 'normal');
+      doc.text(`Generado: ${date} | Original: ${arqueo.fechaApertura}`, 105, 20, { align: 'center' });
+      doc.text(`Cajero: ${selectedBox.nombreEmpleado} | Caja: ${selectedBox.idCaja}`, 105, 25, { align: 'center' });
+
+      // Financial Summary
+      doc.setTextColor(0); doc.setFontSize(11); doc.text("RESUMEN FINANCIERO GLOBAL", 14, 42);
+      const summaryData = [
+          ['Monto Inicial', `L. ${mInicial.toFixed(2)}`],
+          ['(+) Total Ingresos', `L. ${tVentaIn.toFixed(2)}`],
+          ['(-) Total Gastos', `L. ${tGastos.toFixed(2)}`],
+          ['(=) Efectivo Calculado', `L. ${mFinal.toFixed(2)}`],
+          ['Ganancia Estimada', `L. ${tGananciaIn.toFixed(2)}`]
+      ];
+      // @ts-ignore
+      doc.autoTable({ startY: 46, head: [['Concepto', 'Monto']], body: summaryData, theme: 'grid', headStyles: { fillColor: [79, 70, 229] }, columnStyles: { 1: { halign: 'right' } }, margin: { right: 110 } });
+      
+      const tigoS = saldosSession.find(s => s.red === 'TIGO')?.saldoFinal || 0;
+      const claroS = saldosSession.find(s => s.red === 'CLARO')?.saldoFinal || 0;
+      // @ts-ignore
+      doc.autoTable({ startY: 46, head: [['Plataforma', 'Saldo Final']], body: [['TIGO', `L. ${Number(tigoS).toFixed(2)}`], ['CLARO', `L. ${Number(claroS).toFixed(2)}`]], theme: 'grid', headStyles: { fillColor: [15, 23, 42] }, columnStyles: { 1: { halign: 'right', textColor: [0, 128, 0], fontStyle: 'bold' } }, margin: { left: 110 } });
+      
+      // Income Detail with Totals and Padding
+      let finalY = (doc as any).lastAutoTable.finalY + 15; // ESPACIADO DE 15MM
+      doc.setFontSize(11); doc.text("DETALLE DE INGRESOS (Completo)", 14, finalY);
+      
       const incomeRows = ingresosList.map(i => [i.descripcion, `L. ${Number(i.costo||0).toFixed(2)}`, `L. ${Number(i.monto||0).toFixed(2)}`, `L. ${(Number(i.monto||0)-Number(i.costo||0)).toFixed(2)}`]);
       // @ts-ignore
-      doc.autoTable({ startY: finalY, head: [['Descripción', 'Costo', 'Venta', 'Ganancia']], body: incomeRows, theme: 'striped', headStyles: { fillColor: [16, 185, 129] } });
+      doc.autoTable({ 
+          startY: finalY + 4, 
+          head: [['Descripción', 'Costo', 'Venta', 'Ganancia']], 
+          body: [...incomeRows, [{content: 'TOTALES', styles: {halign: 'right', fontStyle: 'bold'}}, `L. ${tCostoIn.toFixed(2)}`, `L. ${tVentaIn.toFixed(2)}`, `L. ${tGananciaIn.toFixed(2)}` ]], 
+          theme: 'striped', 
+          headStyles: { fillColor: [16, 185, 129] },
+          columnStyles: { 1: { halign: 'right' }, 2: { halign: 'right' }, 3: { halign: 'right', fontStyle: 'bold' } },
+          footStyles: { fillColor: [30, 41, 59], textColor: [255, 255, 255] }
+      });
+
+      // Expenses Detail
       finalY = (doc as any).lastAutoTable.finalY + 10;
-      const expenseRows = sessionDetails.egresos.map(e => [e.descripcion, `L. ${(Number(e.monto)||0).toFixed(2)}`]);
+      doc.text("DETALLE DE GASTOS / SALIDAS", 14, finalY);
+      const expenseRows = sessionDetails.egresos.map(e => [e.descripcion, `L. ${Number(e.monto||0).toFixed(2)}`]);
       // @ts-ignore
-      doc.autoTable({ startY: finalY, head: [['Descripción', 'Monto']], body: expenseRows, theme: 'striped', headStyles: { fillColor: [239, 68, 68] } });
-      doc.save(`Reporte_Auditoria_${arqueo.idArqueo}.pdf`);
+      doc.autoTable({ 
+          startY: finalY + 4, 
+          head: [['Descripción', 'Monto']], 
+          body: [...expenseRows, [{content: 'TOTAL GASTOS', styles: {halign: 'right', fontStyle: 'bold'}}, `L. ${tGastos.toFixed(2)}` ]], 
+          theme: 'striped', 
+          headStyles: { fillColor: [239, 68, 68] },
+          columnStyles: { 1: { halign: 'right', fontStyle: 'bold' } }
+      });
+      doc.save(`Cierre_Auditoria_${arqueo.idArqueo}.pdf`);
   };
 
   const handleUpdateInitial = async () => {
       if(!selectedBox?.idArqueo) return;
       try {
           await CashService.updateInitialAmount(selectedBox.idArqueo, Number(newMontoInicial));
-          openManager(selectedBox);
-          Swal.fire('Actualizado', `Monto inicial actualizado`, 'success');
-          loadData(); 
+          openManager(selectedBox); Swal.fire('Actualizado', `Monto inicial actualizado`, 'success'); loadData(); 
       } catch(e:any) { Swal.fire('Error', e.message, 'error'); }
   };
 
@@ -266,8 +282,7 @@ const AdminCashDashboard: React.FC = () => {
           await CashService.updateSaldo(editingSaldo.idsaldos, { saldoInicio: Number(editingSaldo.saldoInicio), saldoFinal: Number(editingSaldo.saldoFinal) });
           const fechaStr = sessionDetails?.arqueo.fechaApertura.substring(0, 10);
           if (fechaStr) { const slds = await CashService.getSaldosByDate(fechaStr); setSaldosSession(slds || []); }
-          setEditingSaldo(null);
-          Swal.fire('Actualizado', 'Saldos actualizados', 'success');
+          setEditingSaldo(null); Swal.fire('Actualizado', 'Saldos actualizados', 'success');
       } catch(e:any) { Swal.fire('Error', e.message, 'error'); }
   };
 
@@ -275,9 +290,7 @@ const AdminCashDashboard: React.FC = () => {
       const result = await Swal.fire({ title: '¿Reabrir Caja?', text: 'Se revertirá el cierre.', icon: 'warning', showCancelButton: true, confirmButtonText: 'Sí, reabrir' });
       if (result.isConfirmed) {
           try {
-              await CashService.reopenBox(idArqueo);
-              Swal.fire('Éxito', 'La caja ha sido reabierta.', 'success');
-              loadData();
+              await CashService.reopenBox(idArqueo); Swal.fire('Éxito', 'La caja ha sido reabierta.', 'success'); loadData();
               if(selectedBox) openManager({...selectedBox, estadoArqueo: 'Activo'});
           } catch (error: any) { Swal.fire('Error', error.message, 'error'); }
       }
@@ -293,9 +306,7 @@ const AdminCashDashboard: React.FC = () => {
       try {
           if(editingItem.type === 'INGRESO') await CashService.updateIngreso(editingItem.id, { descripcion: editForm.descripcion, monto: Number(editForm.monto), costo: Number(editForm.costo) });
           else await CashService.updateEgreso(editingItem.id, { descripcion: editForm.descripcion, monto: Number(editForm.monto) });
-          setEditingItem({id:'', type: null});
-          openManager(selectedBox); loadData();
-          Swal.fire('Guardado', 'Registro actualizado', 'success');
+          setEditingItem({id:'', type: null}); openManager(selectedBox); loadData(); Swal.fire('Guardado', 'Registro actualizado', 'success');
       } catch(e:any) { Swal.fire('Error', e.message, 'error'); }
   };
 
@@ -306,8 +317,7 @@ const AdminCashDashboard: React.FC = () => {
           try {
               if(type === 'INGRESO') await CashService.deleteIngreso(id);
               else await CashService.deleteEgreso(id);
-              openManager(selectedBox); loadData();
-              Swal.fire('Eliminado', 'Transacción eliminada', 'success');
+              openManager(selectedBox); loadData(); Swal.fire('Eliminado', 'Transacción eliminada', 'success');
           } catch(e:any) { Swal.fire('Error', e.message, 'error'); }
       }
   };
@@ -346,7 +356,7 @@ const AdminCashDashboard: React.FC = () => {
                        <div className="flex justify-between items-start">
                            <div className="flex-1 min-w-0 pr-4">
                                <h2 className="text-lg md:text-xl font-bold text-slate-800 flex flex-col md:flex-row md:items-center gap-1 md:gap-2 leading-tight"><span className="truncate">{selectedBox.nombreCaja}</span><span className="text-xs font-normal text-slate-500 bg-white border px-2 py-0.5 rounded-full w-fit">Sesión: {selectedBox.idArqueo}</span></h2>
-                               <p className="text-xs md:text-sm text-slate-500 mt-1 truncate">Cajero: <strong>{selectedBox.nombreEmpleado}</strong> | Estado: <span className={selectedBox.estadoArqueo === 'Activo' ? 'text-emerald-600 font-bold' : 'text-slate-600 font-bold'}>{selectedBox.estadoArqueo}</span></p>
+                               <p className="text-xs md:sm text-slate-500 mt-1 truncate">Cajero: <strong>{selectedBox.nombreEmpleado}</strong> | Estado: <span className={selectedBox.estadoArqueo === 'Activo' ? 'text-emerald-600 font-bold' : 'text-slate-600 font-bold'}>{selectedBox.estadoArqueo}</span></p>
                            </div>
                            <button onClick={() => setSelectedBox(null)} className="p-2 hover:bg-slate-200 rounded-full transition-colors"><X size={24} className="text-slate-500"/></button>
                        </div>
@@ -363,8 +373,7 @@ const AdminCashDashboard: React.FC = () => {
                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">Sesiones Anteriores</label>
                                <div className="relative"><History className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" size={14}/><select className="w-full pl-8 pr-3 py-2 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500/20 appearance-none" value={selectedBox.idArqueo} onChange={handleSwitchSession}>{sessionsHistory.map(s => (<option key={s.idArqueo} value={s.idArqueo}>{new Date(s.fechaApertura).toLocaleDateString()} - {s.idArqueo}</option>))}</select><div className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400"><Calendar size={12}/></div></div>
                            </div>
-                           <div className="hidden md:block flex-1"></div>
-                           <div className="p-3 md:p-4 pt-0 md:pt-4"><div className="bg-indigo-900 rounded-xl p-4 text-white shadow-lg"><p className="text-xs text-indigo-300 uppercase font-bold mb-1">Efectivo Calculado</p><p className="text-2xl md:text-3xl font-bold tracking-tight">L. {localTotals.finalCalculado.toFixed(2)}</p><div className="mt-3 text-[10px] md:text-xs opacity-70 flex justify-between border-t border-indigo-700/50 pt-2 gap-2"><div className="flex flex-col"><span>Ini</span><span className="font-bold">{Number(sessionDetails.arqueo.montoInicial || 0).toFixed(0)}</span></div><div className="flex flex-col text-center"><span>Ing</span><span className="font-bold text-emerald-300">+{localTotals.totalIngresos.toFixed(0)}</span></div><div className="flex flex-col text-right"><span>Egr</span><span className="font-bold text-red-300">-{localTotals.totalEgresos.toFixed(0)}</span></div></div></div></div>
+                           <div className="p-3 md:p-4"><div className="bg-indigo-900 rounded-xl p-4 text-white shadow-lg"><p className="text-xs text-indigo-300 uppercase font-bold mb-1">Efectivo Calculado</p><p className="text-2xl md:text-3xl font-bold tracking-tight">L. {localTotals.finalCalculado.toFixed(2)}</p><div className="mt-3 text-[10px] md:text-xs opacity-70 flex justify-between border-t border-indigo-700/50 pt-2 gap-2"><div className="flex flex-col"><span>Ini</span><span className="font-bold">{Number(sessionDetails.arqueo.montoInicial || 0).toFixed(0)}</span></div><div className="flex flex-col text-center"><span>Ing</span><span className="font-bold text-emerald-300">+{localTotals.totalIngresos.toFixed(0)}</span></div><div className="flex flex-col text-right"><span>Egr</span><span className="font-bold text-red-300">-{localTotals.totalEgresos.toFixed(0)}</span></div></div></div></div>
                        </div>
 
                        <div className="flex-1 overflow-y-auto p-4 md:p-6 bg-slate-50/30">
@@ -373,7 +382,7 @@ const AdminCashDashboard: React.FC = () => {
                                    <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
                                        <div className="p-3 bg-emerald-50 border-b border-emerald-100 flex justify-between items-center">
                                            <h3 className="font-bold text-emerald-800 flex items-center gap-2 text-sm md:text-base"><ArrowUpCircle size={18}/> Ingresos y Ventas</h3>
-                                           <button onClick={() => setShowNewModal('INGRESO')} className="bg-emerald-600 text-white px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-sm hover:bg-emerald-700 transition-colors"><PlusCircle size={14}/> Nuevo Ingreso</button>
+                                           <button onClick={() => { setShowNewModal('INGRESO'); setNewForm({...newForm, subtipo: 'Reparacion'}); }} className="bg-emerald-600 text-white px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-sm hover:bg-emerald-700 transition-colors"><PlusCircle size={14}/> Nuevo Ingreso</button>
                                        </div>
                                        <div className="overflow-x-auto">
                                            <table className="w-full text-[10px] md:text-sm text-left min-w-[500px]">
@@ -383,8 +392,8 @@ const AdminCashDashboard: React.FC = () => {
                                                        <tr key={ing.idIngreso} className="border-b hover:bg-slate-50 group">
                                                            <td className="p-3 text-xs text-slate-400 font-mono whitespace-nowrap">{ing.fechaCreacion ? new Date(ing.fechaCreacion).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : '-'}</td>
                                                            <td className="p-3">{editingItem.id === ing.idIngreso ? (<input className="border p-1 rounded w-full text-xs" value={editForm.descripcion} onChange={e=>setEditForm({...editForm, descripcion: e.target.value})} />) : (<div className="flex items-center gap-2"><span>{ing.descripcion}</span>{ing.descripcion.includes('Factura #') && (<button onClick={() => handleViewInvoiceDetails(ing.descripcion)} className="p-1 text-indigo-600 bg-indigo-50 rounded hover:bg-indigo-100"><Eye size={12}/></button>)}</div>)}</td>
-                                                           <td className="p-3 text-slate-500">{editingItem.id === ing.idIngreso ? (<input type="number" className="border p-1 rounded w-16" value={editForm.costo} onChange={e=>setEditForm({...editForm, costo: e.target.value})} />) : `L. ${Number(ing.costo || 0).toFixed(2)}`}</td>
-                                                           <td className="p-3 font-bold text-emerald-600">{editingItem.id === ing.idIngreso ? (<input type="number" className="border p-1 rounded w-20" value={editForm.monto} onChange={e=>setEditForm({...editForm, monto: e.target.value})} />) : `L. ${Number(ing.monto).toFixed(2)}`}</td>
+                                                           <td className="p-3 text-slate-500">L. {Number(ing.costo || 0).toFixed(2)}</td>
+                                                           <td className="p-3 font-bold text-emerald-600">L. {Number(ing.monto).toFixed(2)}</td>
                                                            <td className="p-3 text-right"><div className="flex justify-end gap-1">{editingItem.id === ing.idIngreso ? (<><button onClick={saveEdit} className="bg-emerald-100 text-emerald-700 p-1.5 rounded"><Save size={16}/></button><button onClick={() => setEditingItem({id:'', type:null})} className="bg-slate-100 text-slate-600 p-1.5 rounded"><X size={16}/></button></>) : (<>{ing.descripcion.includes('Factura #') && (<button onClick={() => handleEditInvoice(ing.descripcion)} className="text-indigo-600 hover:bg-indigo-50 p-1 rounded"><Ticket size={16}/></button>)}<button onClick={() => startEdit(ing, 'INGRESO')} className="text-slate-400 hover:text-blue-500 p-1 rounded"><Edit2 size={16}/></button><button onClick={() => deleteTransaction(ing.idIngreso, 'INGRESO')} className="text-slate-400 hover:text-red-500 p-1 rounded"><Trash2 size={16}/></button></>)}</div></td>
                                                        </tr>
                                                    ))}
@@ -396,7 +405,7 @@ const AdminCashDashboard: React.FC = () => {
                                    <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
                                        <div className="p-3 bg-red-50 border-b border-red-100 flex justify-between items-center">
                                            <h3 className="font-bold text-red-800 flex items-center gap-2 text-sm md:text-base"><ArrowDownCircle size={18}/> Gastos y Salidas</h3>
-                                           <button onClick={() => setShowNewModal('EGRESO')} className="bg-red-600 text-white px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-sm hover:bg-red-700 transition-colors"><PlusCircle size={14}/> Nuevo Gasto</button>
+                                           <button onClick={() => { setShowNewModal('EGRESO'); setNewForm({...newForm, subtipo: 'Gasto Operativo'}); }} className="bg-red-600 text-white px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-sm hover:bg-red-700 transition-colors"><PlusCircle size={14}/> Nuevo Gasto</button>
                                        </div>
                                        <div className="overflow-x-auto">
                                            <table className="w-full text-[10px] md:text-sm text-left min-w-[500px]">
@@ -406,7 +415,7 @@ const AdminCashDashboard: React.FC = () => {
                                                        <tr key={egr.idegresos} className="border-b hover:bg-slate-50 group">
                                                            <td className="p-3 text-xs text-slate-400 font-mono whitespace-nowrap">{egr.fechaCreacion ? new Date(egr.fechaCreacion).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : '-'}</td>
                                                            <td className="p-3">{editingItem.id === egr.idegresos ? <input className="border p-1 rounded w-full" value={editForm.descripcion} onChange={e=>setEditForm({...editForm, descripcion: e.target.value})} /> : egr.descripcion}</td>
-                                                           <td className="p-3 font-bold text-red-600">{editingItem.id === egr.idegresos ? <input type="number" className="border p-1 rounded w-20" value={editForm.monto} onChange={e=>setEditForm({...editForm, monto: e.target.value})} /> : `L. ${Number(egr.monto).toFixed(2)}`}</td>
+                                                           <td className="p-3 font-bold text-red-600">L. {Number(egr.monto).toFixed(2)}</td>
                                                            <td className="p-3 text-right"><div className="flex justify-end gap-1">{editingItem.id === egr.idegresos ? (<><button onClick={saveEdit} className="bg-emerald-100 text-emerald-700 p-1.5 rounded"><Save size={16}/></button><button onClick={() => setEditingItem({id:'', type:null})} className="bg-slate-100 text-slate-600 p-1.5 rounded"><X size={16}/></button></>) : (<><button onClick={() => startEdit(egr, 'EGRESO')} className="text-slate-400 hover:text-blue-500 p-1 rounded"><Edit2 size={16}/></button><button onClick={() => deleteTransaction(egr.idegresos, 'EGRESO')} className="text-slate-400 hover:text-red-500 p-1 rounded"><Trash2 size={16}/></button></>)}</div></td>
                                                        </tr>
                                                    ))}
@@ -430,28 +439,61 @@ const AdminCashDashboard: React.FC = () => {
            </div>
        )}
 
-       {/* MODAL PARA NUEVO INGRESO/EGRESO MANUAL */}
+       {/* MODAL UNIFICADO PARA NUEVO INGRESO/EGRESO (IGUAL A CASHREGISTER) */}
        {showNewModal && (
            <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[70] flex items-center justify-center p-4">
                <div className="bg-white rounded-3xl w-full max-w-sm shadow-2xl p-6 animate-fade-in">
-                   <div className="flex justify-between items-center mb-6">
+                   <div className="flex justify-between items-center mb-6 border-b border-slate-100 pb-2">
                        <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
-                           {showNewModal === 'INGRESO' ? <ArrowUpRight className="text-emerald-600"/> : <ArrowDownCircle className="text-red-600"/>}
-                           {showNewModal === 'INGRESO' ? 'Nuevo Ingreso (Admin)' : 'Nuevo Gasto (Admin)'}
+                           {showNewModal === 'INGRESO' ? <ArrowUpCircle className="text-emerald-600"/> : <ArrowDownCircle className="text-red-600"/>}
+                           {showNewModal === 'INGRESO' ? 'Registrar Ingreso (Admin)' : 'Registrar Salida (Admin)'}
                        </h3>
-                       <button onClick={() => setShowNewModal(null)} className="text-slate-400"><X/></button>
+                       <button onClick={() => setShowNewModal(null)}><X className="text-slate-400"/></button>
                    </div>
                    <div className="space-y-4">
-                       <p className="text-[10px] text-slate-400 bg-slate-50 p-2 rounded-lg border italic">Este movimiento se guardará con la fecha del arqueo seleccionado.</p>
-                       <div><label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Descripción</label><input required className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none" value={newForm.descripcion} onChange={e => setNewForm({...newForm, descripcion: e.target.value})} placeholder="Ej: Pago servicio limpieza"/></div>
+                       <div>
+                           <label className="text-[10px] font-black text-slate-400 uppercase mb-1 block">Clasificación</label>
+                           {showNewModal === 'INGRESO' ? (
+                               <select className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold" value={newForm.subtipo} onChange={e => setNewForm({...newForm, subtipo: e.target.value})}>
+                                   <option value="Reparacion">Servicio de Reparación</option>
+                                   <option value="Venta Producto Externo">Venta Producto Externo</option>
+                                   <option value="KrediYa_Prima">KrediYa (Pago de Prima)</option>
+                                   <option value="Cobros Venta a Negocios Externos">Cobros Venta a Negocios Externos</option>
+                               </select>
+                           ) : (
+                               <select className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold" value={newForm.subtipo} onChange={e => setNewForm({...newForm, subtipo: e.target.value, idSocio: ''})}>
+                                   <option value="Gasto Operativo">Gasto Operativo</option>
+                                   <option value="Pago Servicio de Reparación">Pago Servicio de Reparación</option>
+                                   <option value="Pago Inventario Externo">Pago Inventario Externo</option>
+                                   <option value="Retiro Personal">Retiro Personal</option>
+                                   <option value="Nomina">Pago de Empleado (Nómina)</option>
+                                   <option value="Compra Inventario">Compra de Mercadería</option>
+                               </select>
+                           )}
+                       </div>
+
+                       {showNewModal === 'EGRESO' && (newForm.subtipo === 'Retiro Personal' || newForm.subtipo === 'Nomina') && (
+                            <div className="animate-fade-in">
+                                <label className="text-[10px] font-black text-indigo-500 uppercase mb-1 block">Vincular a Socio</label>
+                                <select className="w-full p-3 bg-indigo-50 border border-indigo-200 rounded-xl text-sm font-bold text-indigo-700" value={newForm.idSocio} onChange={e => setNewForm({...newForm, idSocio: e.target.value})}>
+                                    <option value="">-- Seleccionar Socio --</option>
+                                    {partners.map(p => <option key={p.idSocio} value={p.idSocio}>{p.nombre}</option>)}
+                                </select>
+                            </div>
+                       )}
+
+                       <div><label className="text-[10px] font-black text-slate-400 uppercase mb-1 block">Descripción</label><input className="w-full p-3 border rounded-xl outline-none focus:ring-2 focus:ring-indigo-500/20" value={newForm.descripcion} onChange={e => setNewForm({...newForm, descripcion: e.target.value})} placeholder="Ej: Pago de alquiler" /></div>
+                       
                        <div className="grid grid-cols-2 gap-4">
-                           <div><label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Monto (Venta)</label><input type="number" required className="w-full p-3 bg-white border border-slate-200 rounded-xl outline-none font-bold text-emerald-600" value={newForm.monto} onChange={e => setNewForm({...newForm, monto: e.target.value})} placeholder="0.00"/></div>
-                           {showNewModal === 'INGRESO' && (<div><label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Costo (Inversión)</label><input type="number" className="w-full p-3 bg-white border border-slate-200 rounded-xl outline-none font-bold text-red-500" value={newForm.costo} onChange={e => setNewForm({...newForm, costo: e.target.value})} placeholder="0.00"/></div>)}
+                           <div><label className="text-[10px] font-black text-slate-400 uppercase mb-1 block">Monto</label><input type="number" className="w-full p-3 border rounded-xl font-bold text-slate-800 outline-none" value={newForm.monto} onChange={e => setNewForm({...newForm, monto: e.target.value})} /></div>
+                           {showNewModal === 'INGRESO' && (
+                               <div><label className="text-[10px] font-black text-slate-400 uppercase mb-1 block">Costo Inversión</label><input type="number" className="w-full p-3 border rounded-xl font-bold text-red-500 outline-none" value={newForm.costo} onChange={e => setNewForm({...newForm, costo: e.target.value})} /></div>
+                           )}
                        </div>
                    </div>
                    <div className="flex gap-3 mt-8">
-                       <button onClick={() => setShowNewModal(null)} className="flex-1 py-3 bg-slate-100 text-slate-500 font-bold rounded-xl">Cancelar</button>
-                       <button onClick={handleCreateManualTransaction} className="flex-1 py-3 bg-indigo-600 text-white font-bold rounded-xl shadow-lg">Guardar</button>
+                       <button onClick={() => setShowNewModal(null)} className="flex-1 py-3 bg-slate-100 text-slate-500 font-bold rounded-xl hover:bg-slate-200 transition-all">Cancelar</button>
+                       <button onClick={handleCreateManualTransaction} className="flex-1 py-3 bg-indigo-600 text-white font-bold rounded-xl shadow-lg hover:bg-indigo-700 transition-all active:scale-95 uppercase text-xs tracking-widest">REGISTRAR</button>
                    </div>
                </div>
            </div>
