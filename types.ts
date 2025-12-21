@@ -1,6 +1,10 @@
 
 export type EstadoGeneral = 'Activo' | 'Inactivo' | 'Disponible' | 'Vendido' | 'Completada' | 'Anulada' | 'Cerrada' | 'Registrado';
 
+// Nuevos Tipos para Clasificación Profesional
+export type SubtipoIngreso = 'Venta Inventario' | 'Venta Prestado' | 'Reparacion' | 'Recarga' | 'KrediYa_Prima' | 'KrediYa_Deposito' | 'Cobro Consignacion' | 'Ajuste';
+export type SubtipoEgreso = 'Gasto Operativo' | 'Gasto Personal Socio' | 'Pago a Tecnico' | 'Pago a Tienda Externa' | 'Nomina' | 'Compra Saldo' | 'Compra Inventario';
+
 export interface Usuario {
   codUsuario: string;
   usuario: string;
@@ -134,8 +138,8 @@ export interface ProductoUnified {
   stock: number;
   imei?: string;
   ubicacion: string;
-  marca?: string;       // Added for POS filtering
-  categoria?: string;   // Added for POS filtering
+  marca?: string;       
+  categoria?: string;   
 }
 
 export interface DetalleVenta {
@@ -143,7 +147,7 @@ export interface DetalleVenta {
   idVenta?: string;
   idAccesorio?: string;
   idTelefono?: string;
-  idInventario?: string; // Helper for frontend
+  idInventario?: string; 
   idIngreso?: string;
   cantidad: number;
   precioVenta: number;
@@ -199,6 +203,7 @@ export interface Ingreso {
   costo: number;
   fechaCreacion?: string;
   estado: string;
+  subtipo_movimiento?: SubtipoIngreso;
 }
 
 export interface Egreso {
@@ -209,7 +214,8 @@ export interface Egreso {
   fechaCreacion?: string;
   estado: string;
   categoria?: string;
-  idSocioAsignado?: number | null;
+  subtipo_egreso?: SubtipoEgreso;
+  id_socio_asignado?: number | null;
 }
 
 export interface Saldo {
@@ -230,18 +236,18 @@ export interface Paquete {
   estado: EstadoGeneral;
 }
 
-export type TipoCosto = 'Costo Directo' | 'Costo Indirecto';
-
-export interface Costo {
-  codCostos: string;
-  tipo: TipoCosto;
-  descripcion: string;
-  monto: number;
+export interface Socio {
+  idSocio: number;
+  nombre: string;
+  porcentajeParticipacion: number;
   estado: EstadoGeneral;
+  fechaIngreso?: string;
 }
 
+// --- NUEVOS TIPOS PARA CONFIGURACIÓN Y COSTOS ---
+
+/* fix: Added EmpresaConfig interface for company settings */
 export interface EmpresaConfig {
-  id?: number;
   nombreEmpresa: string;
   rtn: string;
   direccion: string;
@@ -255,122 +261,105 @@ export interface EmpresaConfig {
   mensajeFinal: string;
 }
 
-export interface Socio {
-  idSocio: number;
-  nombre: string;
-  porcentajeParticipacion: number;
+/* fix: Added TipoCosto union type */
+export type TipoCosto = 'Costo Directo' | 'Costo Indirecto';
+
+/* fix: Added Costo interface */
+export interface Costo {
+  codCostos: string;
+  tipo: TipoCosto;
+  descripcion: string;
+  monto: number;
   estado: EstadoGeneral;
-  fechaIngreso?: string;
 }
 
+// --- NUEVOS TIPOS PARA DISEÑADOR DE ETIQUETAS ---
+
+/* fix: Added LabelElement interface for designer elements */
+export interface LabelElement {
+  id: string;
+  type: 'TEXT' | 'BARCODE' | 'QR' | 'IMAGE' | 'SHAPE' | 'DETAIL_TABLE';
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation: number;
+  content: string;
+  fontSize?: number;
+  color?: string;
+  textAlign?: 'left' | 'center' | 'right';
+  fontWeight?: string;
+  fontFamily?: string;
+  barcodeFormat?: string;
+  displayValue?: boolean;
+  shapeType?: 'RECTANGLE' | 'CIRCLE' | 'LINE';
+  fill?: string;
+  stroke?: string;
+  strokeWidth?: number;
+  isMultiline?: boolean;
+  isStretchWithOverflow?: boolean;
+}
+
+/* fix: Added LabelTemplate interface */
+export interface LabelTemplate {
+  id: string;
+  name: string;
+  category?: string;
+  type?: 'LABEL' | 'DOCUMENT';
+  dataSource?: string;
+  isDefault: boolean;
+  width: number;
+  height: number;
+  elements: LabelElement[];
+}
+
+// --- TIPOS ADICIONALES PARA CONTABILIDAD ---
+
+/* fix: Added missing accounting interfaces used in api service */
 export interface GastoContable {
-  idGasto: number;
+  idGasto: string;
   descripcion: string;
   monto: number;
   fecha: string;
-  categoria: 'Operativo' | 'Administrativo' | 'Ventas' | 'Personal' | 'Financiero';
-  idSocioAsignado?: number | null; 
-  nombreSocio?: string;
-  origenFondo: 'Caja' | 'Banco' | 'Tarjeta';
+  categoria: string;
 }
 
 export interface ReporteFinanciero {
-  periodo: string;
-  ingresosVentas: number;
+  ventasBrutas: number;
   costoVentas: number;
   utilidadBruta: number;
   gastosOperativos: number;
   utilidadNeta: number;
-  distribucion: {
-    socio: string;
-    porcentaje: number;
-    utilidadCorrespondiente: number;
-    gastosPersonalesDeducidos: number;
-    pagoFinal: number;
-  }[];
 }
 
 export interface ComponenteCosto {
-  id: number;
-  nombre: string; 
-  naturaleza: 'Fijo' | 'Porcentual';
+  id: string;
+  nombre: string;
+  monto: number;
 }
 
 export interface CostoProducto {
-  id: number;
-  idProducto: string; 
-  tipoProducto: 'TELEFONO' | 'ACCESORIO';
-  idComponente: number;
-  valor: number;
-  nombreComponente?: string;
+  codProducto: string;
+  costoUnitario: number;
+  margenUtilidad: number;
 }
 
 export interface PresupuestoMensual {
-  id?: number;
-  mes: number;
+  mes: string;
   anio: number;
-  categoria: string; 
-  montoBase: number;
-  montoMejor: number;
-  montoPeor: number;
+  montoEstimado: number;
+  montoReal: number;
 }
 
 export interface DailyTrackingRow {
   fecha: string;
-  diaSemana: string;
-  ventaTotal: number;
-  costosDirectos: number; 
-  gastosOperativos: number;
-  gananciaBruta: number;
-  gananciaNeta: number;
+  ingresos: number;
+  egresos: number;
+  balance: number;
 }
 
 export interface PnLRow {
   concepto: string;
-  real: number;
-  presupuesto: number;
-  diferencia: number;
-  isTotal?: boolean;
-}
-
-export type ElementType = 'TEXT' | 'BARCODE' | 'QR' | 'IMAGE' | 'SHAPE' | 'DETAIL_TABLE';
-
-export interface LabelElement {
-  id: string;
-  type: ElementType;
-  x: number; 
-  y: number; 
-  width: number; 
-  height: number; 
-  rotation: number; 
-  content: string; 
-  variableField?: string; 
-  fontFamily?: string;
-  fontSize?: number; 
-  fontWeight?: string; 
-  color?: string; 
-  textAlign?: 'left' | 'center' | 'right';
-  isMultiline?: boolean; 
-  lineHeight?: number; 
-  isStretchWithOverflow?: boolean; 
-  shapeType?: 'RECTANGLE' | 'LINE' | 'CIRCLE';
-  fill?: string;
-  stroke?: string;
-  strokeWidth?: number;
-  borderRadius?: number;
-  barcodeFormat?: string; 
-  displayValue?: boolean;
-}
-
-export interface LabelTemplate {
-  id: string; 
-  name: string;
-  category?: 'GENERAL' | 'TELEPHONE' | 'ACCESSORY' | 'INVOICE' | 'REPORT'; 
-  type?: 'LABEL' | 'DOCUMENT'; 
-  dataSource?: 'NONE' | 'TELEPHONES' | 'INVENTORY_ACCESSORIES' | 'SALES' | 'CLIENTS' | 'FULL_DB';
-  isDefault: boolean;
-  width: number; 
-  height: number; 
-  elements: LabelElement[];
-  createdAt?: string;
+  monto: number;
+  porcentaje: number;
 }
