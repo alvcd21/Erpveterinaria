@@ -13,10 +13,10 @@ import 'jspdf-autotable';
 
 type TabType = 'INGRESOS' | 'EGRESO' | 'VENTAS' | 'RECARGAS';
 
-// Helper robusto para números a letras (Facturación SAR)
+// Helper robusto para números a letras (Requerido para facturación SAR)
 const numeroALetras = (num: number): string => {
     const unidades = ['', 'UNO', 'DOS', 'TRES', 'CUATRO', 'CINCO', 'SEIS', 'SIETE', 'OCHO', 'NUEVE'];
-    const decenas = ['', 'DIEZ', 'VEINTE', 'TREINTA', 'CUARENTA', 'CUARENTA', 'SESENTA', 'SETENTA', 'OCHENTA', 'NOVENTA'];
+    const decenas = ['', 'DIEZ', 'VEINTE', 'TREINTA', 'CUARENTA', 'CINCUENTA', 'SESENTA', 'SETENTA', 'OCHENTA', 'NOVENTA'];
     const diez_veinte = ['DIEZ', 'ONCE', 'DOCE', 'TRECE', 'CATORCE', 'QUINCE', 'DIECISEIS', 'DIECISIETE', 'DIECIOCHO', 'DIECINUEVE'];
     const centenas = ['', 'CIENTO', 'DOSCIENTOS', 'TRESCIENTOS', 'CUATROCIENTOS', 'QUINIENTOS', 'SEISCIENTOS', 'SETECIENTOS', 'OCHOCIENTOS', 'NOVECIENTOS'];
 
@@ -35,6 +35,12 @@ const numeroALetras = (num: number): string => {
     const decimalPart = Math.round((num - integerPart) * 100);
     let text = '';
     if (integerPart === 0) text = 'CERO';
+    else if (integerPart >= 1000000) {
+        const millions = Math.floor(integerPart / 1000000);
+        const remainder = integerPart % 1000000;
+        text += (millions === 1 ? 'UN MILLON' : convertGroup(millions) + ' MILLONES');
+        if (remainder > 0) text += ' ' + convertGroup(Math.floor(remainder / 100)) + ' MIL ' + convertGroup(remainder % 1000);
+    } 
     else if (integerPart >= 1000) {
         const thousands = Math.floor(integerPart / 1000);
         const remainder = integerPart % 1000;
@@ -64,13 +70,15 @@ const CashRegister: React.FC = () => {
   const { user, hasPermission } = useAuth();
   const navigate = useNavigate();
 
-  // Modal Forms
+  // Modals States
   const [showIngresoModal, setShowIngresoModal] = useState(false);
+  const [isEditingIngreso, setIsEditingIngreso] = useState(false);
   const [ingresoForm, setIngresoForm] = useState({ 
     id: '', descripcion: '', monto: '', costo: '', subtipo: 'Venta Inventario' as SubtipoIngreso, irAPos: true 
   });
   
   const [showEgresoModal, setShowEgresoModal] = useState(false);
+  const [isEditingEgreso, setIsEditingEgreso] = useState(false);
   const [egresoForm, setEgresoForm] = useState({ 
     id: '', descripcion: '', monto: '', subtipo: 'Gasto Operativo' as SubtipoEgreso, idSocio: '' 
   });
@@ -150,43 +158,195 @@ const CashRegister: React.FC = () => {
       const doc = new jsPDF();
       doc.setFillColor(30, 41, 59); doc.rect(0, 0, 210, 30, 'F');
       doc.setTextColor(255); doc.setFontSize(18); doc.text("REPORTE DE CIERRE", 105, 15, { align: 'center' });
-      // ... Lógica abreviada de reporte para el ejemplo ...
       // @ts-ignore
       doc.autoTable({ startY: 40, head: [['Concepto', 'Monto']], body: [['Monto Inicial', `L. ${resumen.montoInicial}`], ['Ingresos', `L. ${resumen.totalVentas}`], ['Efectivo Final', `L. ${resumen.montoFinal}`]] });
       doc.save(`Cierre_${user.idCaja}.pdf`);
   };
 
-  const handleReprintInvoice = async (id: string) => {
-      try {
-          const sale = await SalesService.getVenta(id);
-          const details = await SalesService.getDetallesVenta(id);
-          const doc = new jsPDF();
-          doc.text(`Factura #${sale.codVenta}`, 10, 10);
-          // @ts-ignore
-          doc.autoTable({ startY: 20, head:[['Cant', 'Desc', 'Total']], body: details.map(d => [d.cantidad, d.descripcionProducto, (d.cantidad * d.precioVenta).toFixed(2)]) });
-          doc.save(`Factura_${id}.pdf`);
-      } catch(e) { Swal.fire('Error', 'No se pudo reimprimir', 'error'); }
+  // --- REIMPRESIÓN DE FACTURA PROFESIONAL (ESTILO POS) ---
+  const handleReprintInvoice = async (idVenta: string) => {
+    try {
+        const sale = await SalesService.getVenta(idVenta);
+        const details = await SalesService.getDetallesVenta(idVenta);
+        
+        if (!sale) return Swal.fire('Error', 'Venta no encontrada', 'error');
+
+        const doc = new jsPDF();
+        const config = companyConfig || { nombreEmpresa: 'SMARTCLOUD', rtn: '', direccion: '', isv: 15 } as any;
+        const pageWidth = doc.internal.pageSize.width;
+        const pageHeight = doc.internal.pageSize.height;
+        const primaryColor = "#1e3a8a";   
+        const accentColor = "#3b82f6";    
+        const grayColor = "#64748b";      
+        const lightGray = "#f1f5f9";      
+
+        // Header geométrico
+        doc.setFillColor(primaryColor);
+        doc.triangle(0, 0, pageWidth, 0, pageWidth, 35, 'F');
+        doc.triangle(0, 0, pageWidth, 35, 0, 50, 'F');
+        doc.setFillColor(accentColor);
+        doc.triangle(0, 0, 100, 0, 0, 50, 'F');
+
+        // Info Empresa
+        doc.setTextColor(255, 255, 255);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(16);
+        doc.text(config.nombreEmpresa.toUpperCase(), 35, 18);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(9);
+        doc.text(config.direccion || '', 35, 24);
+        doc.text(`Tel: ${config.telefono} | ${config.correo || ''}`, 35, 29);
+
+        // Título Factura
+        doc.setFontSize(24);
+        doc.setFont("helvetica", "bold");
+        doc.text("FACTURA", pageWidth - 15, 20, { align: "right" });
+        doc.setFontSize(10);
+        doc.setFont("helvetica", "normal");
+        doc.text(`NO. ${sale.codVenta}`, pageWidth - 15, 28, { align: "right" });
+
+        const topInfoY = 60;
+        doc.setFillColor(lightGray);
+        doc.roundedRect(14, topInfoY, 90, 35, 3, 3, 'F');
+        
+        // Info Cliente
+        doc.setTextColor(primaryColor);
+        doc.setFontSize(10);
+        doc.setFont("helvetica", "bold");
+        doc.text("FACTURAR A:", 18, topInfoY + 6);
+        
+        doc.setTextColor(0, 0, 0);
+        doc.setFont("helvetica", "bold");
+        doc.text(sale.nombreCliente || "CONSUMIDOR FINAL", 18, topInfoY + 12);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(9);
+        doc.setTextColor(grayColor);
+        doc.text(`RTN/DNI: ${sale.identidadCliente || "N/A"}`, 18, topInfoY + 17);
+        doc.text(`${sale.direccionCliente || "N/A"}`, 18, topInfoY + 22);
+
+        // Bloque SAR
+        const rightColX = 115;
+        doc.setFont("helvetica", "bold"); doc.setTextColor(grayColor);
+        doc.text("FECHA EMISIÓN:", rightColX, topInfoY + 5);
+        doc.setTextColor(0,0,0); doc.text(new Date(sale.fecha).toLocaleDateString(), rightColX + 45, topInfoY + 5);
+        
+        doc.setTextColor(grayColor); doc.text("R.T.N. EMISOR:", rightColX, topInfoY + 10);
+        doc.setTextColor(0,0,0); doc.text(config.rtn || 'N/A', rightColX + 45, topInfoY + 10);
+
+        doc.setTextColor(grayColor); doc.text("CAI:", rightColX, topInfoY + 15);
+        doc.setTextColor(0,0,0); doc.text(config.cai || 'N/A', rightColX + 45, topInfoY + 15);
+
+        doc.setTextColor(grayColor); doc.text("VENDEDOR:", rightColX, topInfoY + 20);
+        doc.setTextColor(0,0,0); doc.text(sale.nombreVendedor || "CAJERO", rightColX + 45, topInfoY + 20);
+
+        // Tabla de Detalles
+        // @ts-ignore
+        doc.autoTable({
+            startY: topInfoY + 40,
+            head: [['CANT.', 'DESCRIPCIÓN', 'PRECIO UNIT.', 'TOTAL']],
+            body: details.map(item => [
+                item.cantidad,
+                item.descripcionProducto,
+                `L. ${Number(item.precioVenta).toFixed(2)}`,
+                `L. ${(Number(item.cantidad) * Number(item.precioVenta)).toFixed(2)}`
+            ]),
+            theme: 'striped',
+            styles: { fontSize: 9, cellPadding: 3, textColor: [50, 50, 50] },
+            headStyles: { fillColor: primaryColor, textColor: [255, 255, 255], fontStyle: 'bold', halign: 'center' },
+            columnStyles: { 0: { halign: 'center' }, 1: { halign: 'left' }, 2: { halign: 'right' }, 3: { halign: 'right', fontStyle: 'bold' } },
+            margin: { left: 14, right: 14 }
+        });
+
+        // @ts-ignore
+        let finalY = doc.lastAutoTable.finalY + 5;
+        const totalsX = 130;
+
+        // Totales
+        const total = Number(sale.total);
+        const isv = Number(sale.isv || 0);
+        const discount = Number(sale.descuento || 0);
+        const subtotal = (total + discount) - isv;
+
+        doc.setFontSize(9); doc.setTextColor(0);
+        doc.text("Subtotal:", totalsX, finalY); doc.text(`L. ${subtotal.toFixed(2)}`, pageWidth - 14, finalY, {align: "right"});
+        finalY += 6;
+        if(discount > 0) {
+            doc.text("Descuentos:", totalsX, finalY); doc.text(`L. ${discount.toFixed(2)}`, pageWidth - 14, finalY, {align: "right"});
+            finalY += 6;
+        }
+        doc.text("I.S.V.:", totalsX, finalY); doc.text(`L. ${isv.toFixed(2)}`, pageWidth - 14, finalY, {align: "right"});
+        finalY += 2;
+        doc.setDrawColor(primaryColor); doc.line(totalsX, finalY, pageWidth - 14, finalY);
+        finalY += 6;
+
+        doc.setFont("helvetica", "bold"); doc.setTextColor(primaryColor); doc.setFontSize(11);
+        doc.text("TOTAL A PAGAR:", totalsX, finalY); doc.text(`L. ${total.toFixed(2)}`, pageWidth - 14, finalY, {align: "right"});
+
+        // Conversión Letras
+        doc.setTextColor(grayColor); doc.setFont("helvetica", "bold"); doc.setFontSize(8);
+        doc.text("SON: " + numeroALetras(total), 14, finalY);
+
+        // Footer Legal
+        const pageHeightFinal = doc.internal.pageSize.height;
+        let footerY = pageHeightFinal - 35;
+        doc.setFont("helvetica", "normal"); doc.setTextColor(grayColor); doc.setFontSize(7);
+        doc.text(`Rango Autorizado: ${config.rangoInicial || '000-001-01-00000001'} al ${config.rangoFinal || '000-001-01-00002000'}`, 14, footerY);
+        doc.text(`Fecha Límite Emisión: ${config.fechaLimite || 'N/A'}`, 14, footerY + 4);
+        doc.text(`Original: Cliente | Copia: Emisor`, 14, footerY + 8);
+
+        doc.setFillColor(lightGray); doc.rect(0, pageHeight - 15, pageWidth, 15, 'F');
+        doc.setTextColor(primaryColor); doc.setFontSize(9);
+        doc.text(config.mensajeFinal || "LA FACTURA ES BENEFICIO DE TODOS, EXIJALA", pageWidth / 2, pageHeight - 6, { align: "center" });
+
+        doc.save(`Factura_${sale.codVenta}_reimpresion.pdf`);
+    } catch (e:any) {
+        Swal.fire('Error', 'No se pudo generar la factura: ' + e.message, 'error');
+    }
   };
 
+  // --- ACTIONS ---
   const handleIngresoAction = async () => {
     try {
-        if (ingresoForm.irAPos) {
+        if (ingresoForm.irAPos && !isEditingIngreso) {
             navigate('/pos', { state: { customItem: { descripcion: `[${ingresoForm.subtipo}] ${ingresoForm.descripcion}`, precio: Number(ingresoForm.monto) } } });
             return;
         }
-        await CashService.createIngreso({ descripcion: ingresoForm.descripcion, monto: Number(ingresoForm.monto), costo: Number(ingresoForm.costo), subtipo_movimiento: ingresoForm.subtipo, fechaCreacion: getFullHndTimestamp() });
+
+        if (isEditingIngreso) {
+            await CashService.updateIngreso(ingresoForm.id, { descripcion: ingresoForm.descripcion, monto: Number(ingresoForm.monto), costo: Number(ingresoForm.costo) });
+            Swal.fire('Actualizado', 'Movimiento modificado', 'success');
+        } else {
+            await CashService.createIngreso({ descripcion: ingresoForm.descripcion, monto: Number(ingresoForm.monto), costo: Number(ingresoForm.costo), subtipo_movimiento: ingresoForm.subtipo, fechaCreacion: getFullHndTimestamp() });
+            Swal.fire('Guardado', 'Ingreso registrado', 'success');
+        }
+
         setShowIngresoModal(false);
+        setIngresoForm({ id: '', descripcion: '', monto: '', costo: '', subtipo: 'Venta Inventario', irAPos: true });
         loadData();
-        Swal.fire('Guardado', 'Ingreso registrado', 'success');
     } catch(err: any) { Swal.fire('Error', err.message, 'error'); }
   };
 
   const handleEgresoAction = async () => {
      try {
-         await CashService.createEgreso({ descripcion: egresoForm.descripcion, monto: Number(egresoForm.monto), subtipo_egreso: egresoForm.subtipo, id_socio_asignado: egresoForm.idSocio || null, fechaCreacion: getFullHndTimestamp() });
+         const payload = { 
+            descripcion: egresoForm.descripcion, 
+            monto: Number(egresoForm.monto), 
+            subtipo_egreso: egresoForm.subtipo,
+            id_socio_asignado: (egresoForm.subtipo === 'Gasto Personal Socio' || egresoForm.subtipo === 'Nomina') ? (egresoForm.idSocio || null) : null,
+            fechaCreacion: getFullHndTimestamp() 
+         };
+
+         if (isEditingEgreso) {
+             await CashService.updateEgreso(egresoForm.id, payload);
+             Swal.fire('Actualizado', 'Gasto modificado', 'success');
+         } else {
+             await CashService.createEgreso(payload);
+             Swal.fire('Guardado', 'Egreso registrado', 'success');
+         }
+
          setShowEgresoModal(false);
+         setEgresoForm({ id: '', descripcion: '', monto: '', subtipo: 'Gasto Operativo', idSocio: '' });
          loadData();
-         Swal.fire('Guardado', 'Egreso registrado', 'success');
      } catch(err: any) { Swal.fire('Error', err.message, 'error'); }
   };
 
@@ -196,7 +356,7 @@ const CashRegister: React.FC = () => {
   };
 
   const handleAnularVenta = async (id: string) => {
-      const result = await Swal.fire({ title: '¿Anular Venta?', icon: 'warning', showCancelButton: true, confirmButtonColor: '#d33' });
+      const result = await Swal.fire({ title: '¿Anular Venta?', text: 'Se devolverá el stock y se ajustará la caja.', icon: 'warning', showCancelButton: true, confirmButtonColor: '#d33' });
       if(result.isConfirmed) { try { await SalesService.anularVenta(id); loadData(); Swal.fire('Anulada', 'Venta anulada', 'success'); } catch(e:any) { Swal.fire('Error', e.message, 'error'); } }
   };
 
@@ -216,16 +376,41 @@ const CashRegister: React.FC = () => {
     try { await CashService.createRecarga({ red: showRecargaModal.red, tipo: showRecargaModal.tipo, descripcion: desc, precioCobrado: montoCobrado, precioPagado: montoPagado, fechaLocal: getHndDateOnly() }); setShowRecargaModal(null); loadData(); Swal.fire('Éxito', 'Recarga realizada', 'success'); } catch (err: any) { Swal.fire('Error', err.message, 'error'); }
   };
 
+  // --- OPEN MODALS HELPERS ---
+  const openNewIngreso = () => {
+      setIsEditingIngreso(false);
+      setIngresoForm({ id: '', descripcion: '', monto: '', costo: '', subtipo: 'Venta Inventario', irAPos: true });
+      setShowIngresoModal(true);
+  };
+
+  const openEditIngreso = (item: Ingreso) => {
+      setIsEditingIngreso(true);
+      setIngresoForm({ id: item.idIngreso, descripcion: item.descripcion, monto: String(item.monto), costo: String(item.costo), subtipo: item.subtipo_movimiento || 'Venta Inventario', irAPos: false });
+      setShowIngresoModal(true);
+  };
+
+  const openNewEgreso = () => {
+      setIsEditingEgreso(false);
+      setEgresoForm({ id: '', descripcion: '', monto: '', subtipo: 'Gasto Operativo', idSocio: '' });
+      setShowEgresoModal(true);
+  };
+
+  const openEditEgreso = (item: Egreso) => {
+      setIsEditingEgreso(true);
+      setEgresoForm({ id: item.idegresos, descripcion: item.descripcion, monto: String(item.monto), subtipo: item.subtipo_egreso || 'Gasto Operativo', idSocio: item.id_socio_asignado ? String(item.id_socio_asignado) : '' });
+      setShowEgresoModal(true);
+  };
+
   const totalIngresos = ingresos.reduce((a,b) => a + Number(b.monto), 0);
   const totalGastos = egresos.reduce((a,b) => a + Number(b.monto), 0);
   const cashInBoxCalculated = arqueo ? (Number(arqueo.montoInicial) + totalIngresos) - totalGastos : 0;
   const getSaldoRed = (red: string) => saldos.find(x => x.red === red)?.saldoFinal || 0;
 
-  if (isLoading) return <div className="flex flex-col justify-center items-center h-full text-slate-400 gap-4"><RefreshCw className="animate-spin" size={32}/><span>Cargando Turno...</span></div>;
+  if (isLoading) return <div className="flex flex-col justify-center items-center h-full text-slate-400 gap-4"><RefreshCw className="animate-spin" size={32}/><span>Cargando Turno de Honduras...</span></div>;
 
   if (!arqueo) {
       return (
-          <div className="flex flex-col items-center justify-center h-full bg-slate-50 p-6">
+          <div className="flex flex-col items-center justify-center h-full bg-slate-50 p-6 animate-fade-in">
               <div className="bg-white max-w-lg w-full rounded-3xl shadow-xl p-8 border border-slate-100">
                   <div className="flex flex-col items-center mb-8">
                       <div className="w-16 h-16 bg-indigo-600 rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-500/30 mb-4"><CloudLightning className="text-white" size={32} /></div>
@@ -249,22 +434,22 @@ const CashRegister: React.FC = () => {
       {/* Header Info */}
       <div className="bg-slate-800 rounded-2xl p-6 text-white shadow-lg">
          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-             <div><h2 className="text-xl font-bold uppercase tracking-wider">Caja: {user?.idCaja}</h2><p className="text-slate-400 text-xs">Abierto: {new Date(arqueo.fechaApertura).toLocaleString()}</p></div>
-             <button onClick={handleCloseBox} className="bg-red-600 hover:bg-red-700 px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 border border-red-500"><Lock size={16}/> CERRAR CAJA</button>
+             <div><h2 className="text-xl font-bold uppercase tracking-wider">Caja: {user?.idCaja}</h2><p className="text-slate-400 text-xs">Abierto el: {new Date(arqueo.fechaApertura).toLocaleString()}</p></div>
+             <button onClick={handleCloseBox} className="bg-red-600 hover:bg-red-700 px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 border border-red-500 shadow-lg shadow-red-500/20"><Lock size={16}/> CERRAR CAJA</button>
          </div>
          <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mt-6">
-              <div className="bg-white/10 p-4 rounded-xl border border-white/5"><p className="text-[10px] text-slate-400 font-bold uppercase">Efectivo</p><h3 className="text-2xl font-bold">L. {Number(cashInBoxCalculated).toLocaleString()}</h3></div>
-              <div className="bg-white/10 p-4 rounded-xl border border-white/5"><p className="text-[10px] text-emerald-400 font-bold uppercase">Ingresos</p><h3 className="text-lg font-bold">L. {Number(totalIngresos).toLocaleString()}</h3></div>
-              <div className="bg-white/10 p-4 rounded-xl border border-white/5"><p className="text-[10px] text-red-300 font-bold uppercase">Gastos</p><h3 className="text-lg font-bold">L. {Number(totalGastos).toLocaleString()}</h3></div>
-              <div className="bg-blue-600/20 border border-blue-500/30 p-4 rounded-xl"><p className="text-[10px] text-blue-200 font-bold uppercase">Tigo</p><h3 className="text-lg font-bold">L. {Number(getSaldoRed('TIGO')).toLocaleString()}</h3></div>
-              <div className="bg-red-600/20 border border-red-500/30 p-4 rounded-xl"><p className="text-[10px] text-red-200 font-bold uppercase">Claro</p><h3 className="text-lg font-bold">L. {Number(getSaldoRed('CLARO')).toLocaleString()}</h3></div>
+              <div className="bg-white/10 p-4 rounded-xl border border-white/5"><p className="text-[10px] text-slate-400 font-bold uppercase mb-1">Efectivo Actual</p><h3 className="text-2xl font-bold tracking-tight">L. {Number(cashInBoxCalculated).toLocaleString()}</h3></div>
+              <div className="bg-white/10 p-4 rounded-xl border border-white/5"><p className="text-[10px] text-emerald-400 font-bold uppercase mb-1">Ingresos</p><h3 className="text-lg font-bold">L. {Number(totalIngresos).toLocaleString()}</h3></div>
+              <div className="bg-white/10 p-4 rounded-xl border border-white/5"><p className="text-[10px] text-red-300 font-bold uppercase mb-1">Egresos</p><h3 className="text-lg font-bold">L. {Number(totalGastos).toLocaleString()}</h3></div>
+              <div className="bg-blue-600/20 border border-blue-500/30 p-4 rounded-xl"><p className="text-[10px] text-blue-200 font-bold uppercase mb-1">Tigo</p><h3 className="text-lg font-bold">L. {Number(getSaldoRed('TIGO')).toLocaleString()}</h3></div>
+              <div className="bg-red-600/20 border border-red-500/30 p-4 rounded-xl"><p className="text-[10px] text-red-200 font-bold uppercase mb-1">Claro</p><h3 className="text-lg font-bold">L. {Number(getSaldoRed('CLARO')).toLocaleString()}</h3></div>
          </div>
       </div>
 
       {/* Tabs */}
       <div className="flex gap-1 overflow-x-auto no-scrollbar border-b border-slate-200">
          {[{ id: 'INGRESOS', label: 'Ingresos', icon: <ArrowUpCircle size={18}/> }, { id: 'EGRESO', label: 'Gastos/Compras', icon: <ArrowDownCircle size={18}/> }, { id: 'RECARGAS', label: 'Recargas', icon: <Smartphone size={18}/> }, { id: 'VENTAS', label: 'Historial Ventas', icon: <ShoppingCart size={18}/> }].map((tab) => (
-            <button key={tab.id} onClick={() => setActiveTab(tab.id as TabType)} className={`px-6 py-3 font-bold text-sm transition-all border-b-2 flex items-center gap-2 ${activeTab === tab.id ? 'border-indigo-600 text-indigo-600 bg-indigo-50' : 'border-transparent text-slate-500'}`}>{tab.icon} {tab.label}</button>
+            <button key={tab.id} onClick={() => setActiveTab(tab.id as TabType)} className={`px-6 py-3 font-bold text-sm transition-all border-b-2 flex items-center gap-2 ${activeTab === tab.id ? 'border-indigo-600 text-indigo-600 bg-indigo-50' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>{tab.icon} {tab.label}</button>
          ))}
       </div>
 
@@ -272,20 +457,20 @@ const CashRegister: React.FC = () => {
          {activeTab === 'INGRESOS' && (
            <div className="space-y-4">
               <div className="flex justify-between items-center bg-emerald-50 p-4 rounded-xl border border-emerald-100">
-                 <div><h3 className="font-bold text-emerald-800">Registrar Nuevo Ingreso</h3><p className="text-xs text-emerald-600">Ventas manuales, reparaciones o préstamos.</p></div>
-                 <button onClick={() => setShowIngresoModal(true)} className="bg-emerald-600 text-white px-4 py-2 rounded-lg hover:bg-emerald-700 shadow-md flex items-center gap-2 font-bold text-sm"><PlusCircle size={18}/> Nuevo</button>
+                 <div><h3 className="font-bold text-emerald-800">Nuevo Ingreso</h3><p className="text-xs text-emerald-600">Servicios técnicos, reparaciones o ventas manuales.</p></div>
+                 <button onClick={openNewIngreso} className="bg-emerald-600 text-white px-4 py-2 rounded-lg hover:bg-emerald-700 shadow-md flex items-center gap-2 font-bold text-sm transition-all active:scale-95"><PlusCircle size={18}/> Registrar</button>
               </div>
-              <div className="overflow-x-auto"><table className="w-full text-xs md:text-sm text-left"><thead className="bg-slate-50 text-slate-500 uppercase font-bold"><tr><th className="p-3">Categoría</th><th className="p-3">Descripción</th><th className="p-3">Monto</th><th className="p-3 text-right">Acción</th></tr></thead><tbody>{ingresos.map(i => (<tr key={i.idIngreso} className="border-b hover:bg-slate-50"><td className="p-3"><span className="bg-slate-100 px-2 py-0.5 rounded text-[10px] font-bold text-slate-600">{i.subtipo_movimiento || 'Venta'}</span></td><td className="p-3 font-medium text-slate-700">{i.descripcion}</td><td className="p-3 font-bold text-emerald-600">L. {Number(i.monto).toFixed(2)}</td><td className="p-3 text-right"><button onClick={() => handleDeleteItem(i.idIngreso, 'INGRESO')} className="p-1 text-red-400 hover:text-red-600"><Trash2 size={16}/></button></td></tr>))}</tbody></table></div>
+              <div className="overflow-x-auto"><table className="w-full text-xs md:text-sm text-left"><thead className="bg-slate-50 text-slate-500 uppercase font-bold"><tr><th className="p-3">Categoría</th><th className="p-3">Descripción</th><th className="p-3">Monto</th><th className="p-3 text-right">Acción</th></tr></thead><tbody>{ingresos.length === 0 ? (<tr><td colSpan={4} className="p-10 text-center text-slate-400 italic">No hay ingresos registrados hoy.</td></tr>) : ingresos.map(i => (<tr key={i.idIngreso} className="border-b hover:bg-slate-50 transition-colors group"><td className="p-3"><span className="bg-slate-100 px-2 py-0.5 rounded text-[10px] font-bold text-slate-600 uppercase">{i.subtipo_movimiento || 'Venta'}</span></td><td className="p-3 font-medium text-slate-700">{i.descripcion}</td><td className="p-3 font-bold text-emerald-600">L. {Number(i.monto).toFixed(2)}</td><td className="p-3 text-right flex justify-end gap-1"><button onClick={() => openEditIngreso(i)} className="p-1.5 text-blue-400 hover:text-blue-600 hover:bg-blue-50 rounded"><Edit2 size={16}/></button><button onClick={() => handleDeleteItem(i.idIngreso, 'INGRESO')} className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded"><Trash2 size={16}/></button></td></tr>))}</tbody></table></div>
            </div>
          )}
 
          {activeTab === 'EGRESO' && (
            <div className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="flex justify-between items-center bg-red-50 p-4 rounded-xl border border-red-100"><div><h3 className="font-bold text-red-800 text-sm">Gasto General / Socio</h3></div><button onClick={() => setShowEgresoModal(true)} className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 shadow-md font-bold text-xs">Nuevo Gasto</button></div>
-                  <div className="flex justify-between items-center bg-blue-50 p-4 rounded-xl border border-blue-100"><div><h3 className="font-bold text-blue-800 text-sm">Compra Saldo de Recargas</h3></div><button onClick={() => setShowSaldoModal(true)} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 shadow-md font-bold text-xs"><Wallet size={16}/> Comprar</button></div>
+                  <div className="flex justify-between items-center bg-red-50 p-4 rounded-xl border border-red-100"><div><h3 className="font-bold text-red-800 text-sm">Gasto General</h3><p className="text-[10px] text-red-600">Pagos, nómina o retiros.</p></div><button onClick={openNewEgreso} className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 shadow-md font-bold text-xs transition-all active:scale-95">Registrar Gasto</button></div>
+                  <div className="flex justify-between items-center bg-blue-50 p-4 rounded-xl border border-blue-100"><div><h3 className="font-bold text-blue-800 text-sm">Compra Saldo</h3><p className="text-[10px] text-blue-600">Reabastecimiento de recargas.</p></div><button onClick={() => setShowSaldoModal(true)} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 shadow-md font-bold text-xs transition-all active:scale-95"><Wallet size={16}/> Comprar</button></div>
               </div>
-              <div className="overflow-x-auto"><table className="w-full text-xs md:text-sm text-left"><thead className="bg-slate-50 text-slate-500 uppercase font-bold"><tr><th className="p-3">Categoría</th><th className="p-3">Descripción</th><th className="p-3">Monto</th><th className="p-3 text-right">Acción</th></tr></thead><tbody>{egresos.map(e => (<tr key={e.idegresos} className="border-b hover:bg-slate-50"><td className="p-3"><span className="bg-slate-100 px-2 py-0.5 rounded text-[10px] font-bold text-slate-600">{e.subtipo_egreso || 'Gasto'}</span></td><td className="p-3 font-medium text-slate-700">{e.descripcion}{e.id_socio_asignado && <span className="block text-[10px] text-indigo-500 font-bold">Socio ID: {e.id_socio_asignado}</span>}</td><td className="p-3 font-bold text-red-600">L. {Number(e.monto).toFixed(2)}</td><td className="p-3 text-right"><button onClick={() => handleDeleteItem(e.idegresos, 'EGRESO')} className="p-1 text-red-400 hover:text-red-600"><Trash2 size={16}/></button></td></tr>))}</tbody></table></div>
+              <div className="overflow-x-auto"><table className="w-full text-xs md:text-sm text-left"><thead className="bg-slate-50 text-slate-500 uppercase font-bold"><tr><th className="p-3">Categoría</th><th className="p-3">Descripción</th><th className="p-3">Monto</th><th className="p-3 text-right">Acción</th></tr></thead><tbody>{egresos.length === 0 ? (<tr><td colSpan={4} className="p-10 text-center text-slate-400 italic">No hay egresos hoy.</td></tr>) : egresos.map(e => (<tr key={e.idegresos} className="border-b hover:bg-slate-50 transition-colors group"><td className="p-3"><span className="bg-slate-100 px-2 py-0.5 rounded text-[10px] font-bold text-slate-600 uppercase">{e.subtipo_egreso || 'Gasto'}</span></td><td className="p-3 font-medium text-slate-700">{e.descripcion}{e.id_socio_asignado && <span className="block text-[10px] text-indigo-500 font-bold flex items-center gap-1"><UserCheck size={10}/> Socio: {partners.find(p=>p.idSocio===e.id_socio_asignado)?.nombre}</span>}</td><td className="p-3 font-bold text-red-600">L. {Number(e.monto).toFixed(2)}</td><td className="p-3 text-right flex justify-end gap-1"><button onClick={() => openEditEgreso(e)} className="p-1.5 text-blue-400 hover:text-blue-600 hover:bg-blue-50 rounded"><Edit2 size={16}/></button><button onClick={() => handleDeleteItem(e.idegresos, 'EGRESO')} className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded"><Trash2 size={16}/></button></td></tr>))}</tbody></table></div>
            </div>
          )}
 
@@ -293,10 +478,10 @@ const CashRegister: React.FC = () => {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 animate-fade-in">
                {['TIGO', 'CLARO'].map(red => (
                   <div key={red} className={`bg-white rounded-2xl border shadow-sm overflow-hidden flex flex-col ${red === 'TIGO' ? 'border-blue-100' : 'border-red-100'}`}>
-                    <div className={`${red === 'TIGO' ? 'bg-blue-600' : 'bg-red-600'} text-white p-4 flex justify-between items-center`}><h3 className="font-bold text-lg">{red}</h3><span className="text-xs bg-white/20 px-3 py-1 rounded-full font-bold">L. {Number(getSaldoRed(red)).toFixed(2)}</span></div>
+                    <div className={`${red === 'TIGO' ? 'bg-blue-600' : 'bg-red-600'} text-white p-4 flex justify-between items-center`}><h3 className="font-bold text-lg">{red}</h3><span className="text-xs bg-white/20 px-3 py-1 rounded-full font-bold">Saldo: L. {Number(getSaldoRed(red)).toFixed(2)}</span></div>
                     <div className="p-6 grid grid-cols-1 gap-4">
-                        <button onClick={() => { setShowRecargaModal({ red: red as any, tipo: 'RECARGA' }); setRecargaForm({tipo:'RECARGA', monto:'', precio:'', paqueteId:''}); }} className={`w-full py-4 bg-slate-50 font-black rounded-2xl border-2 transition-all flex items-center justify-center gap-3 uppercase text-xs tracking-widest ${red==='TIGO'?'text-blue-700 border-blue-50 hover:bg-blue-50':'text-red-700 border-red-50 hover:bg-red-50'}`}><Smartphone size={20}/> Recarga Saldo</button>
-                        <button onClick={() => { setShowRecargaModal({ red: red as any, tipo: 'PAQUETE' }); setRecargaForm({tipo:'PAQUETE', monto:'', precio:'', paqueteId:''}); }} className={`w-full py-4 bg-slate-50 font-black rounded-2xl border-2 transition-all flex items-center justify-center gap-3 uppercase text-xs tracking-widest ${red==='TIGO'?'text-blue-700 border-blue-50 hover:bg-blue-50':'text-red-700 border-red-50 hover:bg-red-50'}`}><Package size={20}/> Comprar Paquete</button>
+                        <button onClick={() => { setShowRecargaModal({ red: red as any, tipo: 'RECARGA' }); setRecargaForm({tipo:'RECARGA', monto:'', precio:'', paqueteId:''}); }} className={`w-full py-4 bg-slate-50 font-black rounded-2xl border-2 transition-all flex items-center justify-center gap-3 uppercase text-xs tracking-widest ${red==='TIGO'?'text-blue-700 border-blue-50 hover:bg-blue-600 hover:text-white':'text-red-700 border-red-50 hover:bg-red-600 hover:text-white'}`}><Smartphone size={20}/> Recarga Saldo</button>
+                        <button onClick={() => { setShowRecargaModal({ red: red as any, tipo: 'PAQUETE' }); setRecargaForm({tipo:'PAQUETE', monto:'', precio:'', paqueteId:''}); }} className={`w-full py-4 bg-slate-50 font-black rounded-2xl border-2 transition-all flex items-center justify-center gap-3 uppercase text-xs tracking-widest ${red==='TIGO'?'text-blue-700 border-blue-50 hover:bg-blue-600 hover:text-white':'text-red-700 border-red-50 hover:bg-red-600 hover:text-white'}`}><Package size={20}/> Comprar Paquete</button>
                     </div>
                   </div>
                ))}
@@ -307,9 +492,9 @@ const CashRegister: React.FC = () => {
            <div className="space-y-4 animate-fade-in">
               <div className="overflow-x-auto"><table className="w-full text-xs md:text-sm text-left"><thead className="bg-slate-50 text-slate-500 uppercase font-bold"><tr><th className="p-3">Factura</th><th className="p-3">Cliente</th><th className="p-3">Total</th><th className="p-3">Estado</th><th className="p-3 text-right">Acción</th></tr></thead><tbody>
                   {ventas.length === 0 ? (<tr><td colSpan={5} className="p-10 text-center text-slate-400 italic">No hay ventas registradas hoy.</td></tr>) : ventas.map(v => (
-                  <tr key={v.codVenta} className={`border-b hover:bg-slate-50 ${v.estado === 'Anulada' ? 'opacity-40 bg-slate-50' : ''}`}><td className="p-3 font-mono text-xs">{v.codVenta}</td><td className="p-3">{v.nombreCliente}</td><td className={`p-3 font-bold ${v.estado === 'Anulada' ? 'line-through text-slate-400' : ''}`}>L. {Number(v.total).toFixed(2)}</td><td className="p-3"><span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${v.estado === 'Anulada' ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700'}`}>{v.estado}</span></td>
+                  <tr key={v.codVenta} className={`border-b hover:bg-slate-50 transition-colors ${v.estado === 'Anulada' ? 'opacity-40 bg-slate-50' : ''}`}><td className="p-3 font-mono text-xs">{v.codVenta}</td><td className="p-3">{v.nombreCliente}</td><td className={`p-3 font-bold ${v.estado === 'Anulada' ? 'line-through text-slate-400' : ''}`}>L. {Number(v.total).toFixed(2)}</td><td className="p-3"><span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${v.estado === 'Anulada' ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700'}`}>{v.estado}</span></td>
                   <td className="p-3 text-right flex justify-end gap-1">
-                      <button onClick={() => handleReprintInvoice(v.codVenta)} className="p-1.5 text-slate-400 hover:text-indigo-600 transition-colors" title="Reimprimir"><Printer size={16}/></button>
+                      <button onClick={() => handleReprintInvoice(v.codVenta)} className="p-1.5 text-slate-500 hover:text-indigo-600 transition-colors" title="Reimprimir Factura Profesional"><Printer size={16}/></button>
                       {v.estado !== 'Anulada' && (<><button onClick={() => navigate('/pos', { state: { editSaleId: v.codVenta } })} className="p-1.5 text-blue-500 hover:bg-blue-50 rounded" title="Editar"><Edit2 size={16}/></button><button onClick={() => handleAnularVenta(v.codVenta)} className="p-1.5 text-red-400 hover:text-red-600" title="Anular"><Ban size={16}/></button></>)}
                   </td></tr>))}</tbody></table></div>
            </div>
@@ -318,36 +503,47 @@ const CashRegister: React.FC = () => {
 
       {/* --- MODALES --- */}
       {showIngresoModal && (
-         <div className="fixed inset-0 bg-slate-900/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-            <div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl animate-fade-in">
-               <div className="flex justify-between items-center mb-6"><h3 className="font-bold text-xl text-slate-800">Registrar Ingreso</h3><button onClick={() => setShowIngresoModal(false)}><X className="text-slate-400"/></button></div>
+         <div className="fixed inset-0 bg-slate-900/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm animate-fade-in">
+            <div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl">
+               <div className="flex justify-between items-center mb-6 border-b border-slate-100 pb-2"><h3 className="font-bold text-xl text-slate-800">{isEditingIngreso ? 'Editar Ingreso' : 'Registrar Ingreso'}</h3><button onClick={() => setShowIngresoModal(false)}><X className="text-slate-400"/></button></div>
                <div className="space-y-4">
-                  <div><label className="text-[10px] font-black text-slate-400 uppercase mb-1 block">Clasificación</label>
-                    <select className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold" value={ingresoForm.subtipo} onChange={e => setIngresoForm({...ingresoForm, subtipo: e.target.value as any})}>
-                      <option value="Venta Inventario">Venta de Inventario</option><option value="Venta Prestado">Venta Producto Prestado</option><option value="Reparacion">Servicio de Reparación</option><option value="KrediYa_Prima">KrediYa (Pago de Prima)</option><option value="Cobro Consignacion">Cobro a Otros Negocios</option><option value="Ajuste">Ajuste de Caja</option>
-                    </select>
-                  </div>
-                  <div><label className="text-[10px] font-black text-slate-400 uppercase mb-1 block">Descripción</label><input className="w-full p-3 border rounded-xl" placeholder="Ej: Reparación Pantalla S20" value={ingresoForm.descripcion} onChange={e => setIngresoForm({...ingresoForm, descripcion:e.target.value})} /></div>
+                  {!isEditingIngreso && (
+                      <div><label className="text-[10px] font-black text-slate-400 uppercase mb-1 block">Clasificación</label>
+                        <select className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold" value={ingresoForm.subtipo} onChange={e => setIngresoForm({...ingresoForm, subtipo: e.target.value as any})}>
+                          <option value="Venta Inventario">Venta de Inventario</option><option value="Venta Prestado">Venta Producto Prestado</option><option value="Reparacion">Servicio de Reparación</option><option value="KrediYa_Prima">KrediYa (Pago de Prima)</option><option value="Cobro Consignacion">Cobro a Otros Negocios</option><option value="Ajuste">Ajuste de Caja</option>
+                        </select>
+                      </div>
+                  )}
+                  <div><label className="text-[10px] font-black text-slate-400 uppercase mb-1 block">Descripción</label><input className="w-full p-3 border rounded-xl outline-none focus:border-indigo-500" placeholder="Ej: Reparación Pantalla S20" value={ingresoForm.descripcion} onChange={e => setIngresoForm({...ingresoForm, descripcion:e.target.value})} /></div>
                   <div className="grid grid-cols-2 gap-3">
-                    <div><label className="text-[10px] font-black text-slate-400 uppercase mb-1 block">Precio Cobrado</label><input type="number" className="w-full p-3 border rounded-xl font-bold text-emerald-600" value={ingresoForm.monto} onChange={e => setIngresoForm({...ingresoForm, monto:e.target.value})} /></div>
-                    <div><label className="text-[10px] font-black text-slate-400 uppercase mb-1 block">Costo Base</label><input type="number" className="w-full p-3 border rounded-xl font-bold text-slate-400" value={ingresoForm.costo} onChange={e => setIngresoForm({...ingresoForm, costo:e.target.value})} /></div>
+                    <div><label className="text-[10px] font-black text-slate-400 uppercase mb-1 block">Precio Cobrado</label><input type="number" className="w-full p-3 border rounded-xl font-bold text-emerald-600 outline-none focus:border-emerald-500" value={ingresoForm.monto} onChange={e => setIngresoForm({...ingresoForm, monto:e.target.value})} /></div>
+                    <div><label className="text-[10px] font-black text-slate-400 uppercase mb-1 block">Costo Base</label><input type="number" className="w-full p-3 border rounded-xl font-bold text-slate-400 outline-none focus:border-slate-400" value={ingresoForm.costo} onChange={e => setIngresoForm({...ingresoForm, costo:e.target.value})} /></div>
                   </div>
-                  <div className="flex items-center gap-2 p-3 bg-indigo-50 rounded-xl border border-indigo-100">
-                    <input type="checkbox" id="irAPosIn" checked={ingresoForm.irAPos} onChange={e => setIngresoForm({...ingresoForm, irAPos: e.target.checked})} className="w-5 h-5 text-indigo-600 rounded"/><label htmlFor="irAPosIn" className="text-xs font-bold text-indigo-700 cursor-pointer">Facturar en POS (Generar Ticket)</label>
-                  </div>
-                  <button onClick={handleIngresoAction} className="w-full py-4 bg-emerald-600 text-white rounded-2xl font-black shadow-lg hover:bg-emerald-700 transition-all text-sm tracking-widest mt-4 uppercase">GUARDAR INGRESO</button>
+                  {!isEditingIngreso && (
+                    <div className="flex items-center gap-2 p-3 bg-indigo-50 rounded-xl border border-indigo-100">
+                        <input type="checkbox" id="irAPosIn" checked={ingresoForm.irAPos} onChange={e => setIngresoForm({...ingresoForm, irAPos: e.target.checked})} className="w-5 h-5 text-indigo-600 rounded"/><label htmlFor="irAPosIn" className="text-xs font-bold text-indigo-700 cursor-pointer">Facturar en POS (Diseño Profesional)</label>
+                    </div>
+                  )}
+                  <button onClick={handleIngresoAction} className="w-full py-4 bg-emerald-600 text-white rounded-2xl font-black shadow-lg hover:bg-emerald-700 transition-all text-sm tracking-widest mt-4 uppercase active:scale-[0.98]">GUARDAR MOVIMIENTO</button>
                </div>
             </div>
          </div>
       )}
 
       {showEgresoModal && (
-         <div className="fixed inset-0 bg-slate-900/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-            <div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl animate-fade-in">
-               <div className="flex justify-between items-center mb-6"><h3 className="font-bold text-xl text-slate-800">Registrar Salida</h3><button onClick={() => setShowEgresoModal(false)}><X className="text-slate-400"/></button></div>
+         <div className="fixed inset-0 bg-slate-900/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm animate-fade-in">
+            <div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl">
+               <div className="flex justify-between items-center mb-6 border-b border-slate-100 pb-2"><h3 className="font-bold text-xl text-slate-800">{isEditingEgreso ? 'Editar Gasto' : 'Registrar Salida'}</h3><button onClick={() => setShowEgresoModal(false)}><X className="text-slate-400"/></button></div>
                <div className="space-y-4">
                   <div><label className="text-[10px] font-black text-slate-400 uppercase mb-1 block">Tipo de Salida</label>
-                    <select className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold" value={egresoForm.subtipo} onChange={e => setEgresoForm({...egresoForm, subtipo: e.target.value as any})}>
+                    <select 
+                        className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold" 
+                        value={egresoForm.subtipo} 
+                        onChange={e => {
+                            const newSub = e.target.value as SubtipoEgreso;
+                            setEgresoForm({...egresoForm, subtipo: newSub, idSocio: (newSub === 'Gasto Personal Socio' || newSub === 'Nomina') ? egresoForm.idSocio : ''});
+                        }}
+                    >
                       <option value="Gasto Operativo">Gasto Operativo</option><option value="Pago a Tecnico">Pago a Técnico Amigo</option><option value="Pago a Tienda Externa">Pago por Producto Prestado</option><option value="Gasto Personal Socio">Retiro Personal de Socio</option><option value="Nomina">Pago de Empleado</option><option value="Compra Inventario">Compra de Mercadería</option>
                     </select>
                   </div>
@@ -359,24 +555,24 @@ const CashRegister: React.FC = () => {
                         </select>
                       </div>
                   )}
-                  <div><label className="text-[10px] font-black text-slate-400 uppercase mb-1 block">Descripción</label><input className="w-full p-3 border rounded-xl" placeholder="Ej: Pago de almuerzo" value={egresoForm.descripcion} onChange={e => setEgresoForm({...egresoForm, descripcion:e.target.value})} /></div>
-                  <div><label className="text-[10px] font-black text-slate-400 uppercase mb-1 block">Monto a Retirar</label><input type="number" className="w-full p-3 border rounded-xl font-bold text-red-600" value={egresoForm.monto} onChange={e => setEgresoForm({...egresoForm, monto:e.target.value})} /></div>
-                  <button onClick={handleEgresoAction} className="w-full py-4 bg-red-600 text-white rounded-2xl font-black shadow-lg hover:bg-red-700 transition-all text-sm tracking-widest mt-4 uppercase">REGISTRAR SALIDA</button>
+                  <div><label className="text-[10px] font-black text-slate-400 uppercase mb-1 block">Descripción</label><input className="w-full p-3 border rounded-xl outline-none focus:border-red-500" placeholder="Ej: Pago de alquiler" value={egresoForm.descripcion} onChange={e => setEgresoForm({...egresoForm, descripcion:e.target.value})} /></div>
+                  <div><label className="text-[10px] font-black text-slate-400 uppercase mb-1 block">Monto a Retirar</label><input type="number" className="w-full p-3 border rounded-xl font-bold text-red-600 outline-none focus:border-red-600" value={egresoForm.monto} onChange={e => setEgresoForm({...egresoForm, monto:e.target.value})} /></div>
+                  <button onClick={handleEgresoAction} className="w-full py-4 bg-red-600 text-white rounded-2xl font-black shadow-lg hover:bg-red-700 transition-all text-sm tracking-widest mt-4 uppercase active:scale-[0.98]">PROCESAR SALIDA</button>
                </div>
             </div>
          </div>
       )}
 
       {showRecargaModal && (
-         <div className="fixed inset-0 bg-slate-900/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-            <div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl animate-fade-in">
+         <div className="fixed inset-0 bg-slate-900/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm animate-fade-in">
+            <div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl">
                <div className="flex justify-between items-center mb-6"><h3 className="font-bold text-xl text-slate-800">{showRecargaModal.tipo} {showRecargaModal.red}</h3><button onClick={() => setShowRecargaModal(null)}><X className="text-slate-400"/></button></div>
                <div className="space-y-4">
                   {showRecargaModal.tipo === 'PAQUETE' ? (
                       <div><label className="text-[10px] font-black text-slate-400 uppercase mb-1 block">Seleccionar Paquete</label>
                         <select className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold" value={recargaForm.paqueteId} onChange={e => setRecargaForm({...recargaForm, paqueteId: e.target.value})}>
                           <option value="">-- Paquetes {showRecargaModal.red} --</option>
-                          {paquetes.filter(p=>p.red===showRecargaModal.red).map(p=>(<option key={p.idPaquete} value={p.idPaquete}>{p.nombre} - L.{p.precio}</option>))}
+                          {paquetes.filter(p=>p.red===showRecargaModal.red && p.estado === 'Activo').map(p=>(<option key={p.idPaquete} value={p.idPaquete}>{p.nombre} - L.{p.precio}</option>))}
                         </select>
                       </div>
                   ) : (
@@ -392,13 +588,13 @@ const CashRegister: React.FC = () => {
       )}
 
       {showSaldoModal && (
-         <div className="fixed inset-0 bg-slate-900/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-            <div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl animate-fade-in">
-                <div className="flex justify-between items-center mb-6"><h3 className="font-bold text-xl text-slate-800">Comprar Saldo</h3><button onClick={() => setShowSaldoModal(false)}><X size={20} className="text-slate-400"/></button></div>
+         <div className="fixed inset-0 bg-slate-900/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm animate-fade-in">
+            <div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl">
+                <div className="flex justify-between items-center mb-6 border-b border-slate-100 pb-2"><h3 className="font-bold text-xl text-slate-800">Comprar Saldo</h3><button onClick={() => setShowSaldoModal(false)}><X size={20} className="text-slate-400"/></button></div>
                 <div className="space-y-4">
-                    <select className="w-full p-3 border rounded-xl bg-slate-50 font-bold" value={saldoForm.red} onChange={e => setSaldoForm({...saldoForm, red: e.target.value as any})}><option value="TIGO">TIGO</option><option value="CLARO">CLARO</option></select>
-                    <div><label className="text-[10px] font-black text-slate-400 uppercase mb-1 block">Efectivo Pagado (Retiro de Caja)</label><input type="number" className="w-full p-3 border rounded-xl font-bold text-red-600" value={saldoForm.montoPagado} onChange={e => setSaldoForm({...saldoForm, montoPagado: e.target.value})} /></div>
-                    <div><label className="text-[10px] font-black text-slate-400 uppercase mb-1 block">Saldo Recibido en App</label><input type="number" className="w-full p-3 border rounded-xl font-bold text-blue-600" value={saldoForm.montoRecibido} onChange={e => setSaldoForm({...saldoForm, montoRecibido: e.target.value})} /></div>
+                    <select className="w-full p-3 border border-slate-200 rounded-xl bg-slate-50 font-bold" value={saldoForm.red} onChange={e => setSaldoForm({...saldoForm, red: e.target.value as any})}><option value="TIGO">TIGO</option><option value="CLARO">CLARO</option></select>
+                    <div><label className="text-[10px] font-black text-slate-400 uppercase mb-1 block">Efectivo Pagado (Egreso de Caja)</label><input type="number" className="w-full p-3 border border-slate-200 rounded-xl font-bold text-red-600" value={saldoForm.montoPagado} onChange={e => setSaldoForm({...saldoForm, montoPagado: e.target.value})} /></div>
+                    <div><label className="text-[10px] font-black text-slate-400 uppercase mb-1 block">Saldo Recibido en App</label><input type="number" className="w-full p-3 border border-slate-200 rounded-xl font-bold text-blue-600" value={saldoForm.montoRecibido} onChange={e => setSaldoForm({...saldoForm, montoRecibido: e.target.value})} /></div>
                     <button onClick={handleBuySaldo} className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-black shadow-lg hover:bg-indigo-700 transition-all text-sm tracking-widest mt-4 uppercase">REGISTRAR COMPRA</button>
                 </div>
             </div>
