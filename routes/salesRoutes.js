@@ -29,12 +29,10 @@ router.put('/clientes/:id', authenticateToken, async (req, res) => {
     } catch(e) { handleDbError(res, e); }
 });
 
-// HISTORIAL CORREGIDO: Filtra por el vendedor actual para evitar ver ventas de otras cajas
 router.get('/ventas/historial', authenticateToken, async (req, res) => {
     try {
         const { fecha } = req.query; 
-        const { codUsuario } = req.user; // Obtenemos el usuario autenticado
-
+        const { codUsuario } = req.user;
         let query = `
             SELECT v.codVenta as "codVenta", v.fecha, v.total, v.estado, v.identidadCliente as "identidadCliente",
             c.nombre || ' ' || c.apellido as "nombreCliente"
@@ -43,12 +41,7 @@ router.get('/ventas/historial', authenticateToken, async (req, res) => {
             WHERE v.codVendedor = $1
         `;
         const params = [codUsuario];
-        
-        if (fecha) { 
-            query += ` AND TO_CHAR(v.fecha, 'YYYY-MM-DD') = $2`; 
-            params.push(fecha); 
-        }
-        
+        if (fecha) { query += ` AND TO_CHAR(v.fecha, 'YYYY-MM-DD') = $2`; params.push(fecha); }
         query += ` ORDER BY v.codVenta DESC`;
         const result = await pool.query(query, params);
         res.json(result.rows);
@@ -96,9 +89,10 @@ router.post('/ventas', authenticateToken, async (req, res) => {
     }
 
     const idIngreso = await generateNextId('ingresos', 'idIngreso', 'INGR', client);
+    // CORREGIDO: Se cambió 'Venta Producto Externo' por 'Venta POS' para coincidir con el ENUM de la BD
     await client.query(
       `INSERT INTO ingresos (idIngreso, idCaja, descripcion, monto, costo, fechaCreacion, estado, subtipo_movimiento) 
-       VALUES ($1, $2, $3, $4, $5, $6, 'Venta POS', 'Venta Producto Externo')`,
+       VALUES ($1, $2, $3, $4, $5, $6, 'Venta POS', 'Venta POS')`,
       [idIngreso, idCaja, `Venta Factura #${codVenta}`, total, totalCosto, hndTime]
     );
 
@@ -132,7 +126,6 @@ router.put('/ventas/:id', authenticateToken, async (req, res) => {
         const { idCaja } = req.user;
 
         await client.query('BEGIN');
-
         const oldDetails = await client.query('SELECT idIngreso, idTelefono, idAccesorio as "idAccesorio", cantidad FROM detalleventa WHERE idVenta = $1', [codVenta]);
         const originalIdIngreso = oldDetails.rows[0]?.idingreso;
 
@@ -178,19 +171,15 @@ router.put('/ventas/:id/anular', authenticateToken, async (req, res) => {
         const codVenta = req.params.id;
         const { idCaja } = req.user;
         await client.query('BEGIN');
-        
         const details = await client.query('SELECT idTelefono, idAccesorio as "idAccesorio", idIngreso, cantidad FROM detalleventa WHERE idVenta = $1', [codVenta]);
         let idIngresoAEliminar = null;
-
         for (const det of details.rows) {
             if(det.idtelefono) await client.query("UPDATE telefonos SET estado = 'Disponible' WHERE codigo = $1", [det.idtelefono]);
             else if (det.idAccesorio) await client.query("UPDATE inventario SET cantidad = cantidad + $1 WHERE codInventario = $2", [det.cantidad, det.idAccesorio]);
             if (det.idingreso) idIngresoAEliminar = det.idingreso;
         }
-
         await client.query("UPDATE ventas SET estado = 'Anulada' WHERE codVenta = $1", [codVenta]);
         if (idIngresoAEliminar) await client.query("DELETE FROM ingresos WHERE idIngreso = $1", [idIngresoAEliminar]);
-
         await updateArqueoBalance(idCaja, client);
         await client.query('COMMIT');
         res.json({ message: 'Anulada' });
@@ -200,9 +189,8 @@ router.put('/ventas/:id/anular', authenticateToken, async (req, res) => {
 router.get('/ventas/:id/detalles', authenticateToken, async (req, res) => {
     try {
         const query = `
-            SELECT 
-                dv.codDetalleVenta as "codDetalleVenta", dv.cantidad, dv.precioVenta as "precioVenta", 
-                COALESCE(t.marca || ' ' || t.modelo, a.descripcion) as "descripcionProducto"
+            SELECT dv.codDetalleVenta as "codDetalleVenta", dv.cantidad, dv.precioVenta as "precioVenta", 
+            COALESCE(t.marca || ' ' || t.modelo, a.descripcion) as "descripcionProducto"
             FROM detalleventa dv
             LEFT JOIN telefonos t ON dv.idTelefono = t.codigo
             LEFT JOIN inventario inv ON dv.idAccesorio = inv.codInventario
