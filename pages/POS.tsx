@@ -1,16 +1,17 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { InventoryService, ClientService, SalesService, ConfigService } from '../services/api';
+import { InventoryService, ClientService, SalesService, CashService, ConfigService } from '../services/api';
 import { ProductoUnified, DetalleVenta, Cliente, EmpresaConfig, VentaPayload } from '../types';
-import { Search, ShoppingCart, Trash2, Smartphone, Zap, RefreshCw, User, X, Check, Plus, Minus, UserPlus, Grid, Filter, Tag, LayoutGrid, Wallet } from 'lucide-react';
+import { Search, ShoppingCart, Trash2, Smartphone, Zap, RefreshCw, User, X, Check, Plus, Minus, UserPlus, Grid, Filter, Tag, LayoutGrid, Wallet, CreditCard, Save } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate, useLocation } from 'react-router-dom';
 
+// Helper robusto para números a letras (Soporta miles y millones)
 const numeroALetras = (num: number): string => {
-    const unidades = ['', 'UNO', 'DOS', 'TRES', 'CUATRO', 'CINCO', 'SEIS', 'SIETE', 'OCHO', 'NUEVE'];
+    const unidades = ['', 'UN', 'DOS', 'TRES', 'CUATRO', 'CINCO', 'SEIS', 'SIETE', 'OCHO', 'NUEVE'];
     const decenas = ['', 'DIEZ', 'VEINTE', 'TREINTA', 'CUARENTA', 'CINCUENTA', 'SESENTA', 'SETENTA', 'OCHENTA', 'NOVENTA'];
     const diez_veinte = ['DIEZ', 'ONCE', 'DOCE', 'TRECE', 'CATORCE', 'QUINCE', 'DIECISEIS', 'DIECISIETE', 'DIECIOCHO', 'DIECINUEVE'];
     const centenas = ['', 'CIENTO', 'DOSCIENTOS', 'TRESCIENTOS', 'CUATROCIENTOS', 'QUINIENTOS', 'SEISCIENTOS', 'SETECIENTOS', 'OCHOCIENTOS', 'NOVECIENTOS'];
@@ -21,7 +22,10 @@ const numeroALetras = (num: number): string => {
         let output = '';
         if (n >= 100) { output += centenas[Math.floor(n / 100)] + ' '; n %= 100; }
         if (n >= 10 && n <= 19) { output += diez_veinte[n - 10]; } 
-        else if (n >= 20) { output += decenas[Math.floor(n / 10)]; if (n % 10 > 0) output += ' Y ' + unidades[n % 10]; } 
+        else if (n >= 20) { 
+            output += decenas[Math.floor(n / 10)]; 
+            if (n % 10 > 0) output += ' Y ' + unidades[n % 10]; 
+        } 
         else if (n > 0) { output += unidades[n]; }
         return output.trim();
     };
@@ -29,12 +33,20 @@ const numeroALetras = (num: number): string => {
     const integerPart = Math.floor(num);
     const decimalPart = Math.round((num - integerPart) * 100);
     let text = '';
+
     if (integerPart === 0) text = 'CERO';
     else if (integerPart >= 1000000) {
         const millions = Math.floor(integerPart / 1000000);
         const remainder = integerPart % 1000000;
         text += (millions === 1 ? 'UN MILLON' : convertGroup(millions) + ' MILLONES');
-        if (remainder > 0) text += ' ' + convertGroup(Math.floor(remainder / 100)) + ' MIL ' + convertGroup(remainder % 1000);
+        if (remainder > 0) {
+            if (remainder >= 1000) {
+                const thousands = Math.floor(remainder / 100); // Simplificado para el grupo
+                text += ' ' + convertGroup(Math.floor(remainder / 1000)) + ' MIL ' + convertGroup(remainder % 1000);
+            } else {
+                text += ' ' + convertGroup(remainder);
+            }
+        }
     } 
     else if (integerPart >= 1000) {
         const thousands = Math.floor(integerPart / 1000);
@@ -43,7 +55,8 @@ const numeroALetras = (num: number): string => {
         if (remainder > 0) text += ' ' + convertGroup(remainder);
     } 
     else { text = convertGroup(integerPart); }
-    return `${text} CON ${decimalPart}/100 LEMPIRAS`;
+
+    return `${text} CON ${decimalPart.toString().padStart(2, '0')}/100 LEMPIRAS`.toUpperCase();
 };
 
 const POS: React.FC = () => {
@@ -59,8 +72,6 @@ const POS: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedType, setSelectedType] = useState<'ALL' | 'TELEFONO' | 'ACCESORIO'>('ALL');
-  const [selectedBrand, setSelectedBrand] = useState<string>('ALL');
-  const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
   const [mobileTab, setMobileTab] = useState<'CATALOG' | 'CART'>('CATALOG');
 
   const [selectedClientId, setSelectedClientId] = useState<string>('');
@@ -192,6 +203,7 @@ const POS: React.FC = () => {
     return { bruto, subtotal, isv, total: conDescuento, financiado };
   }, [cart, discount, companyConfig, paymentType, primaAmount]);
 
+  // --- GENERACIÓN DE FACTURA (Diseño solicitado) ---
   const generateInvoicePDF = (saleId: string) => {
       const client = clients.find(c => c.identidad === selectedClientId);
       const doc = new jsPDF();
@@ -199,36 +211,34 @@ const POS: React.FC = () => {
       const pageWidth = doc.internal.pageSize.width;
       const pageHeight = doc.internal.pageSize.height;
       
-      const primaryColor = [30, 58, 138]; // Azul marino oscuro
+      const primaryColor = [30, 58, 138]; // Azul marino (#1e3a8a)
       const grayColor = [100, 116, 139]; // Gris texto
-      const lightGray = [241, 245, 249]; // Fondo gris suave
+      const lightGray = [241, 245, 249]; // Fondo gris bloques
 
-      // --- HEADER ---
+      // 1. ENCABEZADO SÓLIDO
       doc.setFillColor(primaryColor[0], primaryColor[1], primaryColor[2]);
-      doc.rect(0, 0, pageWidth, 40, 'F');
+      doc.rect(0, 0, pageWidth, 45, 'F');
       
-      // Logo y Nombre Empresa
       doc.setTextColor(255, 255, 255);
       doc.setFont("helvetica", "bold");
-      doc.setFontSize(22);
-      doc.text(config.nombreEmpresa.toUpperCase(), 35, 18);
+      doc.setFontSize(24);
+      doc.text(config.nombreEmpresa.toUpperCase(), 14, 20);
       
       doc.setFontSize(9);
       doc.setFont("helvetica", "normal");
-      doc.text(config.direccion || '', 35, 25);
-      doc.text(`Tel: ${config.telefono} | ${config.correo || ''}`, 35, 30);
+      doc.text(config.direccion || '', 14, 28);
+      doc.text(`Tel: ${config.telefono} | ${config.correo || ''}`, 14, 33);
 
-      // Etiqueta Factura y Número
-      doc.setFontSize(26);
+      doc.setFontSize(28);
       doc.setFont("helvetica", "bold");
-      doc.text("FACTURA", pageWidth - 20, 20, { align: "right" });
-      doc.setFontSize(11);
-      doc.text(`NO. ${saleId}`, pageWidth - 20, 30, { align: "right" });
+      doc.text("FACTURA", pageWidth - 14, 22, { align: "right" });
+      doc.setFontSize(12);
+      doc.text(`NO. ${saleId}`, pageWidth - 14, 32, { align: "right" });
 
-      // --- INFORMACIÓN CLIENTE ---
+      // 2. BLOQUE CLIENTE Y METADATOS
       const topInfoY = 55;
       doc.setFillColor(lightGray[0], lightGray[1], lightGray[2]);
-      doc.roundedRect(14, topInfoY, 90, 40, 3, 3, 'F');
+      doc.roundedRect(14, topInfoY, 95, 40, 3, 3, 'F');
       
       doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
       doc.setFontSize(10);
@@ -236,46 +246,43 @@ const POS: React.FC = () => {
       doc.text("FACTURAR A:", 18, topInfoY + 8);
       
       doc.setTextColor(0, 0, 0);
-      doc.setFontSize(12);
-      doc.text(client ? `${client.nombre} ${client.apellido}`.toUpperCase() : "CONSUMIDOR FINAL", 18, topInfoY + 16);
+      doc.setFontSize(13);
+      doc.text(client ? `${client.nombre} ${client.apellido}`.toUpperCase() : "CONSUMIDOR FINAL", 18, topInfoY + 18);
       
       doc.setFontSize(9);
       doc.setFont("helvetica", "normal");
       doc.setTextColor(grayColor[0], grayColor[1], grayColor[2]);
-      doc.text(`RTN/DNI: ${selectedClientId || "99999999999999"}`, 18, topInfoY + 23);
-      doc.text(`${client?.direccion || "Choluteca"}`, 18, topInfoY + 28);
+      doc.text(`RTN/DNI: ${selectedClientId || "99999999999999"}`, 18, topInfoY + 26);
+      doc.text(`${client?.direccion || "CHOLUTECA, HONDURAS"}`, 18, topInfoY + 32);
 
-      // --- METADATOS FACTURA ---
-      const rightColX = 115;
-      const metaLineHeight = 6;
+      // Metadatos derecha
+      const rightColX = 120;
+      const metaYStart = topInfoY + 5;
+      const spacingY = 6;
       doc.setFontSize(9);
       doc.setFont("helvetica", "bold");
       doc.setTextColor(grayColor[0], grayColor[1], grayColor[2]);
       
-      const labels = ["FECHA EMISIÓN:", "FECHA VENCIMIENTO:", "R.T.N. EMISOR:", "CAI:", "ORDEN DE COMPRA:", "VENDEDOR:"];
-      
-      // Cálculo de fecha vencimiento (Ej: 30 días después)
       const emissionDate = new Date();
-      const dueDate = new Date();
-      dueDate.setDate(emissionDate.getDate() + 30);
-      
-      const values = [
-          emissionDate.toLocaleDateString('es-HN'),
-          dueDate.toLocaleDateString('es-HN'),
-          config.rtn || 'N/A',
-          config.cai || 'N/A',
-          "N/A",
-          user?.nombreEmpleado || "Cajero del Sistema"
+      const dueDate = new Date(); dueDate.setDate(emissionDate.getDate() + 30);
+
+      const metaData = [
+          { label: "FECHA EMISIÓN:", value: emissionDate.toLocaleDateString('es-HN') },
+          { label: "FECHA VENCIMIENTO:", value: dueDate.toLocaleDateString('es-HN') },
+          { label: "R.T.N. EMISOR:", value: config.rtn || 'N/A' },
+          { label: "CAI:", value: config.cai || 'N/A' },
+          { label: "ORDEN DE COMPRA:", value: "N/A" },
+          { label: "VENDEDOR:", value: user?.nombreEmpleado?.toUpperCase() || "ADMINISTRADOR" }
       ];
 
-      labels.forEach((label, i) => {
-          doc.text(label, rightColX, topInfoY + 5 + (i * metaLineHeight));
-          doc.setTextColor(0,0,0);
-          doc.text(values[i], rightColX + 45, topInfoY + 5 + (i * metaLineHeight));
+      metaData.forEach((item, i) => {
+          doc.text(item.label, rightColX, metaYStart + (i * spacingY));
+          doc.setTextColor(0, 0, 0);
+          doc.text(String(item.value), rightColX + 45, metaYStart + (i * spacingY));
           doc.setTextColor(grayColor[0], grayColor[1], grayColor[2]);
       });
 
-      // --- TABLA DE PRODUCTOS ---
+      // 3. TABLA DE PRODUCTOS
       // @ts-ignore
       doc.autoTable({
           startY: topInfoY + 45,
@@ -287,8 +294,8 @@ const POS: React.FC = () => {
               `L. ${(Number(item.cantidad) * Number(item.precioVenta)).toFixed(2)}`
           ]),
           theme: 'striped',
-          styles: { fontSize: 9, cellPadding: 3, textColor: [0,0,0] },
-          headStyles: { fillColor: primaryColor, fontStyle: 'bold', halign: 'center', textColor: [255,255,255] },
+          styles: { fontSize: 9, cellPadding: 3, textColor: [0, 0, 0] },
+          headStyles: { fillColor: primaryColor, fontStyle: 'bold', halign: 'center', textColor: [255, 255, 255] },
           columnStyles: { 
               0: { halign: 'center', cellWidth: 20 }, 
               1: { halign: 'left' },
@@ -298,10 +305,10 @@ const POS: React.FC = () => {
           margin: { left: 14, right: 14 }
       });
 
-      // --- TOTALES ---
+      // 4. TOTALES
       // @ts-ignore
-      let finalY = doc.lastAutoTable.finalY + 8;
-      const totalsX = 130;
+      let finalY = doc.lastAutoTable.finalY + 10;
+      const totalsX = 135;
       doc.setFontSize(10);
       doc.setTextColor(grayColor[0], grayColor[1], grayColor[2]);
       doc.setFont("helvetica", "normal");
@@ -309,32 +316,33 @@ const POS: React.FC = () => {
       doc.text("Subtotal:", totalsX, finalY); 
       doc.text(`L. ${totals.subtotal.toFixed(2)}`, pageWidth - 14, finalY, {align: "right"});
       
-      finalY += 6;
+      finalY += 7;
       doc.text("Descuentos:", totalsX, finalY); 
       doc.text(`L. ${discount.toFixed(2)}`, pageWidth - 14, finalY, {align: "right"});
       
-      finalY += 6;
+      finalY += 7;
       doc.text(`ISV (${companyConfig?.isv || 15}%):`, totalsX, finalY); 
       doc.text(`L. ${totals.isv.toFixed(2)}`, pageWidth - 14, finalY, {align: "right"});
       
-      finalY += 6;
+      finalY += 4;
       doc.setDrawColor(primaryColor[0], primaryColor[1], primaryColor[2]);
       doc.setLineWidth(0.5);
-      doc.line(totalsX, finalY - 2, pageWidth - 14, finalY - 2);
+      doc.line(totalsX, finalY, pageWidth - 14, finalY);
       
+      finalY += 6;
       doc.setFont("helvetica", "bold"); 
       doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
-      doc.setFontSize(12);
-      doc.text("TOTAL A PAGAR:", totalsX, finalY + 2);
-      doc.text(`L. ${totals.total.toFixed(2)}`, pageWidth - 14, finalY + 2, {align: "right"});
+      doc.setFontSize(13);
+      doc.text("TOTAL A PAGAR:", totalsX, finalY);
+      doc.text(`L. ${totals.total.toFixed(2)}`, pageWidth - 14, finalY, {align: "right"});
 
-      // Cantidad en letras
+      // 5. CANTIDAD EN LETRAS
       doc.setTextColor(grayColor[0], grayColor[1], grayColor[2]);
       doc.setFontSize(9);
-      doc.text("SON: " + numeroALetras(totals.total), 14, finalY + 15);
+      doc.text("SON: " + numeroALetras(totals.total), 14, finalY + 12);
 
-      // --- FOOTER LEGAL ---
-      let footerY = pageHeight - 45;
+      // 6. PIE LEGAL
+      let footerY = pageHeight - 40;
       doc.setFontSize(8); 
       doc.setTextColor(grayColor[0], grayColor[1], grayColor[2]);
       doc.setFont("helvetica", "normal");
@@ -360,7 +368,7 @@ const POS: React.FC = () => {
     
     if (paymentType === 'KrediYa') {
         if (primaAmount <= 0) return Swal.fire('Prima Requerida', 'La venta KrediYa requiere un pago inicial (Prima).', 'warning');
-        if (primaAmount >= totals.total) return Swal.fire('Monto Inválido', 'La prima no puede ser mayor o igual al total. Use "Contado" en su lugar.', 'error');
+        if (primaAmount >= totals.total) return Swal.fire('Monto Inválido', 'La prima no puede ser mayor o igual al total.', 'error');
     }
 
     try {
@@ -380,23 +388,21 @@ const POS: React.FC = () => {
       if (isEditing && editingSaleId) {
         await SalesService.updateVenta(editingSaleId, payload);
         saleId = editingSaleId;
+        Swal.fire('Actualizado', 'Venta modificada con éxito', 'success');
       } else {
         const response = await SalesService.createVenta(payload);
         saleId = response.codVenta;
-      }
-
-      const result = await Swal.fire({
-        title: 'Venta Completada',
-        text: `Se ha generado la factura #${saleId}. ¿Desea descargar el comprobante legal?`,
-        icon: 'success',
-        showCancelButton: true,
-        confirmButtonText: 'Sí, Imprimir',
-        cancelButtonText: 'No por ahora',
-        confirmButtonColor: '#4f46e5'
-      });
-
-      if (result.isConfirmed) {
-          generateInvoicePDF(saleId);
+        Swal.fire({
+            title: '¡Venta Exitosa!',
+            text: `Factura #${saleId} generada.`,
+            icon: 'success',
+            showCancelButton: true,
+            confirmButtonText: 'Imprimir Factura',
+            cancelButtonText: 'Cerrar',
+            confirmButtonColor: '#1e3a8a'
+        }).then(res => {
+            if(res.isConfirmed) generateInvoicePDF(saleId);
+        });
       }
 
       resetPOS();
@@ -417,15 +423,10 @@ const POS: React.FC = () => {
     loadInitialData();
   };
 
-  const brands = useMemo(() => ['ALL', ...new Set(products.filter(p => p.tipo === 'TELEFONO').map(p => p.marca!))].sort(), [products]);
-  const categories = useMemo(() => ['ALL', ...new Set(products.filter(p => p.tipo === 'ACCESORIO').map(p => p.categoria!))].sort(), [products]);
-
   const filteredProducts = products.filter(p => {
     const matchSearch = p.nombre.toLowerCase().includes(searchTerm.toLowerCase()) || p.imei?.includes(searchTerm) || p.codigo.toLowerCase().includes(searchTerm.toLowerCase());
     const matchType = selectedType === 'ALL' || p.tipo === selectedType;
-    const matchBrand = selectedType !== 'TELEFONO' || selectedBrand === 'ALL' || p.marca === selectedBrand;
-    const matchCat = selectedType !== 'ACCESORIO' || selectedCategory === 'ALL' || p.categoria === selectedCategory;
-    return matchSearch && matchType && matchBrand && matchCat;
+    return matchSearch && matchType;
   });
 
   return (
@@ -441,23 +442,19 @@ const POS: React.FC = () => {
                <div className="relative flex-1"><Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} /><input type="text" placeholder="Buscar Producto, IMEI o Código..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-12 pr-4 py-2.5 bg-slate-50 border-none rounded-xl focus:ring-2 focus:ring-indigo-500/30 outline-none text-sm font-medium" /></div>
                <button onClick={loadInitialData} className="bg-slate-100 hover:bg-indigo-50 text-slate-500 hover:text-indigo-600 p-2.5 rounded-xl transition-all active:scale-95"><RefreshCw size={20} className={isLoading ? 'animate-spin' : ''}/></button>
             </div>
-            <div className="flex flex-col gap-3">
-               <div className="flex gap-2 overflow-x-auto no-scrollbar">
-                  <button onClick={() => {setSelectedType('ALL'); setSelectedBrand('ALL'); setSelectedCategory('ALL');}} className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest whitespace-nowrap transition-all ${selectedType === 'ALL' ? 'bg-slate-800 text-white shadow-md' : 'bg-slate-100 text-slate-400'}`}>TODOS</button>
-                  <button onClick={() => setSelectedType('TELEFONO')} className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest whitespace-nowrap flex items-center gap-2 transition-all ${selectedType === 'TELEFONO' ? 'bg-blue-600 text-white shadow-md' : 'bg-slate-100 text-slate-400'}`}><Smartphone size={14}/> TELÉFONOS</button>
-                  <button onClick={() => setSelectedType('ACCESORIO')} className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest whitespace-nowrap flex items-center gap-2 transition-all ${selectedType === 'ACCESORIO' ? 'bg-orange-600 text-white shadow-md' : 'bg-slate-100 text-slate-400'}`}><Zap size={14}/> ACCESORIOS</button>
-               </div>
-               {selectedType === 'TELEFONO' && (<div className="flex gap-1.5 overflow-x-auto no-scrollbar animate-fade-in py-1 border-t border-slate-50 mt-1"><div className="flex items-center px-2 text-slate-300"><Filter size={12}/></div>{brands.map(b => (<button key={b} onClick={() => setSelectedBrand(b)} className={`px-3 py-1 rounded-md text-[9px] font-bold uppercase transition-all border ${selectedBrand === b ? 'bg-blue-50 border-blue-500 text-blue-700' : 'bg-white text-slate-400 border-slate-200'}`}>{b === 'ALL' ? 'Todas las Marcas' : b}</button>))}</div>)}
-               {selectedType === 'ACCESORIO' && (<div className="flex gap-1.5 overflow-x-auto no-scrollbar animate-fade-in py-1 border-t border-slate-50 mt-1"><div className="flex items-center px-2 text-slate-300"><Filter size={12}/></div>{categories.map(c => (<button key={c} onClick={() => setSelectedCategory(c)} className={`px-3 py-1 rounded-md text-[9px] font-bold uppercase transition-all border ${selectedCategory === c ? 'bg-orange-50 border-orange-500 text-orange-700' : 'bg-white text-slate-400 border-slate-200'}`}>{c === 'ALL' ? 'Todas las Categorías' : c}</button>))}</div>)}
+            <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
+               <button onClick={() => setSelectedType('ALL')} className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest whitespace-nowrap transition-all ${selectedType === 'ALL' ? 'bg-slate-800 text-white shadow-md' : 'bg-slate-100 text-slate-400'}`}>TODOS</button>
+               <button onClick={() => setSelectedType('TELEFONO')} className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest whitespace-nowrap flex items-center gap-2 transition-all ${selectedType === 'TELEFONO' ? 'bg-blue-600 text-white shadow-md' : 'bg-slate-100 text-slate-400'}`}><Smartphone size={14}/> TELÉFONOS</button>
+               <button onClick={() => setSelectedType('ACCESORIO')} className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest whitespace-nowrap flex items-center gap-2 transition-all ${selectedType === 'ACCESORIO' ? 'bg-indigo-600 text-white shadow-md' : 'bg-slate-100 text-slate-400'}`}><Zap size={14}/> ACCESORIOS</button>
             </div>
           </div>
           <div className="flex-1 overflow-y-auto p-4 bg-slate-50/50 custom-scrollbar">
-            <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3">
               {filteredProducts.map(p => (
                 <button key={p.id} onClick={() => addToCart(p)} disabled={p.stock === 0} className={`flex flex-col items-start p-3 bg-white rounded-2xl border transition-all text-left relative group active:scale-95 shadow-sm ${p.stock === 0 ? 'opacity-50 grayscale' : 'border-slate-200/60 hover:border-indigo-500 hover:shadow-md'}`}>
-                  <div className="w-full flex justify-between items-start mb-2"><span className={`text-[8px] font-black px-1.5 py-0.5 rounded-md uppercase ${p.tipo==='TELEFONO' ? 'bg-blue-50 text-blue-600':'bg-orange-50 text-orange-600'}`}>{p.tipo.substring(0,3)}</span><span className={`text-[9px] font-black px-1.5 py-0.5 rounded-md ${p.stock > 1 ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600'}`}>Stock: {p.stock}</span></div>
+                  <div className="w-full flex justify-between items-start mb-2"><span className={`text-[8px] font-black px-1.5 py-0.5 rounded-md uppercase bg-slate-100 text-slate-500`}>{p.tipo.substring(0,3)}</span><span className={`text-[9px] font-black px-1.5 py-0.5 rounded-md ${p.stock > 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600'}`}>Stock: {p.stock}</span></div>
                   <h4 className="font-bold text-slate-800 text-[11px] line-clamp-2 leading-tight min-h-[2.2rem]">{p.nombre}</h4>
-                  <div className="mt-2 w-full pt-2 border-t border-slate-50"><span className="block text-sm font-black text-indigo-600">L. {Number(p.precioVenta).toLocaleString()}</span><span className="text-[9px] text-slate-400 font-bold uppercase mt-0.5 block truncate">Ubic: {p.ubicacion}</span></div>
+                  <div className="mt-2 w-full pt-2 border-t border-slate-50"><span className="block text-sm font-black text-indigo-600">L. {Number(p.precioVenta).toLocaleString()}</span></div>
                 </button>
               ))}
             </div>
@@ -465,11 +462,11 @@ const POS: React.FC = () => {
         </div>
         <div className={`w-full lg:w-[400px] flex-col bg-white rounded-3xl shadow-xl border border-slate-200 h-full ${mobileTab === 'CART' ? 'flex' : 'hidden lg:flex'}`}>
           <div className={`p-5 border-b space-y-4 shrink-0 bg-[#1e293b] text-white rounded-t-3xl`}>
-            <div className="flex justify-between items-center"><h3 className="font-black text-sm uppercase tracking-wider flex items-center gap-2"><Zap className={isEditing ? 'text-amber-400' : 'text-indigo-400'} size={18} /> {isEditing ? `EDITANDO #${editingSaleId}` : 'VENTA ACTUAL'}</h3>{isEditing && <button onClick={resetPOS} className="text-[10px] font-black uppercase bg-red-500/20 text-red-400 px-2 py-1 rounded">Cancelar</button>}{!isEditing && cart.length > 0 && <button onClick={() => setCart([])} className="text-slate-400 hover:text-white"><Trash2 size={18}/></button>}</div>
+            <div className="flex justify-between items-center"><h3 className="font-black text-sm uppercase tracking-wider flex items-center gap-2"><Zap className={isEditing ? 'text-amber-400' : 'text-indigo-400'} size={18} /> {isEditing ? `EDITANDO #${editingSaleId}` : 'VENTA ACTUAL'}</h3>{isEditing && <button onClick={resetPOS} className="text-[10px] font-black uppercase bg-red-500/20 text-red-400 px-2 py-1 rounded">Cancelar</button>}</div>
             <div className="grid grid-cols-3 gap-1">
-               <button onClick={() => setPaymentType('Contado')} className={`py-2 text-[8px] md:text-[10px] font-black uppercase tracking-widest rounded-xl transition-all border-2 ${paymentType === 'Contado' ? 'bg-indigo-600 border-indigo-600 text-white shadow-lg' : 'bg-transparent border-slate-700 text-slate-500'}`}>Contado</button>
-               <button onClick={() => setPaymentType('KrediYa')} className={`py-2 text-[8px] md:text-[10px] font-black uppercase tracking-widest rounded-xl transition-all border-2 ${paymentType === 'KrediYa' ? 'bg-emerald-600 border-emerald-600 text-white shadow-lg' : 'bg-transparent border-slate-700 text-slate-500'}`}>KrediYa</button>
-               <button onClick={() => setPaymentType('Credito')} className={`py-2 text-[8px] md:text-[10px] font-black uppercase tracking-widest rounded-xl transition-all border-2 ${paymentType === 'Credito' ? 'bg-indigo-600 border-indigo-600 text-white shadow-lg' : 'bg-transparent border-slate-700 text-slate-500'}`}>Crédito</button>
+               {['Contado', 'KrediYa', 'Credito'].map(type => (
+                   <button key={type} onClick={() => setPaymentType(type as any)} className={`py-2 text-[8px] md:text-[10px] font-black uppercase tracking-widest rounded-xl transition-all border-2 ${paymentType === type ? 'bg-indigo-600 border-indigo-600 text-white shadow-lg' : 'bg-transparent border-slate-700 text-slate-500'}`}>{type}</button>
+               ))}
             </div>
             <div className="relative"><User size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500"/><select value={selectedClientId} onChange={(e) => setSelectedClientId(e.target.value)} className="w-full pl-9 pr-10 py-2.5 bg-slate-800 border-none rounded-xl text-xs font-bold text-white focus:ring-2 focus:ring-indigo-500 transition-all appearance-none"><option value="">CONSUMIDOR FINAL</option>{clients.map(c => <option key={c.identidad} value={c.identidad}>{c.nombre} {c.apellido}</option>)}</select><button onClick={() => navigate('/clients')} className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 bg-indigo-600 text-white rounded-lg"><UserPlus size={14}/></button></div>
           </div>
@@ -482,18 +479,13 @@ const POS: React.FC = () => {
           <div className="p-5 bg-white border-t border-slate-100 rounded-b-3xl">
             <div className="space-y-1.5 mb-4">
               <div className="flex justify-between text-slate-400 text-[10px] font-bold uppercase tracking-wider"><span>Subtotal</span><span>L. {totals.subtotal.toFixed(2)}</span></div>
-              <div className="flex justify-between items-center py-1 border-y border-slate-50"><div className="flex items-center gap-2"><Tag size={12} className="text-red-500"/><span className="text-[10px] font-black text-red-500 uppercase">Descuento</span></div><input type="number" value={discount} onChange={(e) => setDiscount(Math.max(0, Number(e.target.value)))} className="w-20 text-right py-1 px-2 border border-slate-100 rounded-lg bg-slate-50 text-[11px] font-black text-slate-800 outline-none focus:ring-2 focus:ring-red-500/20" onFocus={e => e.target.select()} /></div>
-              
               {paymentType === 'KrediYa' && (
-                  <div className="animate-fade-in space-y-2 pt-1">
-                      <div className="flex justify-between items-center py-1.5 bg-emerald-50 px-3 rounded-xl border border-emerald-100">
-                          <div className="flex items-center gap-2"><Wallet size={12} className="text-emerald-600"/><span className="text-[10px] font-black text-emerald-600 uppercase">Pago Prima</span></div>
-                          <input type="number" value={primaAmount} onChange={(e) => setPrimaAmount(Math.max(0, Number(e.target.value)))} className="w-24 text-right py-1 px-2 border border-emerald-200 rounded-lg bg-white text-[12px] font-black text-emerald-700 outline-none focus:ring-2 focus:ring-emerald-500/20" onFocus={e => e.target.select()} />
-                      </div>
-                      <div className="flex justify-between text-slate-500 text-[10px] font-black uppercase tracking-wider px-1"><span>Saldo a Financiar:</span><span className="text-slate-800">L. {totals.financiado.toFixed(2)}</span></div>
+                  <div className="animate-fade-in space-y-2 pt-1 bg-emerald-50 p-2 rounded-xl border border-emerald-100 mb-2">
+                      <div className="flex justify-between items-center"><div className="flex items-center gap-2"><Wallet size={12} className="text-emerald-600"/><span className="text-[10px] font-black text-emerald-600 uppercase">Pago Prima</span></div><input type="number" value={primaAmount} onChange={(e) => setPrimaAmount(Math.max(0, Number(e.target.value)))} className="w-24 text-right py-1 px-2 border border-emerald-200 rounded-lg bg-white text-[12px] font-black text-emerald-700 outline-none" onFocus={e => e.target.select()} /></div>
+                      <div className="flex justify-between text-slate-500 text-[10px] font-black uppercase px-1"><span>A Financiar:</span><span className="text-slate-800 font-bold">L. {totals.financiado.toFixed(2)}</span></div>
                   </div>
               )}
-
+              <div className="flex justify-between items-center py-1 border-y border-slate-50"><div className="flex items-center gap-2"><Tag size={12} className="text-red-500"/><span className="text-[10px] font-black text-red-500 uppercase">Descuento</span></div><input type="number" value={discount} onChange={(e) => setDiscount(Math.max(0, Number(e.target.value)))} className="w-20 text-right py-1 px-2 border border-slate-100 rounded-lg bg-slate-50 text-[11px] font-black text-slate-800 outline-none" onFocus={e => e.target.select()} /></div>
               <div className="flex justify-between text-slate-400 text-[10px] font-bold uppercase tracking-wider"><span>ISV ({companyConfig?.isv || 15}%)</span><span>L. {totals.isv.toFixed(2)}</span></div>
               <div className="flex justify-between items-end pt-3"><span className="font-black text-xs text-slate-800 uppercase tracking-widest">Total Neto</span><span className="font-black text-2xl text-indigo-600 tracking-tighter">L. {totals.total.toFixed(2)}</span></div>
             </div>
