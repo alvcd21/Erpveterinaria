@@ -85,29 +85,43 @@ router.post('/ventas', authenticateToken, async (req, res) => {
     const codVenta = await generateNextId('ventas', 'codVenta', 'FACT', client);
 
     let totalCosto = 0;
+    let descArray = [];
+
+    // Resolver descripciones descriptivas para el ingreso a caja
     for (const item of detalles) {
         if (item.idTelefono) {
-            const tel = await client.query("SELECT precioCompra FROM telefonos WHERE codigo = $1", [item.idTelefono]);
-            totalCosto += Number(tel.rows[0]?.preciocompra || 0);
+            const tel = await client.query("SELECT marca, modelo, precioCompra FROM telefonos WHERE codigo = $1", [item.idTelefono]);
+            const row = tel.rows[0];
+            totalCosto += Number(row?.preciocompra || 0);
+            if (row) descArray.push(`${row.marca} ${row.modelo}`.toUpperCase());
         } else if (item.idInventario) {
-            const inv = await client.query('SELECT precioCompra FROM inventario WHERE codInventario = $1', [item.idInventario]);
-            totalCosto += (Number(inv.rows[0]?.preciocompra || 0) * Number(item.cantidad || 1));
+            const inv = await client.query(`
+                SELECT i.precioCompra, a.descripcion, c.tipo as categoria 
+                FROM inventario i 
+                JOIN accesorios a ON i.codAccesorio = a.codAccesorio
+                LEFT JOIN categoria c ON a.codCategoria = c.codCategoria
+                WHERE i.codInventario = $1
+            `, [item.idInventario]);
+            const row = inv.rows[0];
+            totalCosto += (Number(row?.preciocompra || 0) * Number(item.cantidad || 1));
+            if (row) descArray.push(`${row.categoria || ''} ${row.descripcion}`.trim().toUpperCase());
         }
     }
 
     const idIngreso = await generateNextId('ingresos', 'idIngreso', 'INGR', client);
     
-    // El ingreso a caja solo es la PRIMA si es KrediYa, o el TOTAL si es Contado.
     const montoIngresoCaja = tipoCompra === 'KrediYa' ? Number(montoPrima) : Number(total);
     const subtipoMovimiento = tipoCompra === 'KrediYa' ? 'KrediYa_Prima' : 'Venta';
     
+    // Descripción final combinada de los productos
+    const descripcionVenta = descArray.join(', ');
+
     await client.query(
       `INSERT INTO ingresos (idIngreso, idCaja, descripcion, monto, costo, fechaCreacion, estado, subtipo_movimiento) 
        VALUES ($1, $2, $3, $4, $5, $6, 'Completada', $7)`,
-      [idIngreso, idCaja, `Venta Factura #${codVenta}${tipoCompra === 'KrediYa' ? ' (Prima KrediYa)' : ''}`, montoIngresoCaja, totalCosto, hndTime, subtipoMovimiento]
+      [idIngreso, idCaja, descripcionVenta, montoIngresoCaja, totalCosto, hndTime, subtipoMovimiento]
     );
 
-    // INSERT EN VENTAS USANDO LOS NOMBRES DE COLUMNA QUE ACABAMOS DE CREAR
     await client.query(
       `INSERT INTO ventas (codVenta, fecha, codVendedor, identidadCliente, total, estado, tipoCompra, isv, descuento, monto_prima, monto_financiamiento) 
        VALUES ($1, $2, $3, $4, $5, 'Completada', $6, $7, $8, $9, $10)`,
@@ -150,18 +164,29 @@ router.put('/ventas/:id', authenticateToken, async (req, res) => {
         await client.query('DELETE FROM detalleventa WHERE idVenta = $1', [codVenta]);
 
         let totalCosto = 0;
+        let descArray = [];
         for (const item of detalles) {
             const codDetalle = await generateNextId('detalleventa', 'codDetalleVenta', 'PROD', client);
             let itemCosto = 0;
             if (item.idTelefono) {
-                const tel = await client.query("SELECT precioCompra FROM telefonos WHERE codigo = $1", [item.idTelefono]);
-                itemCosto = Number(tel.rows[0]?.preciocompra || 0);
+                const tel = await client.query("SELECT marca, modelo, precioCompra FROM telefonos WHERE codigo = $1", [item.idTelefono]);
+                const row = tel.rows[0];
+                itemCosto = Number(row?.preciocompra || 0);
+                if (row) descArray.push(`${row.marca} ${row.modelo}`.toUpperCase());
                 await client.query("UPDATE telefonos SET estado = 'Vendido' WHERE codigo = $1", [item.idTelefono]);
                 await client.query(`INSERT INTO detalleventa (codDetalleVenta, idVenta, idTelefono, idIngreso, cantidad, precioVenta, estado) VALUES ($1,$2,$3,$4,1,$5,'Activo')`, [codDetalle, codVenta, item.idTelefono, idIngreso, item.precioVenta]);
             } else {
                 const invId = item.idInventario || item.idAccesorio;
-                const inv = await client.query('SELECT codAccesorio, precioCompra FROM inventario WHERE codInventario = $1', [invId]);
-                itemCosto = Number(inv.rows[0]?.preciocompra || 0);
+                const inv = await client.query(`
+                    SELECT i.precioCompra, a.descripcion, c.tipo as categoria 
+                    FROM inventario i 
+                    JOIN accesorios a ON i.codAccesorio = a.codAccesorio
+                    LEFT JOIN categoria c ON a.codCategoria = c.codCategoria
+                    WHERE i.codInventario = $1
+                `, [invId]);
+                const row = inv.rows[0];
+                itemCosto = Number(row?.preciocompra || 0);
+                if (row) descArray.push(`${row.categoria || ''} ${row.descripcion}`.trim().toUpperCase());
                 await client.query("UPDATE inventario SET cantidad = cantidad - $1 WHERE codInventario = $2", [item.cantidad, invId]);
                 await client.query(`INSERT INTO detalleventa (codDetalleVenta, idVenta, idAccesorio, idIngreso, cantidad, precioVenta, estado) VALUES ($1,$2,$3,$4,$5,$6,'Activo')`, [codDetalle, codVenta, invId, idIngreso, item.cantidad, item.precioVenta]);
             }
@@ -171,7 +196,8 @@ router.put('/ventas/:id', authenticateToken, async (req, res) => {
         if (idIngreso) {
             const montoActualizadoCaja = tipoCompra === 'KrediYa' ? Number(montoPrima) : Number(total);
             const subtipoActualizado = tipoCompra === 'KrediYa' ? 'KrediYa_Prima' : 'Venta';
-            await client.query('UPDATE ingresos SET monto = $1, costo = $2, subtipo_movimiento = $3 WHERE idIngreso = $4', [montoActualizadoCaja, totalCosto, subtipoActualizado, idIngreso]);
+            const descripcionActualizada = descArray.join(', ');
+            await client.query('UPDATE ingresos SET descripcion = $1, monto = $2, costo = $3, subtipo_movimiento = $4 WHERE idIngreso = $5', [descripcionActualizada, montoActualizadoCaja, totalCosto, subtipoActualizado, idIngreso]);
         }
         
         await client.query(
@@ -192,6 +218,8 @@ router.get('/ventas/:id/detalles', authenticateToken, async (req, res) => {
                 dv.codDetalleVenta as "codDetalleVenta", 
                 dv.cantidad, 
                 dv.precioVenta as "precioVenta", 
+                dv.idTelefono as "idTelefono",
+                dv.idAccesorio as "idInventario",
                 COALESCE(
                     t.marca || ' ' || t.modelo, 
                     acc_via_inv.descripcion, 

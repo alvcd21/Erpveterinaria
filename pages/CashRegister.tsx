@@ -7,7 +7,9 @@ import {
 } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { useAuth } from '../context/AuthContext';
-import { useNavigate } from 'react-router-dom';
+// Fix: Use namespace import to bypass missing named export errors in certain environments
+import * as ReactRouterDOM from 'react-router-dom';
+const { useNavigate } = ReactRouterDOM as any;
 import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
 

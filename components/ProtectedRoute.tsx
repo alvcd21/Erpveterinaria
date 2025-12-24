@@ -1,6 +1,8 @@
 
 import React from 'react';
-import { Navigate, useLocation } from 'react-router-dom';
+// Fix: Use namespace import to bypass missing named export errors in certain environments
+import * as ReactRouterDOM from 'react-router-dom';
+const { Navigate, useLocation } = ReactRouterDOM as any;
 import { useAuth } from '../context/AuthContext';
 
 interface ProtectedRouteProps {

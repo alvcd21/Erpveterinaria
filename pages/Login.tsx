@@ -1,6 +1,8 @@
 
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+// Fix: Use namespace import to bypass missing named export errors in certain environments
+import * as ReactRouterDOM from 'react-router-dom';
+const { useNavigate } = ReactRouterDOM as any;
 import { useAuth } from '../context/AuthContext';
 import { CloudLightning, Lock, User, ArrowRight, AlertCircle } from 'lucide-react';
 

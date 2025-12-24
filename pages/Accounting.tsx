@@ -8,7 +8,9 @@ import {
 import Swal from 'sweetalert2';
 import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
-import { useNavigate } from 'react-router-dom';
+// Fix: Use namespace import to bypass missing named export errors in certain environments
+import * as ReactRouterDOM from 'react-router-dom';
+const { useNavigate } = ReactRouterDOM as any;
 
 interface AuditTransaction {
     tipo: 'INGRESO' | 'EGRESO';
@@ -286,43 +288,4 @@ const Accounting: React.FC = () => {
                             
                             {/* Siempre permitir editar costo en ingresos para corregir rentabilidad */}
                             {editingTx.tipo === 'INGRESO' && (
-                                <div><label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Costo (Inversión)</label><input type="number" className="w-full p-3 bg-white border border-slate-200 rounded-xl outline-none font-bold text-red-500 shadow-sm" value={editForm.costo} onChange={e => setEditForm({...editForm, costo: e.target.value})} /></div>
-                            )}
-                        </div>
-
-                        {editingTx.tipo === 'INGRESO' && (
-                             <div className="p-3 bg-indigo-50 border border-indigo-100 rounded-xl flex items-start gap-2">
-                                <AlertCircle size={14} className="text-indigo-600 mt-0.5 shrink-0"/>
-                                <p className="text-[9px] text-indigo-700">Editar el costo afectará directamente la <strong>Utilidad Bruta</strong> de este ingreso específico.</p>
-                             </div>
-                        )}
-
-                        {editingTx.tipo === 'EGRESO' && (
-                            <div className="space-y-4 bg-indigo-50/50 p-4 rounded-2xl border border-indigo-100">
-                                <div>
-                                    <label className="text-[10px] font-bold text-indigo-400 uppercase mb-2 block">Categoría Contable</label>
-                                    <select className="w-full p-3 bg-white border border-slate-200 rounded-xl text-xs font-bold" value={editForm.categoria} onChange={e => setEditForm({...editForm, categoria: e.target.value})}>
-                                        <option value="Gasto Operativo">Gasto Operativo (General)</option>
-                                        <option value="Compra de Producto">Reinversión de Stock</option>
-                                        <option value="Otros">Ajustes / Otros</option>
-                                    </select>
-                                </div>
-                                <div>
-                                    <label className="text-[10px] font-bold text-indigo-400 uppercase mb-2 block">Asignar a Socio (Deducción)</label>
-                                    <select className="w-full p-3 bg-white border border-slate-200 rounded-xl text-xs font-bold" value={editForm.id_socio_asignado} onChange={e => setEditForm({...editForm, id_socio_asignado: e.target.value})}>
-                                        <option value="">Gasto General Compartido</option>
-                                        {partners.map(p => <option key={p.idSocio} value={p.idSocio}>Personal: {p.nombre}</option>)}
-                                    </select>
-                                </div>
-                            </div>
-                        )}
-                    </div>
-                    <div className="flex gap-3 mt-8"><button onClick={() => setEditingTx(null)} className="flex-1 py-3 bg-slate-100 text-slate-500 font-bold rounded-xl">Cancelar</button><button onClick={saveEditTx} className="flex-1 py-3 bg-indigo-600 text-white font-bold rounded-xl shadow-lg">Guardar y Recalcular</button></div>
-                </div>
-            </div>
-        )}
-    </div>
-  );
-};
-
-export default Accounting;
+                                <div><label className="

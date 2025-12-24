@@ -1,7 +1,8 @@
 
 import React, { useState } from 'react';
-// Verified Link, useLocation and useNavigate are standard exports of react-router-dom v6
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+// Fix: Use namespace import to bypass missing named export errors in certain environments
+import * as ReactRouterDOM from 'react-router-dom';
+const { Link, useLocation, useNavigate } = ReactRouterDOM as any;
 import { useAuth } from '../context/AuthContext';
 import { 
   LayoutDashboard, ShoppingCart, Users, DollarSign, FileText, LogOut, Menu, X, Bell, CloudLightning, ShieldCheck, Truck, ChevronDown, ChevronRight, Package, Briefcase, Box, UserCog, Calculator, Smartphone, Activity, Tag, Settings, PieChart

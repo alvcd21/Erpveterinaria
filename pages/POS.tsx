@@ -7,7 +7,9 @@ import Swal from 'sweetalert2';
 import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
 import { useAuth } from '../context/AuthContext';
-import { useNavigate, useLocation } from 'react-router-dom';
+// Fix: Use namespace import to bypass missing named export errors in certain environments
+import * as ReactRouterDOM from 'react-router-dom';
+const { useNavigate, useLocation } = ReactRouterDOM as any;
 
 // Helper robusto para números a letras (Soporta miles y millones correctamente)
 const numeroALetras = (num: number): string => {
@@ -204,12 +206,12 @@ const POS: React.FC = () => {
     return { bruto, subtotal, isv, total: conDescuento, financiado };
   }, [cart, discount, companyConfig, paymentType, primaAmount]);
 
-  // --- GENERACIÓN DE FACTURA (DISEÑO GEOMÉTRICO RESTAURADO) ---
+  // --- GENERACIÓN DE FACTURA (DISEÑO EXACTO SEGÚN IMAGEN) ---
   const generateInvoicePDF = (saleId: string) => {
       try {
           const client = clients.find(c => c.identidad === selectedClientId);
           const doc = new jsPDF();
-          const config = companyConfig || { nombreEmpresa: 'SMARTCLOUD', rtn: '', direccion: '', isv: 15, cai: '', rangoInicial: '', rangoFinal: '', fechaLimite: '', mensajeFinal: '' } as any;
+          const config = companyConfig || { nombreEmpresa: 'SMARTCLOUD-HN', rtn: 'N/A', direccion: 'N/A', telefono: 'N/A', isv: 15, cai: 'N/A', rangoInicial: '0001', rangoFinal: '5000', fechaLimite: '30/12/2025' } as any;
           const pageWidth = doc.internal.pageSize.width;
           const pageHeight = doc.internal.pageSize.height;
           
@@ -218,34 +220,41 @@ const POS: React.FC = () => {
           const grayColor = "#64748b";      
           const lightGray = "#f1f5f9";      
 
-          // Header geométrico (Triángulos)
-          doc.setFillColor(primaryColor);
-          doc.triangle(0, 0, pageWidth, 0, pageWidth, 35, 'F');
-          doc.triangle(0, 0, pageWidth, 35, 0, 50, 'F');
+          // 1. Header Geométrico
           doc.setFillColor(accentColor);
-          doc.triangle(0, 0, 100, 0, 0, 50, 'F');
+          doc.triangle(0, 0, pageWidth, 0, 0, 45, 'F');
+          doc.setFillColor(primaryColor);
+          doc.triangle(pageWidth, 0, pageWidth, 45, 100, 0, 'F');
 
-          // Info Empresa
+          // 2. Logo (Círculos de puntos simulados)
+          doc.setFillColor(255, 255, 255);
+          for (let i = 0; i < 5; i++) {
+              for (let j = 0; j < 5; j++) {
+                  if ((i + j) % 2 === 0) doc.circle(18 + (i * 3), 10 + (j * 3), 0.8, 'F');
+              }
+          }
+
+          // 3. Info Empresa
           doc.setTextColor(255, 255, 255);
           doc.setFont("helvetica", "bold");
-          doc.setFontSize(18);
-          doc.text(config.nombreEmpresa.toUpperCase(), 35, 18);
+          doc.setFontSize(22);
+          doc.text(config.nombreEmpresa.toUpperCase(), 38, 18);
           doc.setFont("helvetica", "normal");
           doc.setFontSize(9);
-          doc.text(config.direccion || '', 35, 24);
-          doc.text(`Tel: ${config.telefono} | ${config.correo || ''}`, 35, 29);
+          doc.text(config.direccion || '', 38, 25);
+          doc.text(`Tel: ${config.telefono} | ${config.correo || ''}`, 38, 30);
 
-          // Título Factura
-          doc.setFontSize(24);
+          // 4. Título Factura
+          doc.setFontSize(28);
           doc.setFont("helvetica", "bold");
           doc.text("FACTURA", pageWidth - 15, 20, { align: "right" });
           doc.setFontSize(11);
-          doc.text(`NO. ${saleId}`, pageWidth - 15, 29, { align: "right" });
+          doc.text(`NO. ${saleId}`, pageWidth - 15, 30, { align: "right" });
 
-          // Bloque de Cliente
-          const topInfoY = 60;
+          // 5. Bloque de Cliente (Gris Redondeado)
+          const topInfoY = 55;
           doc.setFillColor(lightGray);
-          doc.roundedRect(14, topInfoY, 90, 38, 3, 3, 'F');
+          doc.roundedRect(14, topInfoY, 95, 40, 3, 3, 'F');
           
           doc.setTextColor(primaryColor);
           doc.setFontSize(10);
@@ -253,60 +262,79 @@ const POS: React.FC = () => {
           doc.text("FACTURAR A:", 18, topInfoY + 8);
           
           doc.setTextColor(0, 0, 0);
-          doc.setFontSize(12);
-          doc.text(client ? `${client.nombre} ${client.apellido}`.toUpperCase() : "CONSUMIDOR FINAL", 18, topInfoY + 16);
+          doc.setFontSize(13);
+          doc.text(client ? `${client.nombre} ${client.apellido}`.toUpperCase() : "CONSUMIDOR FINAL", 18, topInfoY + 18);
           
           doc.setFontSize(9);
           doc.setFont("helvetica", "normal");
           doc.setTextColor(grayColor);
-          doc.text(`RTN/DNI: ${selectedClientId || "99999999999999"}`, 18, topInfoY + 23);
-          doc.text(`${client?.direccion || "CHOLUTECA, HONDURAS"}`, 18, topInfoY + 28);
+          doc.text(`RTN/DNI: ${selectedClientId || "99999999999999"}`, 18, topInfoY + 26);
+          doc.text(`${client?.direccion || "CHOLUTECA, HONDURAS"}`, 18, topInfoY + 32);
 
-          // Metadatos derecha
-          const rightColX = 115;
+          // 6. Metadatos derecha
+          const rightColX = 120;
           const metaY = topInfoY + 5;
+          const spacing = 6;
+          doc.setFontSize(9);
           doc.setFont("helvetica", "bold");
-          doc.text("FECHA EMISIÓN:", rightColX, metaY);
-          doc.text("FECHA VENC.:", rightColX, metaY + 6);
-          doc.text("R.T.N. EMISOR:", rightColX, metaY + 12);
-          doc.text("CAI:", rightColX, metaY + 18);
-          doc.text("VENDEDOR:", rightColX, metaY + 24);
-
+          doc.setTextColor(grayColor);
+          
+          const labels = ["FECHA EMISIÓN:", "FECHA VENCIMIENTO:", "R.T.N. EMISOR:", "CAI:", "ORDEN DE COMPRA:", "VENDEDOR:"];
           const emissionDate = new Date();
           const dueDate = new Date(); dueDate.setDate(emissionDate.getDate() + 30);
           
-          doc.setFont("helvetica", "normal");
-          doc.setTextColor(0,0,0);
-          doc.text(emissionDate.toLocaleDateString('es-HN'), rightColX + 45, metaY);
-          doc.text(dueDate.toLocaleDateString('es-HN'), rightColX + 45, metaY + 6);
-          doc.text(config.rtn || 'N/A', rightColX + 45, metaY + 12);
-          doc.text(config.cai || 'N/A', rightColX + 45, metaY + 18);
-          doc.text(user?.nombreEmpleado?.toUpperCase() || "ADMIN", rightColX + 45, metaY + 24);
+          const values = [
+              emissionDate.toLocaleDateString('es-HN'),
+              dueDate.toLocaleDateString('es-HN'),
+              config.rtn || 'N/A',
+              config.cai || 'N/A',
+              "N/A",
+              user?.nombreEmpleado?.toUpperCase() || "ADMINISTRADOR"
+          ];
 
-          // Tabla de Productos
+          labels.forEach((label, i) => {
+              doc.text(label, rightColX, metaY + (i * spacing));
+              doc.setTextColor(0, 0, 0);
+              doc.text(String(values[i]), rightColX + 45, metaY + (i * spacing));
+              doc.setTextColor(grayColor);
+          });
+
+          // 7. Tabla de Productos (Centrada)
           // @ts-ignore
           doc.autoTable({
               startY: topInfoY + 45,
-              head: [['CANT.', 'DESCRIPCIÓN', 'PRECIO UNIT.', 'TOTAL']],
-              body: cart.map(item => [
-                  item.cantidad, 
-                  item.descripcionProducto?.toUpperCase(), 
-                  `L. ${Number(item.precioVenta).toFixed(2)}`, 
-                  `L. ${(Number(item.cantidad) * Number(item.precioVenta)).toFixed(2)}`
-              ]),
+              head: [['COD.', 'CANT.', 'DESCRIPCIÓN', 'PRECIO UNIT.', 'TOTAL']],
+              body: cart.map(item => {
+                  const prod = products.find(p => p.id === (item.idTelefono || item.idInventario));
+                  const cod = item.idTelefono || prod?.codigo || 'N/A';
+                  let desc = '';
+                  if (item.tipoProducto === 'TELEFONO') {
+                      desc = prod?.nombre?.toUpperCase() || item.descripcionProducto?.toUpperCase() || '';
+                  } else {
+                      desc = `${prod?.categoria || ''} ${item.descripcionProducto}`.trim().toUpperCase();
+                  }
+                  return [
+                      cod,
+                      item.cantidad,
+                      desc,
+                      `L. ${Number(item.precioVenta).toFixed(2)}`,
+                      `L. ${(Number(item.cantidad) * Number(item.precioVenta)).toFixed(2)}`
+                  ];
+              }),
               theme: 'striped',
-              styles: { fontSize: 9, cellPadding: 3, textColor: [0, 0, 0] },
+              styles: { fontSize: 9, cellPadding: 3, textColor: [0, 0, 0], halign: 'center' },
               headStyles: { fillColor: [30, 58, 138], fontStyle: 'bold', halign: 'center', textColor: [255, 255, 255] },
               columnStyles: { 
-                  0: { halign: 'center', cellWidth: 20 }, 
-                  1: { halign: 'left' },
-                  2: { halign: 'right', cellWidth: 40 }, 
-                  3: { halign: 'right', fontStyle: 'bold', cellWidth: 40 } 
+                  0: { cellWidth: 35 },
+                  1: { cellWidth: 15 },
+                  2: { halign: 'left' },
+                  3: { cellWidth: 30 },
+                  4: { cellWidth: 30, fontStyle: 'bold' }
               },
               margin: { left: 14, right: 14 }
           });
 
-          // Totales
+          // 8. Totales
           // @ts-ignore
           let finalY = doc.lastAutoTable.finalY + 10;
           const totalsX = 135;
@@ -337,12 +365,12 @@ const POS: React.FC = () => {
           doc.text("TOTAL A PAGAR:", totalsX, finalY);
           doc.text(`L. ${totals.total.toFixed(2)}`, pageWidth - 14, finalY, {align: "right"});
 
-          // Cantidad en letras
+          // 9. Cantidad en letras
           doc.setTextColor(grayColor);
           doc.setFontSize(9);
           doc.text("SON: " + numeroALetras(totals.total), 14, finalY + 12);
 
-          // Pie Legal
+          // 10. Pie Legal
           let footerY = pageHeight - 40;
           doc.setFontSize(8); 
           doc.setTextColor(grayColor);

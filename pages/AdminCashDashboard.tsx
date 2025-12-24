@@ -6,7 +6,9 @@ import { Activity, Lock, Unlock, RefreshCw, AlertTriangle, Eye, ArrowUpCircle, A
 import Swal from 'sweetalert2';
 import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
-import { useNavigate } from 'react-router-dom';
+// Fix: Use namespace import to bypass missing named export errors in certain environments
+import * as ReactRouterDOM from 'react-router-dom';
+const { useNavigate } = ReactRouterDOM as any;
 
 interface BoxStatus {
     idCaja: string;
