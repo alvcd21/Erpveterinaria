@@ -2,7 +2,6 @@
 import React, { useEffect, useState } from 'react';
 import { CashService, SalesService, AccountingService, PackagesService } from '../services/api';
 import { Arqueo, Ingreso, Egreso, Saldo, Socio, SubtipoIngreso, SubtipoEgreso } from '../types';
-// Added DollarSign to the imports from lucide-react
 import { Activity, Lock, Unlock, RefreshCw, AlertTriangle, Eye, ArrowUpCircle, ArrowDownCircle, Settings, X, Save, Edit2, Trash2, FileText, Smartphone, Printer, History, Calendar, Ticket, Info, PlusCircle, ArrowUpRight, UserCheck, DollarSign } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { jsPDF } from 'jspdf';
@@ -29,16 +28,13 @@ const AdminCashDashboard: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [partners, setPartners] = useState<Socio[]>([]);
   
-  // Manager Modal State
   const [selectedBox, setSelectedBox] = useState<BoxStatus | null>(null);
   const [sessionDetails, setSessionDetails] = useState<{arqueo: Arqueo, ingresos: Ingreso[], egresos: Egreso[]} | null>(null);
   const [sessionsHistory, setSessionsHistory] = useState<any[]>([]);
   const [activeTab, setActiveTab] = useState<'MOVIMIENTOS' | 'CONFIG'>('MOVIMIENTOS');
   
-  // Calculated Totals
   const [localTotals, setLocalTotals] = useState({ totalIngresos: 0, totalEgresos: 0, finalCalculado: 0 });
 
-  // Edit States
   const [editingItem, setEditingItem] = useState<{id: string, type: 'INGRESO'|'EGRESO'|null}>({id:'', type: null});
   const [editForm, setEditForm] = useState({ 
     descripcion: '', 
@@ -49,13 +45,10 @@ const AdminCashDashboard: React.FC = () => {
   });
   const [newMontoInicial, setNewMontoInicial] = useState<string>('');
 
-  // Creation Modals
   const [showNewModal, setShowNewModal] = useState<'INGRESO' | 'EGRESO' | null>(null);
   const [newForm, setNewForm] = useState({ descripcion: '', monto: '', costo: '0', subtipo: '', idSocio: '' });
 
-  // Saldos Management
   const [saldosSession, setSaldosSession] = useState<Saldo[]>([]);
-  const [editingSaldo, setEditingSaldo] = useState<Saldo | null>(null);
 
   useEffect(() => { loadData(); loadPartners(); }, []);
 
@@ -129,7 +122,6 @@ const AdminCashDashboard: React.FC = () => {
     if (!selectedBox || !sessionDetails) return;
     if (!newForm.descripcion || !newForm.monto || !newForm.subtipo) return Swal.fire('Error', 'Complete los campos requeridos', 'error');
     try {
-        // Logica de fecha retroactiva: se usa el dia de la sesion auditada
         const arqDate = sessionDetails.arqueo.fechaApertura.substring(0, 10);
         const manualTimestamp = `${arqDate} 12:00:00`;
         
@@ -206,7 +198,6 @@ const AdminCashDashboard: React.FC = () => {
       doc.autoTable({ startY: 50, head: [['Plataforma', 'Saldo Final']], body: [['TIGO', `L. ${Number(tigoS).toFixed(2)}`], ['CLARO', `L. ${Number(claroS).toFixed(2)}`]], theme: 'grid', headStyles: { fillColor: [15, 23, 42] }, columnStyles: { 1: { halign: 'right', textColor: [0, 128, 0], fontStyle: 'bold' } }, margin: { left: 110 } });
       const yPlatforms = (doc as any).lastAutoTable.finalY;
 
-      // SOLUCIÓN DEFINITIVA AL SOLAPAMIENTO: Maxima Y + 25mm
       let currentY = Math.max(ySummary, yPlatforms) + 25; 
       
       doc.setTextColor(0); doc.setFontSize(11); doc.text("DETALLE DE INGRESOS (Completo)", 14, currentY);
@@ -369,7 +360,6 @@ const AdminCashDashboard: React.FC = () => {
                            )}
                            {!loading && activeTab === 'MOVIMIENTOS' && (
                                <div className="space-y-8 animate-fade-in">
-                                   {/* INGRESOS TABLE */}
                                    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
                                        <div className="p-4 bg-emerald-50 border-b border-emerald-100 flex justify-between items-center">
                                            <h3 className="font-black text-emerald-800 flex items-center gap-2 text-sm uppercase tracking-wider"><ArrowUpCircle size={18}/> Ingresos y Ventas</h3>
@@ -414,7 +404,6 @@ const AdminCashDashboard: React.FC = () => {
                                        </div>
                                    </div>
 
-                                   {/* EGRESOS TABLE */}
                                    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
                                        <div className="p-4 bg-red-50 border-b border-red-100 flex justify-between items-center">
                                            <h3 className="font-black text-red-800 flex items-center gap-2 text-sm uppercase tracking-wider"><ArrowDownCircle size={18}/> Gastos y Egresos</h3>
@@ -504,7 +493,7 @@ const AdminCashDashboard: React.FC = () => {
                            {showNewModal === 'INGRESO' ? (
                                <select className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold" value={newForm.subtipo} onChange={e => setNewForm({...newForm, subtipo: e.target.value})}>
                                    <option value="Reparacion">Servicio de Reparación</option>
-                                   <option value="Venta POS">Venta POS</option>
+                                   <option value="Venta Producto Externo">Venta Producto Externo</option>
                                    <option value="KrediYa_Prima">KrediYa (Pago de Prima)</option>
                                    <option value="Cobros Venta a Negocios Externos">Cobros Venta a Negocios Externos</option>
                                </select>

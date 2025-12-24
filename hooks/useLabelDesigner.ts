@@ -1,5 +1,5 @@
 
-import { useState, useRef, useCallback, useEffect } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { LabelTemplate, LabelElement } from '../types';
 import { LabelService, AdminService } from '../services/api';
 import Swal from 'sweetalert2';
@@ -268,6 +268,7 @@ export const useLabelDesigner = () => {
     };
 
     // --- INTERACTION LOGIC (CANVAS) ---
+    // // Fix: Explicitly use React namespace for event types which require the React import.
     const handlePointerDown = (e: React.MouseEvent | React.TouchEvent, id: string | null, mode: 'MOVE'|'RESIZE'|'ROTATE'|'PANNING', handle?: string) => {
         e.stopPropagation();
         
@@ -303,6 +304,7 @@ export const useLabelDesigner = () => {
         }
     };
 
+    // // Fix: Explicitly use React namespace for event types which require the React import.
     const handlePointerMove = (e: React.MouseEvent | React.TouchEvent) => {
         if (interaction.mode === 'NONE') return;
         

@@ -19,7 +19,7 @@ const AdminUsers: React.FC<AdminUsersProps> = ({ initialView }) => {
   const [roles, setRoles] = useState<Rol[]>([]);
   const [cajas, setCajas] = useState<Caja[]>([]);
   const [permisos, setPermisos] = useState<Permiso[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, useState] = useState(false);
 
   const [showModal, setShowModal] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -447,7 +447,8 @@ const AdminUsers: React.FC<AdminUsersProps> = ({ initialView }) => {
                         <div className="mt-4">
                             <label className="text-xs font-bold text-slate-500 uppercase block mb-3">Asignar Permisos</label>
                             <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 max-h-[300px] overflow-y-auto">
-                                {Object.entries(groupedPermisos).map(([modulo, perms]) => (
+                                {/* // Fix: Explicitly cast Object.entries to fix inferred 'unknown' type for 'perms' */}
+                                {(Object.entries(groupedPermisos) as [string, Permiso[]][]).map(([modulo, perms]) => (
                                     <div key={modulo} className="mb-4 last:mb-0">
                                         <h4 className="text-xs font-bold text-indigo-600 uppercase mb-2 border-b border-indigo-100 pb-1">{modulo}</h4>
                                         <div className="grid grid-cols-2 gap-2">
