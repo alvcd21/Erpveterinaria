@@ -5,7 +5,7 @@ const bcrypt = require('bcryptjs');
 const { pool, generateNextId, handleDbError, updateArqueoBalance } = require('../config/db');
 const { authenticateToken } = require('../middleware/auth');
 
-// --- ENDPOINT PARA EL DISEÑADOR DE ETIQUETAS (EVITA ERROR 404) ---
+// --- ENDPOINT PARA ESQUEMA DE DATOS (REQUERIDO POR IMPRESIÓN/DISEÑO) ---
 router.get('/schema', authenticateToken, async (req, res) => {
     try {
         const query = `
@@ -18,14 +18,11 @@ router.get('/schema', authenticateToken, async (req, res) => {
             AND table_name IN ('telefonos', 'inventario', 'accesorios', 'ventas', 'clientes', 'configuracion')
         `;
         const result = await pool.query(query);
-        
-        // Formatear para el frontend
         const schema = result.rows.reduce((acc, curr) => {
             if (!acc[curr.table]) acc[curr.table] = { columns: [], relations: [] };
             acc[curr.table].columns.push({ name: curr.column, type: curr.type });
             return acc;
         }, {});
-
         res.json(schema);
     } catch(e) { handleDbError(res, e); }
 });
@@ -115,15 +112,6 @@ router.get('/admin/boxes/:id/history', authenticateToken, async (req, res) => {
         `;
         const result = await pool.query(query, [req.params.id]);
         res.json(result.rows);
-    } catch(e) { handleDbError(res, e); }
-});
-
-// GESTIÓN DE SALDOS ADMINISTRATIVOS
-router.get('/admin/saldos', authenticateToken, async (req, res) => {
-    try {
-        const { fecha } = req.query;
-        const r = await pool.query(`SELECT idsaldos, red, saldoInicio as "saldoInicio", saldoFinal as "saldoFinal" FROM saldos WHERE TO_CHAR(fecha, 'YYYY-MM-DD') = $1`, [fecha]);
-        res.json(r.rows);
     } catch(e) { handleDbError(res, e); }
 });
 
