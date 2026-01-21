@@ -39,7 +39,13 @@ const numeroALetras = (num: number): string => {
         const millions = Math.floor(integerPart / 1000000);
         const remainder = integerPart % 1000000;
         text += (millions === 1 ? 'UN MILLON' : convertGroup(millions) + ' MILLONES');
-        if (remainder > 0) text += ' ' + convertGroup(Math.floor(remainder / 100)) + ' MIL ' + convertGroup(remainder % 1000);
+        if (remainder > 0) {
+            if (remainder >= 1000) {
+                text += ' ' + convertGroup(Math.floor(remainder / 1000)) + ' MIL ' + convertGroup(remainder % 1000);
+            } else {
+                text += ' ' + convertGroup(remainder);
+            }
+        }
     } 
     else if (integerPart >= 1000) {
         const thousands = Math.floor(integerPart / 1000);
@@ -179,125 +185,209 @@ const CashRegister: React.FC = () => {
     doc.save(`Cierre_${user.idCaja}_${getHndDateOnly()}.pdf`);
   };
 
-  // --- REIMPRESIÓN MEJORADA (MISMO DISEÑO POS) ---
+  // --- REIMPRESIÓN IDÉNTICA AL POS ---
   const handleReprintInvoice = async (saleId: string) => {
-    try {
-        const [sale, details, cfg] = await Promise.all([
-            SalesService.getVenta(saleId),
-            SalesService.getDetallesVenta(saleId),
-            ConfigService.get()
-        ]);
+      try {
+          const [sale, details, cfg] = await Promise.all([
+              SalesService.getVenta(saleId),
+              SalesService.getDetallesVenta(saleId),
+              ConfigService.get()
+          ]);
 
-        if (!sale) return;
+          if (!sale) return;
 
-        const doc = new jsPDF();
-        const primaryColor = "#1e3a8a";   
-        const accentColor = "#3b82f6";    
-        const grayColor = "#64748b";      
-        const lightGray = "#f1f5f9";      
-        const pageWidth = doc.internal.pageSize.width;
-        const pageHeight = doc.internal.pageSize.height;
+          /**
+           * COPIA Y PEGA TU IMAGEN BASE64 AQUÍ DENTRO DE LAS COMILLAS SI TIENES UNA
+           */
+          const LOGO_BASE64 = ""; 
 
-        // Correct field mapping to match EmpresaConfig interface
-        // Fix: Use correct property names as defined in EmpresaConfig interface
-        const nombreEmpresa = (cfg.nombreEmpresa || 'SMARTCLOUD ERP').toUpperCase();
-        const rtnEmpresa = cfg.rtn || 'N/A';
-        const direccionEmpresa = cfg.direccion || 'N/A';
-        const telefonoEmpresa = cfg.telefono || 'N/A';
-        const correoEmpresa = cfg.correo || 'N/A';
-        const caiEmpresa = cfg.cai || 'N/A';
-        const rangoInic = cfg.rangoInicial || 'N/A';
-        const rangoFin = cfg.rangoFinal || 'N/A';
-        const fechaLim = cfg.fechaLimite ? new Date(cfg.fechaLimite).toLocaleDateString('es-HN') : 'N/A';
-        const isvRate = Number(cfg.isv || 15);
+          const doc = new jsPDF();
+          
+          // Fix: Ensure property names match the EmpresaConfig interface (camelCase)
+          const nombreEmpresa = (cfg.nombreEmpresa || 'SMARTCLOUD ERP').toUpperCase();
+          const rtnEmpresa = cfg.rtn || 'N/A';
+          const direccionEmpresa = cfg.direccion || 'N/A';
+          const telefonoEmpresa = cfg.telefono || 'N/A';
+          const correoEmpresa = cfg.correo || 'N/A';
+          const caiEmpresa = cfg.cai || 'N/A';
+          const rangoInic = cfg.rangoInicial || 'N/A';
+          const rangoFin = cfg.rangoFinal || 'N/A';
+          const fechaLim = cfg.fechaLimite ? new Date(cfg.fechaLimite).toLocaleDateString('es-HN') : 'N/A';
+          const isvConfig = cfg.isv || 15;
+          const mensajeFinal = cfg.mensajeFinal || "LA FACTURA ES BENEFICIO DE TODOS, EXIJALA";
 
-        // Header Geométrico
-        doc.setFillColor(primaryColor);
-        doc.triangle(0, 0, pageWidth, 0, pageWidth, 35, 'F');
-        doc.triangle(0, 0, pageWidth, 35, 0, 50, 'F');
-        doc.setFillColor(accentColor);
-        doc.triangle(0, 0, 100, 0, 0, 50, 'F');
+          const pageWidth = doc.internal.pageSize.width;
+          const pageHeight = doc.internal.pageSize.height;
+          
+          const primaryColor = "#1e3a8a";   
+          const accentColor = "#3b82f6";    
+          const grayColor = "#64748b";      
+          const lightGray = "#f1f5f9";      
 
-        // Info Empresa
-        doc.setTextColor(255, 255, 255);
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(16);
-        doc.text(nombreEmpresa, 38, 18);
-        doc.setFont("helvetica", "normal");
-        doc.setFontSize(9);
-        doc.text(direccionEmpresa, 38, 25);
-        doc.text(`Tel: ${telefonoEmpresa} | ${correoEmpresa}`, 38, 30);
+          // 1. Header Geométrico (Triángulos Azul y Celeste)
+          doc.setFillColor(primaryColor);
+          doc.triangle(0, 0, pageWidth, 0, pageWidth, 35, 'F');
+          doc.triangle(0, 0, pageWidth, 35, 0, 50, 'F');
+          doc.setFillColor(accentColor);
+          doc.triangle(0, 0, 100, 0, 0, 50, 'F');
 
-        // Título Factura
-        doc.setFontSize(26);
-        doc.setFont("helvetica", "bold");
-        doc.text("FACTURA", pageWidth - 15, 20, { align: "right" });
-        doc.setFontSize(10);
-        doc.text(`REIMPRESIÓN NO. ${sale.codVenta}`, pageWidth - 15, 29, { align: "right" });
+          // 2. Logo
+          if (LOGO_BASE64) {
+              doc.addImage(LOGO_BASE64, 'PNG', 15, 12, 18, 18);
+          }
 
-        // Bloque Cliente
-        const topInfoY = 60;
-        doc.setFillColor(lightGray);
-        doc.roundedRect(14, topInfoY, 95, 38, 3, 3, 'F');
-        doc.setTextColor(primaryColor);
-        doc.setFontSize(10);
-        doc.setFont("helvetica", "bold");
-        doc.text("FACTURAR A:", 18, topInfoY + 8);
-        doc.setTextColor(0, 0, 0);
-        doc.setFontSize(13);
-        doc.text((sale.nombreCliente || "CONSUMIDOR FINAL").toUpperCase(), 18, topInfoY + 18);
-        doc.setFontSize(9);
-        doc.setFont("helvetica", "normal");
-        doc.setTextColor(grayColor);
-        doc.text(`RTN/DNI: ${sale.identidadCliente || "99999999999999"}`, 18, topInfoY + 26);
-        doc.text(`${sale.direccionCliente || "CHOLUTECA, HONDURAS"}`, 18, topInfoY + 32);
+          // 3. Info Empresa
+          doc.setTextColor(255, 255, 255);
+          doc.setFont("helvetica", "bold");
+          doc.setFontSize(16);
+          doc.text(nombreEmpresa, 38, 18);
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(9);
+          doc.text(direccionEmpresa, 38, 25);
+          doc.text(`Tel: ${telefonoEmpresa} | ${correoEmpresa}`, 38, 30);
 
-        // Datos Fiscales
-        const rightColX = 120;
-        const metaY = topInfoY + 5;
-        doc.setFontSize(9);
-        doc.setFont("helvetica", "bold");
-        doc.setTextColor(grayColor);
-        const labels = ["FECHA EMISIÓN:", "R.T.N. EMISOR:", "CAI:", "VENDEDOR:"];
-        const values = [new Date(sale.fecha).toLocaleDateString('es-HN'), rtnEmpresa, caiEmpresa, sale.nombreVendedor?.toUpperCase() || "ADMINISTRADOR"];
-        labels.forEach((l, i) => {
-            doc.text(l, rightColX, metaY + (i * 6));
-            doc.setTextColor(0,0,0);
-            doc.text(String(values[i]), rightColX + 45, metaY + (i * 6));
-            doc.setTextColor(grayColor);
-        });
+          // 4. Título Factura
+          doc.setFontSize(26);
+          doc.setFont("helvetica", "bold");
+          doc.text("FACTURA", pageWidth - 15, 20, { align: "right" });
+          doc.setFontSize(10);
+          doc.text(`NO. ${sale.codVenta}`, pageWidth - 15, 29, { align: "right" });
 
-        // Tabla Productos
-        // @ts-ignore
-        doc.autoTable({
-            startY: topInfoY + 45,
-            head: [['COD.', 'CANT.', 'DESCRIPCIÓN', 'PRECIO UNIT.', 'TOTAL']],
-            body: details.map(d => [d.idTelefono || d.idInventario || 'N/A', d.cantidad, d.descripcionProducto?.toUpperCase(), `L. ${Number(d.precioVenta).toFixed(2)}`, `L. ${(Number(d.cantidad) * Number(d.precioVenta)).toFixed(2)}`]),
-            theme: 'striped',
-            headStyles: { fillColor: [30, 58, 138] }
-        });
+          // 5. Bloque de Cliente
+          const topInfoY = 60;
+          doc.setFillColor(lightGray);
+          doc.roundedRect(14, topInfoY, 95, 38, 3, 3, 'F');
+          
+          doc.setTextColor(primaryColor);
+          doc.setFontSize(10);
+          doc.setFont("helvetica", "bold");
+          doc.text("FACTURAR A:", 18, topInfoY + 8);
+          
+          doc.setTextColor(0, 0, 0);
+          doc.setFontSize(13);
+          doc.text((sale.nombreCliente || "CONSUMIDOR FINAL").toUpperCase(), 18, topInfoY + 18);
+          
+          doc.setFontSize(9);
+          doc.setFont("helvetica", "normal");
+          doc.setTextColor(grayColor);
+          doc.text(`RTN/DNI: ${sale.identidadCliente || "99999999999999"}`, 18, topInfoY + 26);
+          doc.text(`${sale.direccionCliente || "CHOLUTECA, HONDURAS"}`, 18, topInfoY + 32);
 
-        // Totales
-        // @ts-ignore
-        let finalY = doc.lastAutoTable.finalY + 10;
-        const subtotal = Number(sale.total) / (1 + (isvRate/100));
-        const isv = Number(sale.total) - subtotal;
-        doc.text("Subtotal:", 135, finalY); doc.text(`L. ${subtotal.toFixed(2)}`, pageWidth - 14, finalY, {align: "right"});
-        finalY += 7;
-        doc.text(`ISV (${isvRate}%):`, 135, finalY); doc.text(`L. ${isv.toFixed(2)}`, pageWidth - 14, finalY, {align: "right"});
-        finalY += 10;
-        doc.setFont("helvetica", "bold"); doc.setTextColor(primaryColor); doc.setFontSize(13);
-        doc.text("TOTAL PAGADO:", 135, finalY); doc.text(`L. ${Number(sale.total).toFixed(2)}`, pageWidth - 14, finalY, {align: "right"});
+          // 6. Datos Fiscales
+          const rightColX = 120;
+          const metaY = topInfoY + 5;
+          const spacing = 6;
+          doc.setFontSize(9);
+          doc.setFont("helvetica", "bold");
+          doc.setTextColor(grayColor);
+          
+          const labels = ["FECHA EMISIÓN:", "FECHA VENCIMIENTO:", "R.T.N. EMISOR:", "CAI:", "VENDEDOR:"];
+          const values = [
+              new Date(sale.fecha).toLocaleDateString('es-HN'),
+              fechaLim,
+              rtnEmpresa,
+              caiEmpresa,
+              sale.nombreVendedor?.toUpperCase() || "ADMINISTRADOR"
+          ];
 
-        // Letras
-        doc.setTextColor(grayColor); doc.setFontSize(9); doc.text("SON: " + numeroALetras(Number(sale.total)), 14, finalY + 12);
+          labels.forEach((label, i) => {
+              doc.text(label, rightColX, metaY + (i * spacing));
+              doc.setTextColor(0, 0, 0);
+              doc.text(String(values[i]), rightColX + 45, metaY + (i * spacing));
+              doc.setTextColor(grayColor);
+          });
 
-        // Footer Legal
-        let footerY = pageHeight - 40;
-        doc.setFontSize(8); doc.text(`Rango Autorizado: ${rangoInic} al ${rangoFin}`, 14, footerY);
-        doc.text(`Fecha Límite: ${fechaLim}`, 14, footerY + 5);
-        doc.save(`Factura_${sale.codVenta}_REIMPRESION.pdf`);
-    } catch (e) { Swal.fire('Error', 'No se pudo generar la factura legal. Verifique configuración.', 'error'); }
+          // 7. Tabla de Productos
+          // @ts-ignore
+          doc.autoTable({
+              startY: topInfoY + 45,
+              head: [['COD.', 'CANT.', 'DESCRIPCIÓN', 'PRECIO UNIT.', 'TOTAL']],
+              body: details.map(item => {
+                  return [
+                      item.idTelefono || item.idInventario || 'N/A',
+                      item.cantidad,
+                      item.descripcionProducto?.toUpperCase() || 'PRODUCTO',
+                      `L. ${Number(item.precioVenta).toFixed(2)}`,
+                      `L. ${(Number(item.cantidad) * Number(item.precioVenta)).toFixed(2)}`
+                  ];
+              }),
+              theme: 'striped',
+              styles: { fontSize: 9, cellPadding: 3, textColor: [0, 0, 0], halign: 'center' },
+              headStyles: { fillColor: [30, 58, 138], fontStyle: 'bold', halign: 'center', textColor: [255, 255, 255] },
+              columnStyles: { 
+                  0: { cellWidth: 35 },
+                  1: { cellWidth: 15 },
+                  2: { halign: 'left' },
+                  3: { cellWidth: 30 },
+                  4: { cellWidth: 30, fontStyle: 'bold' }
+              },
+              margin: { left: 14, right: 14 }
+          });
+
+          // 8. Totales
+          // @ts-ignore
+          let finalY = doc.lastAutoTable.finalY + 10;
+          const totalsX = 135;
+          const isvRateNum = isvConfig / 100;
+          const totalVal = Number(sale.total);
+          const subtotalVal = totalVal / (1 + isvRateNum);
+          const isvVal = totalVal - subtotalVal;
+          const descuentVal = Number(sale.descuento || 0);
+
+          doc.setFontSize(10);
+          doc.setTextColor(grayColor);
+          doc.setFont("helvetica", "normal");
+          
+          doc.text("Subtotal:", totalsX, finalY); 
+          doc.text(`L. ${subtotalVal.toFixed(2)}`, pageWidth - 14, finalY, {align: "right"});
+          
+          finalY += 7;
+          doc.text("Descuentos:", totalsX, finalY); 
+          doc.text(`L. ${descuentVal.toFixed(2)}`, pageWidth - 14, finalY, {align: "right"});
+          
+          finalY += 7;
+          doc.text(`ISV (${isvConfig}%):`, totalsX, finalY); 
+          doc.text(`L. ${isvVal.toFixed(2)}`, pageWidth - 14, finalY, {align: "right"});
+          
+          finalY += 3;
+          doc.setDrawColor(primaryColor);
+          doc.setLineWidth(0.5);
+          doc.line(totalsX, finalY, pageWidth - 14, finalY);
+          
+          finalY += 6;
+          doc.setFont("helvetica", "bold"); 
+          doc.setTextColor(primaryColor);
+          doc.setFontSize(13);
+          doc.text("TOTAL A PAGAR:", totalsX, finalY);
+          doc.text(`L. ${totalVal.toFixed(2)}`, pageWidth - 14, finalY, {align: "right"});
+
+          // 9. Cantidad en letras
+          doc.setTextColor(grayColor);
+          doc.setFontSize(9);
+          doc.text("SON: " + numeroALetras(totalVal), 14, finalY + 12);
+
+          // 10. Pie Legal
+          let footerY = pageHeight - 40;
+          doc.setFontSize(8); 
+          doc.setTextColor(grayColor);
+          doc.setFont("helvetica", "normal");
+          doc.text(`Rango Autorizado: ${rangoInic} al ${rangoFin}`, 14, footerY);
+          doc.text(`Fecha Límite de Emisión: ${fechaLim}`, 14, footerY + 5);
+          doc.text(`Original: Cliente | Copia: Emisor`, 14, footerY + 10);
+          
+          // Banda Inferior
+          doc.setFillColor(lightGray);
+          doc.rect(0, pageHeight - 15, pageWidth, 15, 'F');
+          doc.setTextColor(primaryColor);
+          doc.setFont("helvetica", "bold");
+          doc.setFontSize(10);
+          doc.text(mensajeFinal, pageWidth / 2, pageHeight - 6, { align: "center" });
+
+          doc.save(`Factura_${sale.codVenta}.pdf`);
+      } catch (err) {
+          console.error(err);
+          Swal.fire('Error PDF', 'No se pudo generar la factura legal. Verifique configuración de empresa.', 'error');
+      }
   };
 
   const handleIngresoAction = async () => {
