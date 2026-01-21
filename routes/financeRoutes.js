@@ -40,7 +40,6 @@ router.post('/arqueo/open', authenticateToken, async (req, res) => {
             [idArqueo, idCaja, codUsuario, hndTime, montoInicial]
         );
 
-        // Inicializar saldos si se proporcionan
         if (saldoTigoInicial !== undefined && saldoTigoInicial > 0) {
             const idS = await generateNextId('saldos', 'idsaldos', 'SLD', client);
             await client.query(`INSERT INTO saldos (idsaldos, red, saldoInicio, saldoComprado, saldoFinal, fecha) VALUES ($1,'TIGO',$2,0,$2,$3)`, [idS, saldoTigoInicial, hndDate]);
@@ -83,6 +82,140 @@ router.post('/arqueo/close', authenticateToken, async (req, res) => {
         await client.query('COMMIT');
         res.json({ resumen: resArq.rows[0] });
     } catch(e) { await client.query('ROLLBACK'); handleDbError(res, e); } finally { client.release(); }
+});
+
+router.get('/arqueo/:id/details', authenticateToken, async (req, res) => {
+    try {
+        const idArqueo = req.params.id;
+        const arqRes = await pool.query(`
+            SELECT idArqueo as "idArqueo", idCaja as "idCaja", montoInicial as "montoInicial", 
+            montoFinal as "montoFinal", totalVentas as "totalVentas", TotalGastos as "TotalGastos", 
+            ganancia, estado, TO_CHAR(fechaApertura, 'YYYY-MM-DD HH24:MI:SS') as "fechaApertura",
+            TO_CHAR(fechaCierre, 'YYYY-MM-DD HH24:MI:SS') as "fechaCierre"
+            FROM arqueo WHERE idArqueo = $1
+        `, [idArqueo]);
+        
+        if (arqRes.rows.length === 0) return res.status(404).json({ error: 'No encontrado' });
+        
+        const arqueo = arqRes.rows[0];
+        const date = arqueo.fechaApertura.substring(0, 10);
+        
+        const ingRes = await pool.query(`
+            SELECT idIngreso as "idIngreso", descripcion, monto, costo, subtipo_movimiento as "subtipo_movimiento",
+            TO_CHAR(fechaCreacion, 'YYYY-MM-DD HH24:MI:SS') as "fechaCreacion"
+            FROM ingresos WHERE idCaja = $1 AND TO_CHAR(fechaCreacion, 'YYYY-MM-DD') = $2
+            ORDER BY fechaCreacion ASC
+        `, [arqueo.idCaja, date]);
+        
+        const egrRes = await pool.query(`
+            SELECT idegresos as "idegresos", descripcion, monto, categoria as "subtipo_egreso", id_socio_asignado,
+            TO_CHAR(fechaCreacion, 'YYYY-MM-DD HH24:MI:SS') as "fechaCreacion"
+            FROM egresos WHERE idCaja = $1 AND TO_CHAR(fechaCreacion, 'YYYY-MM-DD') = $2
+            ORDER BY fechaCreacion ASC
+        `, [arqueo.idCaja, date]);
+
+        res.json({ arqueo, ingresos: ingRes.rows, egresos: egrRes.rows });
+    } catch(e) { handleDbError(res, e); }
+});
+
+router.put('/arqueo/:id/initial', authenticateToken, async (req, res) => {
+    try {
+        const { montoInicial } = req.body;
+        const resArq = await pool.query("UPDATE arqueo SET montoInicial = $1 WHERE idArqueo = $2 RETURNING idCaja", [montoInicial, req.params.id]);
+        if (resArq.rows[0]) await updateArqueoBalance(resArq.rows[0].idCaja);
+        res.json({ message: 'OK' });
+    } catch(e) { handleDbError(res, e); }
+});
+
+// --- INGRESOS Y EGRESOS ---
+
+router.get('/ingresos', authenticateToken, async (req, res) => {
+    try {
+        const { idCaja, fecha } = req.query;
+        const targetCaja = idCaja || req.user.idCaja;
+        
+        const r = await pool.query(`
+            SELECT idIngreso as "idIngreso", descripcion, monto, costo, subtipo_movimiento as "subtipo_movimiento",
+            TO_CHAR(fechaCreacion, 'YYYY-MM-DD HH24:MI:SS') as "fechaCreacion", estado
+            FROM ingresos WHERE idCaja = $1 AND TO_CHAR(fechaCreacion, 'YYYY-MM-DD') = $2
+            ORDER BY fechaCreacion DESC
+        `, [targetCaja, fecha]);
+        res.json(r.rows);
+    } catch(e) { handleDbError(res, e); }
+});
+
+router.get('/egresos', authenticateToken, async (req, res) => {
+    try {
+        const { idCaja, fecha } = req.query;
+        const targetCaja = idCaja || req.user.idCaja;
+
+        const r = await pool.query(`
+            SELECT idegresos as "idegresos", descripcion, monto, categoria as "subtipo_egreso", id_socio_asignado,
+            TO_CHAR(fechaCreacion, 'YYYY-MM-DD HH24:MI:SS') as "fechaCreacion", estado
+            FROM egresos WHERE idCaja = $1 AND TO_CHAR(fechaCreacion, 'YYYY-MM-DD') = $2
+            ORDER BY fechaCreacion DESC
+        `, [targetCaja, fecha]);
+        res.json(r.rows);
+    } catch(e) { handleDbError(res, e); }
+});
+
+router.post('/ingresos', authenticateToken, async (req, res) => {
+    try {
+        const { idCaja: cajaManual, descripcion, monto, costo, subtipo_movimiento, fechaCreacion } = req.body;
+        const { idCaja } = req.user;
+        const id = await generateNextId('ingresos', 'idIngreso', 'INGR');
+        await pool.query(`INSERT INTO ingresos (idIngreso, idCaja, descripcion, monto, costo, subtipo_movimiento, fechaCreacion, estado) VALUES ($1,$2,$3,$4,$5,$6,$7,'Registrado')`,
+            [id, cajaManual || idCaja, descripcion, monto, costo || 0, subtipo_movimiento || 'Reparacion', fechaCreacion || getLocalTimestamp()]);
+        await updateArqueoBalance(cajaManual || idCaja);
+        res.status(201).json({ message: 'OK' });
+    } catch(e) { handleDbError(res, e); }
+});
+
+router.put('/ingresos/:id', authenticateToken, async (req, res) => {
+    try {
+        const { descripcion, monto, costo } = req.body;
+        const result = await pool.query('UPDATE ingresos SET descripcion=$1, monto=$2, costo=$3 WHERE idIngreso=$4 RETURNING idCaja', [descripcion, monto, costo, req.params.id]);
+        if (result.rows[0]) await updateArqueoBalance(result.rows[0].idcaja);
+        res.json({ message: 'OK' });
+    } catch(e) { handleDbError(res, e); }
+});
+
+router.delete('/ingresos/:id', authenticateToken, async (req, res) => {
+    try {
+        const result = await pool.query('DELETE FROM ingresos WHERE idIngreso=$1 RETURNING idCaja', [req.params.id]);
+        if (result.rows[0]) await updateArqueoBalance(result.rows[0].idcaja);
+        res.json({ message: 'OK' });
+    } catch(e) { handleDbError(res, e); }
+});
+
+router.post('/egresos', authenticateToken, async (req, res) => {
+    try {
+        const { idCaja: cajaManual, descripcion, monto, subtipo_egreso, id_socio_asignado, fechaCreacion } = req.body;
+        const { idCaja } = req.user;
+        const id = await generateNextId('egresos', 'idegresos', 'EGRE');
+        await pool.query(`INSERT INTO egresos (idegresos, idCaja, descripcion, monto, categoria, id_socio_asignado, fechaCreacion, estado) VALUES ($1,$2,$3,$4,$5,$6,$7,'Registrado')`,
+            [id, cajaManual || idCaja, descripcion, monto, subtipo_egreso, id_socio_asignado || null, fechaCreacion || getLocalTimestamp()]);
+        await updateArqueoBalance(cajaManual || idCaja);
+        res.status(201).json({ message: 'OK' });
+    } catch(e) { handleDbError(res, e); }
+});
+
+router.put('/egresos/:id', authenticateToken, async (req, res) => {
+    try {
+        const { descripcion, monto, subtipo_egreso, id_socio_asignado } = req.body;
+        const result = await pool.query('UPDATE egresos SET descripcion=$1, monto=$2, categoria=$3, id_socio_asignado=$4 WHERE idegresos=$5 RETURNING idCaja', 
+            [descripcion, monto, subtipo_egreso, id_socio_asignado || null, req.params.id]);
+        if (result.rows[0]) await updateArqueoBalance(result.rows[0].idcaja);
+        res.json({ message: 'OK' });
+    } catch(e) { handleDbError(res, e); }
+});
+
+router.delete('/egresos/:id', authenticateToken, async (req, res) => {
+    try {
+        const result = await pool.query('DELETE FROM egresos WHERE idegresos=$1 RETURNING idCaja', [req.params.id]);
+        if (result.rows[0]) await updateArqueoBalance(result.rows[0].idcaja);
+        res.json({ message: 'OK' });
+    } catch(e) { handleDbError(res, e); }
 });
 
 // --- SALDOS Y RECARGAS ---
