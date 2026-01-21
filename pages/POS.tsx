@@ -1,8 +1,8 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { InventoryService, ClientService, SalesService, CashService, ConfigService } from '../services/api';
-import { ProductoUnified, DetalleVenta, Cliente, EmpresaConfig, VentaPayload } from '../types';
-import { Search, ShoppingCart, Trash2, Smartphone, Zap, RefreshCw, User, X, Check, Plus, Minus, UserPlus, Grid, Filter, Tag, LayoutGrid, Wallet, CreditCard, Save } from 'lucide-react';
+import { InventoryService, ClientService, SalesService, ConfigService } from '../services/api';
+import { ProductoUnified, DetalleVenta, Cliente, VentaPayload } from '../types';
+import { Search, ShoppingCart, RefreshCw, User, X, Check, Plus, Minus, UserPlus, Zap, LayoutGrid, Tag, Save, Wallet } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
@@ -203,28 +203,31 @@ const POS: React.FC = () => {
     return { bruto, subtotal, isv, total: conDescuento, financiado };
   }, [cart, discount, companyConfig, paymentType, primaAmount]);
 
-  // --- GENERACIÓN DE FACTURA (DISEÑO GEOMÉTRICO RESTAURADO) ---
+  // --- GENERACIÓN DE FACTURA (DISEÑO GEOMÉTRICO RESTAURADO Y VINCULADO) ---
   const generateInvoicePDF = (saleId: string) => {
       try {
-          // PEGA AQUÍ TU LOGO BASE64
+          /**
+           * COPIA Y PEGA TU IMAGEN BASE64 AQUÍ DENTRO DE LAS COMILLAS
+           * Ejemplo: "data:image/png;base64,iVBORw0KGgoAAAANS..."
+           */
           const LOGO_BASE64 = ""; 
 
           const client = clients.find(c => c.identidad === selectedClientId);
           const doc = new jsPDF();
           
-          // Mapeo exacto con los nombres de columna de tu tabla config (minúsculas en la BD)
+          // Mapeo directo con los nombres de columna en minúsculas de la tabla 'config'
           const cfg = companyConfig || {};
-          const nombreEmpresa = (cfg.nombreempresa || cfg.nombreEmpresa || 'SMARTCLOUD ERP').toUpperCase();
+          const nombreEmpresa = (cfg.nombreempresa || 'SMARTCLOUD ERP').toUpperCase();
           const rtnEmpresa = cfg.rtn || 'N/A';
           const direccionEmpresa = cfg.direccion || 'N/A';
           const telefonoEmpresa = cfg.telefono || 'N/A';
           const correoEmpresa = cfg.correo || 'N/A';
           const caiEmpresa = cfg.cai || 'N/A';
-          const rangoInic = cfg.rangoinicial || cfg.rangoInicial || 'N/A';
-          const rangoFin = cfg.rangofinal || cfg.rangoFinal || 'N/A';
-          const fechaLim = cfg.fechalimite || cfg.fechaLimite ? new Date(cfg.fechalimite || cfg.fechaLimite).toLocaleDateString('es-HN') : 'N/A';
+          const rangoInic = cfg.rangoinicial || 'N/A';
+          const rangoFin = cfg.rangofinal || 'N/A';
+          const fechaLim = cfg.fechalimite ? new Date(cfg.fechalimite).toLocaleDateString('es-HN') : 'N/A';
           const isvConfig = cfg.isv || 15;
-          const mensajeFinal = cfg.mensajefinal || cfg.mensajeFinal || "LA FACTURA ES BENEFICIO DE TODOS, EXIJALA";
+          const mensajeFinal = cfg.mensajefinal || "LA FACTURA ES BENEFICIO DE TODOS, EXIJALA";
 
           const pageWidth = doc.internal.pageSize.width;
           const pageHeight = doc.internal.pageSize.height;
@@ -241,19 +244,12 @@ const POS: React.FC = () => {
           doc.setFillColor(accentColor);
           doc.triangle(0, 0, 100, 0, 0, 50, 'F');
 
-          // 2. Logo (Imagen Base64 o Puntos por defecto)
+          // 2. Logo (Imagen Base64 proporcionada por el usuario)
           if (LOGO_BASE64) {
               doc.addImage(LOGO_BASE64, 'PNG', 15, 12, 18, 18);
-          } else {
-              doc.setFillColor(255, 255, 255);
-              for (let i = 0; i < 5; i++) {
-                  for (let j = 0; j < 5; j++) {
-                      if ((i + j) % 2 === 0) doc.circle(18 + (i * 3), 12 + (j * 3), 0.8, 'F');
-                  }
-              }
           }
 
-          // 3. Info Empresa vinculado a BD
+          // 3. Info Empresa vinculado a la tabla Config
           doc.setTextColor(255, 255, 255);
           doc.setFont("helvetica", "bold");
           doc.setFontSize(16);
@@ -290,7 +286,7 @@ const POS: React.FC = () => {
           doc.text(`RTN/DNI: ${selectedClientId || "99999999999999"}`, 18, topInfoY + 26);
           doc.text(`${client?.direccion || "CHOLUTECA, HONDURAS"}`, 18, topInfoY + 32);
 
-          // 6. Datos Fiscales (Derecha) vinculado a BD
+          // 6. Datos Fiscales vinculado a la tabla Config
           const rightColX = 120;
           const metaY = topInfoY + 5;
           const spacing = 6;
@@ -480,7 +476,6 @@ const POS: React.FC = () => {
     return matchSearch && matchType && matchBrand && matchCat;
   });
 
-  // Extract isv configuration for display in totals section
   const isvConfig = companyConfig?.isv || 15;
 
   return (
