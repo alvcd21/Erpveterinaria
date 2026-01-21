@@ -13,7 +13,7 @@ router.get('/arqueo/active', authenticateToken, async (req, res) => {
             SELECT idArqueo as "idArqueo", idCaja as "idCaja", montoInicial as "montoInicial", 
             montoFinal as "montoFinal", totalVentas as "totalVentas", TotalGastos as "TotalGastos", ganancia, estado,
             TO_CHAR(fechaApertura, 'YYYY-MM-DD HH24:MI:SS') as "fechaApertura"
-            FROM arqueo WHERE idCaja = $1 AND estado = 'Active' LIMIT 1
+            FROM arqueo WHERE idCaja = $1 AND estado = 'Activo' LIMIT 1
         `;
         const result = await pool.query(query, [idCaja]);
         res.json(result.rows[0] || null);
@@ -99,7 +99,6 @@ router.get('/saldos/status', authenticateToken, async (req, res) => {
 router.get('/saldos/today', authenticateToken, async (req, res) => {
     try {
         const { fecha } = req.query;
-        // Consulta mejorada: Trae el saldo de hoy, si no existe, trae el último histórico disponible para que no sea NaN
         const query = `
             SELECT DISTINCT ON (red) 
                 idsaldos, red, saldoInicio as "saldoInicio", saldoComprado as "saldoComprado", saldoFinal as "saldoFinal", fecha
