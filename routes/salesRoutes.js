@@ -43,16 +43,27 @@ router.get('/ventas/historial', authenticateToken, async (req, res) => {
         const { fecha } = req.query; 
         const { codUsuario } = req.user;
         
+        // LÓGICA SOLICITADA:
+        // 1. Mis ventas (donde soy el vendedor)
+        // 2. O ventas KrediYa que están pendientes (Globales para que cualquier caja las cobre)
+        // 3. O si soy Admin (veo todo)
         let query = `
             SELECT v.codVenta as "codVenta", v.fecha, v.total, v.estado, v.identidadCliente as "identidadCliente",
             v.tipoCompra as "tipoCompra", v.estado_pago_financiera as "estado_pago_financiera",
             c.nombre || ' ' || c.apellido as "nombreCliente"
             FROM ventas v
             JOIN clientes c ON v.identidadCliente = c.identidad
-            WHERE (v.codVendedor = $1 OR EXISTS (SELECT 1 FROM usuarios WHERE codUsuario = $1 AND (idrol = 'ROL-0001' OR idrol = 'Admin')))
+            WHERE (
+                v.codVendedor = $1 
+                OR (v.tipoCompra = 'KrediYa' AND v.estado_pago_financiera = 'Pendiente')
+                OR EXISTS (SELECT 1 FROM usuarios WHERE codUsuario = $1 AND (idrol = 'ROL-0001' OR idrol = 'Admin'))
+            )
         `;
         const params = [codUsuario];
-        if (fecha) { query += ` AND TO_CHAR(v.fecha, 'YYYY-MM-DD') = $${params.length + 1}`; params.push(fecha); }
+        if (fecha) { 
+            query += ` AND TO_CHAR(v.fecha, 'YYYY-MM-DD') = $${params.length + 1}`; 
+            params.push(fecha); 
+        }
         query += ` ORDER BY v.fecha DESC`;
         const result = await pool.query(query, params);
         res.json(result.rows);
@@ -164,7 +175,7 @@ router.put('/ventas/:id/deposito-krediya', authenticateToken, async (req, res) =
     const client = await pool.connect();
     try {
         const codVenta = req.params.id;
-        const { idCaja } = req.user;
+        const { idCaja } = req.user; // ESTA LÍNEA ASEGURA QUE EL INGRESO CAIGA EN LA CAJA QUE ACEPTA
         await client.query('BEGIN');
 
         const vRes = await client.query('SELECT total, monto_financiera, monto_prima_efectivo FROM ventas WHERE codVenta = $1 AND es_krediya = TRUE', [codVenta]);
@@ -192,6 +203,7 @@ router.put('/ventas/:id/deposito-krediya', authenticateToken, async (req, res) =
 
         await client.query("UPDATE ventas SET estado_pago_financiera = 'Depositado' WHERE codVenta = $1", [codVenta]);
 
+        await updateArqueoBalance(idCaja, client);
         await client.query('COMMIT');
         res.json({ message: 'Depósito conciliado' });
     } catch(err) { await client.query('ROLLBACK'); handleDbError(res, err); } finally { client.release(); }
