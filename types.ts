@@ -1,4 +1,5 @@
 
+
 export type EstadoGeneral = 'Activo' | 'Inactivo' | 'Disponible' | 'Vendido' | 'Completada' | 'Anulada' | 'Cerrada' | 'Registrado';
 
 // Clasificación unificada para compatibilidad con DB
@@ -214,6 +215,8 @@ export interface Consignacion {
   fecha_salida: string;
   fecha_limite?: string;
   nombre_producto?: string;
+  /* Added missing property returned by backend to fix TS error in Consignments.tsx line 229 */
+  codigo_referencia?: string;
 }
 
 export interface Arqueo {
