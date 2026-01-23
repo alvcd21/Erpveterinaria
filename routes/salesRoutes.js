@@ -43,9 +43,10 @@ router.get('/ventas/historial', authenticateToken, async (req, res) => {
         const { fecha } = req.query; 
         const { codUsuario, idCaja } = req.user;
         
-        // LÓGICA FILTRADO SOLICITADA:
-        // 1. Mostrar solo ventas de MI CAJA y MI USUARIO (Incluso si soy Admin en esta vista operativa)
-        // 2. O ventas KrediYa que están pendientes de depósito (Visibilidad global para conciliación)
+        // LÓGICA DE FILTRADO CORREGIDA:
+        // 1. Mostrar ventas KrediYa PENDIENTES de cualquier fecha (Global).
+        // 2. Mostrar ventas del DÍA de la caja y usuario actual.
+        // 3. Si es Admin, mostrar ventas del DÍA de todas las cajas.
         let query = `
             SELECT v.codVenta as "codVenta", v.fecha, v.total, v.estado, v.identidadCliente as "identidadCliente",
             v.tipoCompra as "tipoCompra", v.estado_pago_financiera as "estado_pago_financiera",
@@ -53,15 +54,13 @@ router.get('/ventas/historial', authenticateToken, async (req, res) => {
             FROM ventas v
             JOIN clientes c ON v.identidadCliente = c.identidad
             WHERE (
-                (v.idCaja = $2 AND v.codVendedor = $1)
-                OR (v.tipoCompra = 'KrediYa' AND v.estado_pago_financiera = 'Pendiente')
+                (v.tipoCompra = 'KrediYa' AND v.estado_pago_financiera = 'Pendiente')
+                OR (v.idCaja = $2 AND v.codVendedor = $1 AND TO_CHAR(v.fecha, 'YYYY-MM-DD') = $3)
+                OR (EXISTS (SELECT 1 FROM usuarios WHERE codUsuario = $1 AND (idrol = 'ROL-0001' OR idrol = 'Admin')) AND TO_CHAR(v.fecha, 'YYYY-MM-DD') = $3)
             )
         `;
-        const params = [codUsuario, idCaja];
-        if (fecha) { 
-            query += ` AND TO_CHAR(v.fecha, 'YYYY-MM-DD') = $${params.length + 1}`; 
-            params.push(fecha); 
-        }
+        const params = [codUsuario, idCaja, fecha || getLocalTimestamp().substring(0,10)];
+        
         query += ` ORDER BY v.fecha DESC`;
         const result = await pool.query(query, params);
         res.json(result.rows);

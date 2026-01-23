@@ -193,10 +193,6 @@ const CashRegister: React.FC = () => {
               ConfigService.get()
           ]);
           if (!sale) return;
-
-          /**
-           * CONFIGURACIÓN DE REIMPRESIÓN GEOMÉTRICA (ORIGINAL DEL USUARIO)
-           */
           const LOGO_BASE64 = ""; 
           const doc = new jsPDF();
           const nombreEmpresa = (cfg.nombreEmpresa || 'SMARTCLOUD ERP').toUpperCase();
@@ -216,7 +212,6 @@ const CashRegister: React.FC = () => {
           const accentColor = "#3b82f6";    
           const grayColor = "#64748b";      
           const lightGray = "#f1f5f9";      
-
           doc.setFillColor(primaryColor);
           doc.triangle(0, 0, pageWidth, 0, pageWidth, 35, 'F');
           doc.triangle(0, 0, pageWidth, 35, 0, 50, 'F');
