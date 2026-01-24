@@ -189,7 +189,8 @@ const Repairs: React.FC = () => {
   const generatePDF = (r: Reparacion) => {
       try {
           const doc = new jsPDF();
-          const LOGO_BASE64 = ""; // Pegar imagen base64 aquí
+          // ESPACIO PARA LOGO BASE64
+          const LOGO_BASE64 = ""; 
           
           const cfg = companyConfig || {};
           const nombreEmpresa = (cfg.nombreempresa || cfg.nombreEmpresa || 'SMARTCLOUD ERP').toUpperCase();
@@ -197,8 +198,6 @@ const Repairs: React.FC = () => {
           const direccionEmpresa = cfg.direccion || 'N/A';
           const telefonoEmpresa = cfg.telefono || 'N/A';
           const correoEmpresa = cfg.correo || 'N/A';
-          const caiEmpresa = cfg.cai || 'N/A';
-          const fechaLim = cfg.fechalimite ? new Date(cfg.fechalimite).toLocaleDateString('es-HN') : 'N/A';
 
           const pageWidth = doc.internal.pageSize.width;
           const pageHeight = doc.internal.pageSize.height;
@@ -208,19 +207,16 @@ const Repairs: React.FC = () => {
           const grayColor = "#64748b";      
           const lightGray = "#f1f5f9";      
 
-          // 1. Header Geométrico (Mismo estilo que POS)
           doc.setFillColor(primaryColor);
           doc.triangle(0, 0, pageWidth, 0, pageWidth, 35, 'F');
           doc.triangle(0, 0, pageWidth, 35, 0, 50, 'F');
           doc.setFillColor(accentColor);
           doc.triangle(0, 0, 100, 0, 0, 50, 'F');
 
-          // 2. Logo
           if (LOGO_BASE64) {
               doc.addImage(LOGO_BASE64, 'PNG', 15, 12, 18, 18);
           }
 
-          // 3. Info Empresa
           doc.setTextColor(255, 255, 255);
           doc.setFont("helvetica", "bold");
           doc.setFontSize(16);
@@ -230,14 +226,12 @@ const Repairs: React.FC = () => {
           doc.text(direccionEmpresa, 38, 25);
           doc.text(`Tel: ${telefonoEmpresa} | ${correoEmpresa}`, 38, 30);
 
-          // 4. Título Orden de Servicio
           doc.setFontSize(22);
           doc.setFont("helvetica", "bold");
           doc.text("ORDEN SERVICIO", pageWidth - 15, 20, { align: "right" });
           doc.setFontSize(10);
           doc.text(`NO. RPR-${String(r.id_reparacion).padStart(5, '0')}`, pageWidth - 15, 29, { align: "right" });
 
-          // 5. Bloque de Cliente
           const topInfoY = 60;
           doc.setFillColor(lightGray);
           doc.roundedRect(14, topInfoY, 95, 38, 3, 3, 'F');
@@ -258,7 +252,6 @@ const Repairs: React.FC = () => {
           doc.text(`RTN/DNI: ${r.identidad_cliente || "N/A"}`, 18, topInfoY + 26);
           doc.text(`${cliente?.direccion || "CHOLUTECA, HONDURAS"}`, 18, topInfoY + 32);
 
-          // 6. Datos de Recepción
           const rightColX = 120;
           const metaY = topInfoY + 5;
           const spacing = 6;
@@ -282,7 +275,6 @@ const Repairs: React.FC = () => {
               doc.setTextColor(grayColor);
           });
 
-          // 7. Datos del Equipo
           doc.setTextColor(primaryColor);
           doc.setFontSize(11);
           doc.setFont("helvetica", "bold");
@@ -292,13 +284,12 @@ const Repairs: React.FC = () => {
           doc.autoTable({
               startY: topInfoY + 55,
               head: [['MARCA', 'MODELO', 'IMEI / NÚMERO DE SERIE']],
-              body: [[r.marca.toUpperCase(), r.modelo.toUpperCase(), r.imei_equipo || 'N/A']],
+              body: [[(r.marca || '').toUpperCase(), (r.modelo || '').toUpperCase(), r.imei_equipo || 'N/A']],
               theme: 'grid',
               headStyles: { fillColor: [30, 58, 138], halign: 'center' },
               styles: { fontSize: 10, halign: 'center' }
           });
 
-          // 8. Falla y Accesorios
           // @ts-ignore
           let tableY = doc.lastAutoTable.finalY + 10;
           doc.setTextColor(primaryColor);
@@ -310,37 +301,31 @@ const Repairs: React.FC = () => {
           doc.autoTable({
               startY: tableY + 5,
               head: [['FALLA REPORTADA POR CLIENTE', 'ACCESORIOS / ARTÍCULOS RECIBIDOS']],
-              body: [[r.descripcion_falla.toUpperCase(), r.complementos?.toUpperCase() || 'NINGUNO']],
+              body: [[(r.descripcion_falla || '').toUpperCase(), r.complementos?.toUpperCase() || 'NINGUNO']],
               theme: 'striped',
               headStyles: { fillColor: [59, 130, 246] },
               styles: { fontSize: 9 },
               columnStyles: { 0: { cellWidth: 100 }, 1: { cellWidth: 82 } }
           });
 
-          // 9. Total Estimado (Mismo diseño que POS)
           // @ts-ignore
           let finalY = doc.lastAutoTable.finalY + 15;
           const totalsX = 135;
-          
           doc.setFillColor(lightGray);
           doc.roundedRect(totalsX - 5, finalY - 5, 65, 25, 3, 3, 'F');
-          
           doc.setFontSize(10);
           doc.setTextColor(grayColor);
           doc.setFont("helvetica", "normal");
           doc.text("TOTAL ESTIMADO:", totalsX, finalY + 5);
-          
           doc.setFont("helvetica", "bold"); 
           doc.setTextColor(primaryColor);
           doc.setFontSize(16);
           doc.text(`L. ${Number(r.precio_cliente).toFixed(2)}`, totalsX, finalY + 15);
 
-          // Letras
           doc.setTextColor(grayColor);
           doc.setFontSize(9);
           doc.text("SON: " + numeroALetras(r.precio_cliente), 14, finalY + 25);
 
-          // 10. Términos Legales
           let footerY = pageHeight - 55;
           doc.setFontSize(8);
           doc.setTextColor(grayColor);
@@ -351,12 +336,10 @@ const Repairs: React.FC = () => {
           doc.text("2. Todo equipo abandonado por más de 30 días calendario pasará a ser propiedad de la empresa.", 14, footerY + 10);
           doc.text("3. La garantía es válida únicamente por la falla descrita en este documento.", 14, footerY + 15);
 
-          // Firmas
           footerY += 30;
           doc.setDrawColor(grayColor);
           doc.line(20, footerY, 85, footerY);
           doc.text("Firma de Aceptación Cliente", 30, footerY + 5);
-
           doc.line(pageWidth - 85, footerY, pageWidth - 20, footerY);
           doc.text("Recibido por (Firma y Sello)", pageWidth - 75, footerY + 5);
 
@@ -385,10 +368,10 @@ const Repairs: React.FC = () => {
 
   const filtered = repairs.filter(r => 
       (r.marca_modelo || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-      r.marca?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      r.modelo?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      r.nombre_tecnico.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      r.imei_equipo?.includes(searchTerm)
+      (r.marca || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (r.modelo || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (r.nombre_tecnico || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (r.imei_equipo || '').includes(searchTerm)
   );
 
   return (

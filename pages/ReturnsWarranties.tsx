@@ -5,7 +5,6 @@ import { Garantia, Venta, ProductoUnified, DetalleVenta, Cliente } from '../type
 import { 
   ShieldCheck, Search, PlusCircle, Clock, CheckCircle, RefreshCcw, X, Save, 
   AlertTriangle, ArrowRightLeft, Trash2, FileText, Smartphone, Printer, Info, History,
-  // Added TrendingUp and Check to the imports
   TrendingUp, Check
 } from 'lucide-react';
 import Swal from 'sweetalert2';
@@ -66,16 +65,13 @@ const ReturnsWarranties: React.FC = () => {
   const handleCreateWarranty = async () => {
       if (!foundInvoice || !selectedDetail) return;
       try {
-          const prod = products.find(p => p.id === (selectedDetail.idTelefono || selectedDetail.idInventario));
-          // En una implementación real, el costo vendría del detalle de la venta o histórico
-          // Por ahora simulamos obteniendo el costo del producto actual o 0
           const payload: Partial<Garantia> = {
               cod_venta: foundInvoice.codVenta,
               id_producto_original: selectedDetail.idTelefono || selectedDetail.idInventario,
               tipo_producto: selectedDetail.tipoProducto as any,
               falla_reportada: falla,
               identidad_cliente: foundInvoice.identidadCliente,
-              costo_original: 0, // El backend debería resolver el costo histórico
+              costo_original: 0, 
               precio_venta_original: Number(selectedDetail.precioVenta),
               observaciones: obs
           };
@@ -94,7 +90,6 @@ const ReturnsWarranties: React.FC = () => {
     const u1 = s1 - c1;
 
     const s2 = Number(selectedNewProduct.precioVenta);
-    const c2 = 0; // Deberíamos tener el precioCompra aquí. Asumiremos 75% si no viene.
     const realC2 = (selectedNewProduct as any).precioCompra || (s2 * 0.75);
     const u2 = s2 - realC2;
 
@@ -151,10 +146,11 @@ const ReturnsWarranties: React.FC = () => {
       }
   };
 
+  // CORRECCIÓN DEL ERROR DE NULOS: Validamos cada campo contra '' antes de aplicar includes
   const filtered = warranties.filter(g => 
-    g.cod_venta.includes(searchTerm) || 
-    g.id_producto_original.includes(searchTerm) ||
-    g.nombre_cliente?.toLowerCase().includes(searchTerm.toLowerCase())
+    (g.cod_venta || '').toLowerCase().includes(searchTerm.toLowerCase()) || 
+    (g.id_producto_original || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (g.nombre_cliente || '').toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   return (
@@ -164,21 +160,21 @@ const ReturnsWarranties: React.FC = () => {
                 <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2"><ShieldCheck className="text-emerald-600"/> Garantías y Devoluciones</h2>
                 <p className="text-slate-500 text-sm">Soporte técnico, reclamos de fábrica e intercambio de equipos.</p>
             </div>
-            <button onClick={() => { setFoundInvoice(null); setInvoiceSearch(''); setShowModal(true); }} className="bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2.5 rounded-xl flex items-center gap-2 font-bold shadow-lg shadow-emerald-600/20 transition-all active:scale-95">
+            <button onClick={() => { setFoundInvoice(null); setInvoiceSearch(''); setShowModal(true); }} className="w-full md:w-auto bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-3 rounded-xl flex items-center justify-center gap-2 font-bold shadow-lg shadow-emerald-600/20 transition-all active:scale-95">
                 <PlusCircle size={20}/> Ingresar Garantía
             </button>
         </div>
 
-        <div className="bg-white rounded-3xl shadow-sm border border-slate-200 flex-1 overflow-hidden flex flex-col">
-            <div className="p-4 border-b bg-slate-50/50 flex gap-4">
-                <div className="relative flex-1 max-w-md">
+        <div className="bg-white rounded-2xl md:rounded-3xl shadow-sm border border-slate-200 flex-1 overflow-hidden flex flex-col">
+            <div className="p-4 border-b bg-slate-50/50 flex flex-col md:flex-row gap-4">
+                <div className="relative flex-1">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                     <input type="text" placeholder="Buscar por factura, IMEI o cliente..." className="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-emerald-500/20" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
                 </div>
             </div>
 
             <div className="flex-1 overflow-auto custom-scrollbar">
-                <table className="w-full text-left">
+                <table className="w-full text-left min-w-[750px]">
                     <thead className="bg-slate-50 text-[10px] font-black text-slate-400 uppercase sticky top-0 z-10 tracking-widest border-b">
                         <tr>
                             <th className="p-4">Factura / Fecha</th>
@@ -192,7 +188,7 @@ const ReturnsWarranties: React.FC = () => {
                         {filtered.length === 0 ? (
                             <tr><td colSpan={5} className="p-10 text-center text-slate-400 italic text-sm">No hay registros de garantía.</td></tr>
                         ) : filtered.map(g => (
-                            <tr key={g.id_garantia} className="hover:bg-slate-50/50 transition-colors group">
+                            <tr key={g.id_garantia} className="hover:bg-slate-50/50 transition-colors">
                                 <td className="p-4">
                                     <p className="font-bold text-slate-800 text-sm">{g.cod_venta}</p>
                                     <p className="text-[10px] text-slate-400 font-mono uppercase">{new Date(g.fecha_ingreso).toLocaleDateString()}</p>
@@ -216,7 +212,7 @@ const ReturnsWarranties: React.FC = () => {
                                     </button>
                                 </td>
                                 <td className="p-4 text-right">
-                                    <div className="flex justify-end gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <div className="flex justify-end gap-1.5 transition-opacity">
                                         {g.estado_garantia !== 'Cambiado' && (
                                             <button onClick={() => { setSelectedWarranty(g); setSelectedNewProduct(null); setShowExchangeModal(true); }} className="p-2 bg-indigo-600 text-white hover:bg-indigo-700 rounded-xl shadow-md shadow-indigo-600/20" title="Cambio de Equipo"><ArrowRightLeft size={16}/></button>
                                         )}
@@ -233,24 +229,24 @@ const ReturnsWarranties: React.FC = () => {
 
         {/* MODAL INGRESO GARANTIA */}
         {showModal && (
-            <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-md z-50 flex items-center justify-center p-4">
-                <div className="bg-white rounded-[2rem] w-full max-w-2xl shadow-2xl overflow-hidden animate-fade-in flex flex-col max-h-[90vh]">
-                    <div className="p-6 border-b flex justify-between items-center bg-white">
+            <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-md z-50 flex items-center justify-center p-2 md:p-4">
+                <div className="bg-white rounded-3xl w-full max-w-2xl shadow-2xl overflow-hidden animate-fade-in flex flex-col h-[90vh]">
+                    <div className="p-5 md:p-6 border-b flex justify-between items-center bg-white">
                         <div className="flex items-center gap-3">
                             <div className="bg-emerald-600 p-2 rounded-xl text-white"><ShieldCheck size={24}/></div>
                             <div>
-                                <h3 className="text-xl font-bold">Ingreso a Garantía</h3>
-                                <p className="text-xs text-slate-400 font-bold uppercase tracking-widest">Recepción de Equipo</p>
+                                <h3 className="text-lg md:text-xl font-bold">Ingreso a Garantía</h3>
+                                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Recepción de Equipo</p>
                             </div>
                         </div>
                         <button onClick={() => setShowModal(false)} className="text-slate-400 hover:text-red-500 transition-colors p-2 hover:bg-red-50 rounded-full"><X/></button>
                     </div>
-                    <div className="p-8 space-y-6 overflow-y-auto custom-scrollbar bg-slate-50/30">
+                    <div className="p-5 md:p-8 space-y-6 overflow-y-auto custom-scrollbar bg-slate-50/30">
                         <div className="space-y-4">
                             <label className="text-[10px] font-black text-indigo-600 uppercase tracking-widest">1. Localizar Factura</label>
-                            <div className="flex gap-2">
-                                <input className="flex-1 p-3 border border-slate-200 rounded-2xl font-bold text-sm uppercase outline-none focus:ring-2 focus:ring-indigo-500/20" placeholder="Número de Factura (Ej: FACT-0001)" value={invoiceSearch} onChange={e => setInvoiceSearch(e.target.value)} />
-                                <button onClick={handleSearchInvoice} className="bg-indigo-600 text-white px-6 py-3 rounded-2xl font-bold hover:bg-indigo-700 transition-all flex items-center gap-2"><Search size={18}/> Buscar</button>
+                            <div className="flex flex-col md:flex-row gap-2">
+                                <input className="flex-1 p-3 border border-slate-200 rounded-2xl font-bold text-sm uppercase outline-none focus:ring-2 focus:ring-indigo-500/20" placeholder="Número de Factura" value={invoiceSearch} onChange={e => setInvoiceSearch(e.target.value)} />
+                                <button onClick={handleSearchInvoice} className="bg-indigo-600 text-white px-6 py-3 rounded-2xl font-bold hover:bg-indigo-700 transition-all flex items-center justify-center gap-2"><Search size={18}/> Buscar</button>
                             </div>
                         </div>
 
@@ -278,7 +274,7 @@ const ReturnsWarranties: React.FC = () => {
                                 <div className="space-y-4">
                                     <label className="text-[10px] font-black text-indigo-600 uppercase tracking-widest block">3. Diagnóstico</label>
                                     <textarea className="w-full p-3 bg-white border border-slate-200 rounded-2xl text-sm outline-none focus:ring-2 focus:ring-indigo-500/20" rows={2} placeholder="Describa el fallo reportado..." value={falla} onChange={e=>setFalla(e.target.value)}/>
-                                    <textarea className="w-full p-3 bg-white border border-slate-200 rounded-2xl text-sm outline-none focus:ring-2 focus:ring-indigo-500/20" rows={2} placeholder="Observaciones adicionales (Estado físico, etc)..." value={obs} onChange={e=>setObs(e.target.value)}/>
+                                    <textarea className="w-full p-3 bg-white border border-slate-200 rounded-2xl text-sm outline-none focus:ring-2 focus:ring-indigo-500/20" rows={2} placeholder="Observaciones adicionales..." value={obs} onChange={e=>setObs(e.target.value)}/>
                                 </div>
 
                                 <button onClick={handleCreateWarranty} disabled={!selectedDetail || !falla} className="w-full py-4 bg-emerald-600 text-white rounded-2xl font-black shadow-xl hover:bg-emerald-700 transition-all flex items-center justify-center gap-3 uppercase tracking-widest text-sm active:scale-95 disabled:opacity-50">
@@ -293,27 +289,26 @@ const ReturnsWarranties: React.FC = () => {
 
         {/* MODAL INTERCAMBIO FINANCIERO */}
         {showExchangeModal && selectedWarranty && (
-            <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-md z-50 flex items-center justify-center p-4">
-                <div className="bg-white rounded-[2rem] w-full max-w-3xl shadow-2xl overflow-hidden animate-fade-in flex flex-col max-h-[90vh]">
-                    <div className="p-6 border-b flex justify-between items-center bg-indigo-600 text-white">
+            <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-md z-50 flex items-center justify-center p-2 md:p-4">
+                <div className="bg-white rounded-3xl w-full max-w-3xl shadow-2xl overflow-hidden animate-fade-in flex flex-col h-[90vh]">
+                    <div className="p-5 md:p-6 border-b flex justify-between items-center bg-indigo-600 text-white shrink-0">
                         <div className="flex items-center gap-3">
                             <div className="bg-white/20 p-2 rounded-xl"><ArrowRightLeft size={24}/></div>
                             <div>
-                                <h3 className="text-xl font-bold">Intercambio de Equipo</h3>
-                                <p className="text-xs text-indigo-100 font-bold uppercase tracking-widest">Ajuste de Garantía y Caja</p>
+                                <h3 className="text-lg md:text-xl font-bold">Intercambio de Equipo</h3>
+                                <p className="text-[10px] text-indigo-100 font-bold uppercase tracking-widest">Ajuste de Garantía y Caja</p>
                             </div>
                         </div>
                         <button onClick={() => setShowExchangeModal(false)} className="text-indigo-200 hover:text-white transition-colors p-2 hover:bg-white/10 rounded-full"><X/></button>
                     </div>
 
-                    <div className="flex-1 flex overflow-hidden">
-                        {/* Selector de Producto Nuevo */}
-                        <div className="w-1/2 p-6 border-r border-slate-100 flex flex-col bg-slate-50/50">
+                    <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
+                        <div className="w-full md:w-1/2 p-5 md:p-6 border-r border-slate-100 flex flex-col bg-slate-50/50 overflow-y-auto">
                             <div className="relative mb-4">
                                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16}/>
                                 <input className="w-full pl-9 pr-3 py-2 bg-white border border-slate-200 rounded-xl text-xs outline-none focus:ring-2 focus:ring-indigo-500/20" placeholder="Buscar nuevo equipo..." value={newProductSearch} onChange={e=>setNewProductSearch(e.target.value)} />
                             </div>
-                            <div className="flex-1 overflow-y-auto space-y-2 custom-scrollbar">
+                            <div className="flex-1 space-y-2">
                                 {products.filter(p => p.nombre.toLowerCase().includes(newProductSearch.toLowerCase()) && p.stock > 0).map(p => (
                                     <button key={p.id} onClick={() => setSelectedNewProduct(p)} className={`w-full p-3 rounded-2xl border text-left transition-all ${selectedNewProduct?.id === p.id ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-700 border-slate-100 hover:border-indigo-300'}`}>
                                         <p className="text-xs font-bold leading-tight">{p.nombre}</p>
@@ -323,8 +318,7 @@ const ReturnsWarranties: React.FC = () => {
                             </div>
                         </div>
 
-                        {/* Cálculos Financieros */}
-                        <div className="w-1/2 p-6 bg-white flex flex-col justify-between">
+                        <div className="w-full md:w-1/2 p-5 md:p-6 bg-white flex flex-col justify-between">
                             <div className="space-y-6">
                                 <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
                                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Resumen de Cambio</p>
@@ -348,7 +342,6 @@ const ReturnsWarranties: React.FC = () => {
 
                                 {exchangeCalculations && (
                                     <div className={`p-4 rounded-2xl border flex items-start gap-3 ${exchangeCalculations.utilidadDiferencia >= 0 ? 'bg-emerald-50 border-emerald-100' : 'bg-red-50 border-red-100'}`}>
-                                        {/* Added TrendingUp icon below to fix the error */}
                                         {exchangeCalculations.utilidadDiferencia >= 0 ? <TrendingUp className="text-emerald-600"/> : <AlertTriangle className="text-red-600"/>}
                                         <div>
                                             <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Impacto en Utilidad</p>
@@ -361,8 +354,7 @@ const ReturnsWarranties: React.FC = () => {
                                 )}
                             </div>
 
-                            <button onClick={processExchange} disabled={!selectedNewProduct} className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-black shadow-xl hover:bg-indigo-700 transition-all flex items-center justify-center gap-3 uppercase tracking-widest text-sm disabled:opacity-50">
-                                {/* Added Check icon below to fix the error */}
+                            <button onClick={processExchange} disabled={!selectedNewProduct} className="w-full mt-4 py-4 bg-indigo-600 text-white rounded-2xl font-black shadow-xl hover:bg-indigo-700 transition-all flex items-center justify-center gap-3 uppercase tracking-widest text-sm disabled:opacity-50">
                                 <Check size={20}/> PROCESAR INTERCAMBIO
                             </button>
                         </div>
