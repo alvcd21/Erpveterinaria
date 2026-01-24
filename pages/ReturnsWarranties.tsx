@@ -220,7 +220,6 @@ const ReturnsWarranties: React.FC = () => {
                   diferenciaEfectivo: exchangeCalculations.diferenciaEfectivo,
                   utilidadDiferencia: exchangeCalculations.utilidadDiferencia,
                   descripcionGastoIngreso: `CAMBIO ${selectedWarranty.id_producto_original} POR ${selectedNewProduct.nombre}`,
-                  // Fix: Properly passing estadoRetorno as part of the data object
                   estadoRetorno: returnedDeviceState
               });
               setShowExchangeModal(false);
@@ -279,7 +278,6 @@ const ReturnsWarranties: React.FC = () => {
           doc.text("DATOS DEL CLIENTE:", 18, topY + 8);
           doc.setFont("helvetica", "normal");
           
-          // MAPEO SEGURO DE DATOS
           doc.text(`Nombre: ${(g.nombre_cliente || 'CONSUMIDOR FINAL').toUpperCase()}`, 18, topY + 16);
           doc.text(`Identidad: ${g.identidad_cliente || 'N/A'}`, 18, topY + 22);
           doc.text(`Fecha Ingreso: ${new Date(g.fecha_ingreso).toLocaleString('es-HN')}`, 18, topY + 28);
@@ -391,7 +389,6 @@ const ReturnsWarranties: React.FC = () => {
                                     <p className="text-[10px] text-slate-400">{g.identidad_cliente}</p>
                                 </td>
                                 <td className="p-4">
-                                    {/* Fix: Comparison updated to handle Entregado which is now part of the interface */}
                                     <button onClick={() => updateStatus(g)} className={`px-3 py-1 rounded-full text-[9px] font-black uppercase flex items-center gap-1.5 transition-all hover:scale-105 ${g.estado_garantia === 'Cambiado' || g.estado_garantia === 'Entregado' ? 'bg-indigo-100 text-indigo-700' : g.estado_garantia === 'Listo' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
                                         {g.estado_garantia === 'Listo' || g.estado_garantia === 'Cambiado' ? <CheckCircle size={12}/> : <Clock size={12}/>}
                                         {g.estado_garantia}
@@ -399,7 +396,6 @@ const ReturnsWarranties: React.FC = () => {
                                 </td>
                                 <td className="p-4 text-right">
                                     <div className="flex justify-end gap-1.5 transition-opacity">
-                                        {/* Fix: Comparison updated to handle Entregado which is now part of the interface */}
                                         {g.estado_garantia !== 'Cambiado' && g.estado_garantia !== 'Entregado' && (
                                             <button onClick={() => { setSelectedWarranty(g); setSelectedNewProduct(null); setNewProductPrice(0); setShowExchangeModal(true); }} className="p-2 bg-indigo-600 text-white hover:bg-indigo-700 rounded-xl shadow-md shadow-indigo-600/20" title="Cambio de Equipo"><ArrowRightLeft size={16}/></button>
                                         )}

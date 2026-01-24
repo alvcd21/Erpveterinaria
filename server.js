@@ -99,22 +99,18 @@ const initDB = async () => {
                     ALTER TABLE ventas ADD COLUMN monto_financiamiento NUMERIC(10,2) DEFAULT 0;
                 EXCEPTION WHEN duplicate_column THEN NULL; END;
 
-                -- Columna para registrar el tipo de producto en el detalle (Requerido para Garantías)
                 BEGIN
                     ALTER TABLE detalleventa ADD COLUMN tipoProducto VARCHAR(20);
                 EXCEPTION WHEN duplicate_column THEN NULL; END;
 
-                -- Columna para categorizar egresos
                 BEGIN
                     ALTER TABLE egresos ADD COLUMN categoria VARCHAR(50) DEFAULT 'Gasto Operativo';
                 EXCEPTION WHEN duplicate_column THEN NULL; END;
 
-                -- Columna para asignar gasto a un socio específico
                 BEGIN
                     ALTER TABLE egresos ADD COLUMN id_socio_asignado INT REFERENCES socios(id_socio);
                 EXCEPTION WHEN duplicate_column THEN NULL; END;
 
-                -- Columnas de balance en arqueo
                 BEGIN
                     ALTER TABLE arqueo ADD COLUMN saldoTigoFinal NUMERIC(10,2) DEFAULT 0;
                     ALTER TABLE arqueo ADD COLUMN saldoClaroFinal NUMERIC(10,2) DEFAULT 0;
@@ -122,6 +118,12 @@ const initDB = async () => {
                     ALTER TABLE arqueo ADD COLUMN TotalGastos NUMERIC(10,2) DEFAULT 0;
                     ALTER TABLE arqueo ADD COLUMN ganancia NUMERIC(10,2) DEFAULT 0;
                 EXCEPTION WHEN duplicate_column THEN NULL; END;
+
+                -- INTENTO DE AMPLIAR ENUMS SI EXISTEN
+                BEGIN
+                    ALTER TYPE subtipo_movimiento_contable ADD VALUE IF NOT EXISTS 'Ajuste Utilidad Cambio';
+                    ALTER TYPE subtipo_egreso_contable ADD VALUE IF NOT EXISTS 'Perdida Margen Garantia';
+                EXCEPTION WHEN OTHERS THEN NULL; END;
             END $$;
         `);
         console.log("DB Initialization and Migrations complete.");
