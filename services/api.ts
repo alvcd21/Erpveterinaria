@@ -99,6 +99,7 @@ export const RepairService = {
   update: (id: number, data: Partial<Reparacion>) => request(`/reparaciones/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   updateStatus: (id: number, estado: string) => request(`/reparaciones/${id}/estado`, { method: 'PUT', body: JSON.stringify({ estado }) }),
   payTechnician: (id: number) => request(`/reparaciones/${id}/pago-tecnico`, { method: 'PUT' }),
+  billRepair: (id: number) => request(`/reparaciones/${id}/facturar`, { method: 'POST' }),
   delete: (id: number) => request(`/reparaciones/${id}`, { method: 'DELETE' }),
 };
 
@@ -123,6 +124,10 @@ export const ConsignService = {
 
 export const CashService = {
   getActiveArqueo: () => request<Arqueo | null>('/arqueo/active'),
+  /**
+   * Fix: Added getSessionDetails method to match route and usage in AdminCashDashboard
+   */
+  getSessionDetails: (idArqueo: string) => request<{arqueo: Arqueo, ingresos: Ingreso[], egresos: Egreso[]}>(`/arqueo/${idArqueo}/details`),
   openCaja: (data: any) => request('/arqueo/open', { method: 'POST', body: JSON.stringify(data) }),
   closeCaja: (idArqueo: string) => request<{resumen: any}>('/arqueo/close', { method: 'POST', body: JSON.stringify({ idArqueo }) }),
   getIngresos: (idCaja: string, fecha?: string) => request<Ingreso[]>(`/ingresos?idCaja=${idCaja}${fecha ? `&fecha=${fecha}` : ''}`),
@@ -139,11 +144,12 @@ export const CashService = {
   createRecarga: (data: any) => request('/recargas', { method: 'POST', body: JSON.stringify(data) }),
   getAdminBoxesStatus: () => request<any[]>('/admin/boxes/status'),
   getBoxHistory: (idCaja: string) => request<any[]>(`/admin/boxes/${idCaja}/history`),
-  reopenBox: (idArqueo: string) => request(`/arqueo/${idArqueo}/reopen`, { method: 'PUT' }),
-  getSessionDetails: (idArqueo: string) => request<any>(`/arqueo/${idArqueo}/details`),
-  updateInitialAmount: (idArqueo: string, monto: number) => request(`/arqueo/${idArqueo}/initial`, { method: 'PUT', body: JSON.stringify({ montoInicial: monto }) }),
   getSaldosByDate: (fecha: string) => request<Saldo[]>(`/admin/saldos?fecha=${fecha}`),
   updateSaldo: (id: string, data: any) => request(`/admin/saldos/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  /**
+   * Fix: Added updateInitialAmount method to match route and usage in AdminCashDashboard
+   */
+  updateInitialAmount: (idArqueo: string, montoInicial: number) => request(`/arqueo/${idArqueo}/initial`, { method: 'PUT', body: JSON.stringify({ montoInicial }) }),
 };
 
 export const ReportsService = {

@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { RepairService, InventoryService, ClientService, ConfigService } from '../services/api';
 import { Reparacion, Telefono, Cliente } from '../types';
 import { 
-  Wrench, PlusCircle, Search, Clock, CheckCircle, Package, DollarSign, User, Smartphone, X, Save, RefreshCw, AlertCircle, FileText, Trash2, Edit2, Printer, Check, Info
+  Wrench, PlusCircle, Search, Clock, CheckCircle, Package, DollarSign, User, Smartphone, X, Save, RefreshCw, AlertCircle, FileText, Trash2, Edit2, Printer, Check, Info, ShoppingCart
 } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { jsPDF } from 'jspdf';
@@ -303,7 +303,7 @@ const Repairs: React.FC = () => {
               head: [['FALLA REPORTADA POR CLIENTE', 'ACCESORIOS / ARTÍCULOS RECIBIDOS']],
               body: [[(r.descripcion_falla || '').toUpperCase(), r.complementos?.toUpperCase() || 'NINGUNO']],
               theme: 'striped',
-              headStyles: { fillColor: [59, 130, 246] },
+              headStyles: { fillColor: [30, 58, 138] },
               styles: { fontSize: 9 },
               columnStyles: { 0: { cellWidth: 100 }, 1: { cellWidth: 82 } }
           });
@@ -361,6 +361,24 @@ const Repairs: React.FC = () => {
     if (newStatus) { try { await RepairService.updateStatus(id, newStatus); loadData(); } catch (e: any) { Swal.fire('Error', e.message, 'error'); } }
   };
 
+  const handleBillRepair = async (r: Reparacion) => {
+      const result = await Swal.fire({
+          title: '¿Facturar Reparación?',
+          text: `Se registrará un ingreso de L. ${r.precio_cliente} y el estado cambiará a ENTREGADO.`,
+          icon: 'question',
+          showCancelButton: true,
+          confirmButtonText: 'Sí, Facturar',
+          confirmButtonColor: '#10b981'
+      });
+      if (result.isConfirmed) {
+          try {
+              await RepairService.billRepair(r.id_reparacion);
+              loadData();
+              Swal.fire('Facturado', 'Ingreso registrado y orden entregada.', 'success');
+          } catch (e: any) { Swal.fire('Error', e.message, 'error'); }
+      }
+  };
+
   const payTechnician = async (id: number) => {
       const result = await Swal.fire({ title: '¿Pagar Técnico?', text: 'Registra egreso de caja.', icon: 'question', showCancelButton: true });
       if (result.isConfirmed) { try { await RepairService.payTechnician(id); loadData(); Swal.fire('Pagado', 'Gasto registrado.', 'success'); } catch (e: any) { Swal.fire('Error', e.message, 'error'); } }
@@ -376,7 +394,7 @@ const Repairs: React.FC = () => {
 
   return (
     <div className="space-y-6 animate-fade-in h-full flex flex-col pb-10">
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4 px-2">
             <div>
                 <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2"><Wrench className="text-indigo-600"/> Servicio Técnico Especializado</h2>
                 <p className="text-slate-500 text-sm">Control integral de reparaciones, garantías y técnicos.</p>
@@ -428,7 +446,7 @@ const Repairs: React.FC = () => {
                                     <p className="text-[10px] text-slate-400 flex items-center gap-1 mt-1"><Wrench size={10}/> Téc: {r.nombre_tecnico}</p>
                                 </td>
                                 <td className="p-4">
-                                    <button onClick={() => updateStatus(r.id_reparacion, r.estado_reparacion)} className={`px-3 py-1 rounded-full text-[9px] font-black uppercase flex items-center gap-1.5 transition-all hover:scale-105 ${r.estado_reparacion === 'Entregado' ? 'bg-emerald-100 text-emerald-700' : r.estado_reparacion === 'Listo' ? 'bg-indigo-100 text-indigo-700' : 'bg-amber-100 text-amber-700'}`}>
+                                    <button onClick={() => updateStatus(r.id_reparacion, r.estado_reparacion)} className={`px-3 py-1 rounded-full text-[9px] font-black uppercase flex items-center gap-1.5 transition-all hover:scale-105 ${r.estado_reparacion === 'Entregado' ? 'bg-indigo-100 text-indigo-700' : r.estado_reparacion === 'Listo' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
                                         {r.estado_reparacion === 'Entregado' ? <CheckCircle size={12}/> : <Clock size={12}/>}
                                         {r.estado_reparacion}
                                     </button>
@@ -442,7 +460,10 @@ const Repairs: React.FC = () => {
                                     )}
                                 </td>
                                 <td className="p-4 text-right">
-                                    <div className="flex justify-end gap-1 transition-opacity">
+                                    <div className="flex justify-end gap-1.5 transition-opacity">
+                                        {r.estado_reparacion !== 'Entregado' && (
+                                            <button onClick={() => handleBillRepair(r)} className="p-2 bg-emerald-600 text-white hover:bg-emerald-700 rounded-xl shadow-md shadow-emerald-600/20 active:scale-90 transition-all" title="Cobrar / Facturar"><ShoppingCart size={16}/></button>
+                                        )}
                                         <button onClick={() => generatePDF(r)} className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg" title="Imprimir Comprobante"><Printer size={16}/></button>
                                         <button onClick={() => openEdit(r)} className="p-2 text-blue-500 hover:bg-blue-50 rounded-lg" title="Editar"><Edit2 size={16}/></button>
                                         <button onClick={() => handleDelete(r.id_reparacion)} className="p-2 text-red-400 hover:bg-red-50 rounded-lg" title="Eliminar"><Trash2 size={16}/></button>

@@ -71,6 +71,46 @@ router.put('/reparaciones/:id/pago-tecnico', authenticateToken, async (req, res)
     } catch(e) { await client.query('ROLLBACK'); handleDbError(res, e); } finally { client.release(); }
 });
 
+// NUEVO ENDPOINT: Facturar Reparación (Generar Ingreso)
+router.post('/reparaciones/:id/facturar', authenticateToken, async (req, res) => {
+    const client = await pool.connect();
+    try {
+        const { idCaja } = req.user;
+        const hndTime = getLocalTimestamp();
+        const idReparacion = req.params.id;
+
+        await client.query('BEGIN');
+
+        // 1. Obtener datos de la reparación
+        const r = await client.query('SELECT precio_cliente, costo_tecnico, marca, modelo FROM reparaciones WHERE id_reparacion=$1', [idReparacion]);
+        if (r.rows.length === 0) throw new Error('Reparación no encontrada');
+        
+        const { precio_cliente, costo_tecnico, marca, modelo } = r.rows[0];
+
+        // 2. Crear Ingreso en Caja
+        const idI = await generateNextId('ingresos', 'idIngreso', 'INGR', client);
+        await client.query(
+            `INSERT INTO ingresos (idIngreso, idCaja, descripcion, monto, costo, subtipo_movimiento, fechaCreacion, estado)
+             VALUES ($1, $2, $3, $4, $5, 'Reparacion', $6, 'Completada')`,
+            [idI, idCaja, `COBRO REPARACIÓN: ${marca} ${modelo} (RPR-${String(idReparacion).padStart(5, '0')})`, precio_cliente, costo_tecnico, hndTime]
+        );
+
+        // 3. Marcar como Entregado
+        await client.query("UPDATE reparaciones SET estado_reparacion='Entregado' WHERE id_reparacion=$1", [idReparacion]);
+
+        // 4. Actualizar Balance
+        await updateArqueoBalance(idCaja, client);
+
+        await client.query('COMMIT');
+        res.json({ message: 'Reparación facturada y entregada correctamente' });
+    } catch(e) { 
+        await client.query('ROLLBACK'); 
+        handleDbError(res, e); 
+    } finally { 
+        client.release(); 
+    }
+});
+
 router.delete('/reparaciones/:id', authenticateToken, async (req, res) => {
     try {
         await pool.query('DELETE FROM reparaciones WHERE id_reparacion=$1', [req.params.id]);
