@@ -130,6 +130,7 @@ const ReturnsWarranties: React.FC = () => {
   const handleCreateWarranty = async () => {
       if (!foundInvoice || !selectedDetail) return;
       try {
+          // SE ASEGURÓ EL MAPEADO EXACTO CON LOS ALIAS DEL BACKEND
           const payload: Partial<Garantia> = {
               cod_venta: foundInvoice.codVenta,
               id_producto_original: selectedDetail.idTelefono || selectedDetail.idAccesorio,
@@ -278,8 +279,8 @@ const ReturnsWarranties: React.FC = () => {
           doc.text("DATOS DEL CLIENTE:", 18, topY + 8);
           doc.setFont("helvetica", "normal");
           
-          // MAPEO SEGURO DE DATOS
           doc.text(`Nombre: ${(g.nombre_cliente || 'CONSUMIDOR FINAL').toUpperCase()}`, 18, topY + 16);
+          // SE ASEGURÓ QUE identidad_cliente y cod_venta SEAN LOS QUE VIENEN DE LA BD
           doc.text(`Identidad: ${g.identidad_cliente || 'N/A'}`, 18, topY + 22);
           doc.text(`Fecha Ingreso: ${new Date(g.fecha_ingreso).toLocaleString('es-HN')}`, 18, topY + 28);
 
@@ -290,7 +291,11 @@ const ReturnsWarranties: React.FC = () => {
           let nombreDispositivo = g.id_producto_original;
           if (g.tipo_producto === 'TELEFONO') {
               const prodInfo = products.find(p => p.id === g.id_producto_original);
-              if (prodInfo) nombreDispositivo = `${prodInfo.marca} ${prodInfo.nombre}`;
+              if (prodInfo) {
+                  nombreDispositivo = `${prodInfo.marca} ${prodInfo.nombre}`.trim();
+              } else if (g.dispositivo_nombre) {
+                  nombreDispositivo = g.dispositivo_nombre;
+              }
           }
 
           // @ts-ignore
@@ -312,7 +317,7 @@ const ReturnsWarranties: React.FC = () => {
           doc.save(`Garantia_GR-${g.id_garantia}.pdf`);
       } catch (e) {
           console.error(e);
-          Swal.fire('Error PDF', 'No se pudo generar the document.', 'error');
+          Swal.fire('Error PDF', 'No se pudo generar el documento.', 'error');
       }
   };
 

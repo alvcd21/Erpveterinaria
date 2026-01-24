@@ -66,7 +66,22 @@ router.get('/ventas/historial', authenticateToken, async (req, res) => {
 router.get('/ventas/:id', authenticateToken, async (req, res) => {
     try {
         const query = `
-            SELECT v.*, c.nombre as "nombreCliente", c.apellido as "apellidoCliente", c.direccion as "direccionCliente", u.usuario as "nombreVendedor"
+            SELECT 
+                v.codVenta as "codVenta", 
+                v.fecha, 
+                v.codVendedor as "codVendedor", 
+                v.identidadCliente as "identidadCliente", 
+                v.total, 
+                v.estado, 
+                v.tipoCompra as "tipoCompra", 
+                v.isv, 
+                v.descuento, 
+                v.monto_prima as "montoPrima", 
+                v.monto_financiamiento as "montoFinanciado",
+                c.nombre as "nombreCliente", 
+                c.apellido as "apellidoCliente", 
+                c.direccion as "direccionCliente", 
+                u.usuario as "nombreVendedor"
             FROM ventas v
             JOIN clientes c ON v.identidadCliente = c.identidad
             JOIN usuarios u ON v.codVendedor = u.codUsuario
