@@ -88,10 +88,12 @@ router.get('/ventas/:id/detalles', authenticateToken, async (req, res) => {
                 dv.cantidad as "cantidad",
                 dv.precioVenta as "precioVenta",
                 dv.tipoProducto as "tipoProducto",
+                COALESCE(t.precioCompra, inv.precioCompra) as "precioCompra",
                 COALESCE(t.marca || ' ' || t.modelo, a.descripcion) as "descripcionProducto"
             FROM detalleventa dv
             LEFT JOIN telefonos t ON dv.idTelefono = t.codigo
             LEFT JOIN accesorios a ON dv.idAccesorio = a.codAccesorio
+            LEFT JOIN inventario inv ON dv.idAccesorio = inv.codInventario
             WHERE dv.idVenta = $1
         `;
         const r = await pool.query(query, [req.params.id]);

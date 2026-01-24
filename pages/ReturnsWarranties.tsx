@@ -1,27 +1,80 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { WarrantyService, SalesService, InventoryService, ClientService } from '../services/api';
+import { WarrantyService, SalesService, InventoryService, ClientService, ConfigService } from '../services/api';
 import { Garantia, Venta, ProductoUnified, DetalleVenta, Cliente } from '../types';
 import { 
   ShieldCheck, Search, PlusCircle, Clock, CheckCircle, RefreshCcw, X, Save, 
   AlertTriangle, ArrowRightLeft, Trash2, FileText, Smartphone, Printer, Info, History,
-  TrendingUp, Check
+  TrendingUp, Check, Edit2, Calendar
 } from 'lucide-react';
 import Swal from 'sweetalert2';
+import { jsPDF } from 'jspdf';
+import 'jspdf-autotable';
+
+const numeroALetras = (num: number): string => {
+    const unidades = ['', 'UN', 'DOS', 'TRES', 'CUATRO', 'CINCO', 'SEIS', 'SIETE', 'OCHO', 'NUEVE'];
+    const decenas = ['', 'DIEZ', 'VEINTE', 'TREINTA', 'CUARENTA', 'CINCUENTA', 'SESENTA', 'SETENTA', 'OCHENTA', 'NOVENTA'];
+    const diez_veinte = ['DIEZ', 'ONCE', 'DOCE', 'TRECE', 'CATORCE', 'QUINCE', 'DIECISEIS', 'DIECISIETE', 'DIECIOCHO', 'DIECINUEVE'];
+    const centenas = ['', 'CIENTO', 'DOSCIENTOS', 'TRESCIENTOS', 'CUATROCIENTOS', 'QUINIENTOS', 'SEISCIENTOS', 'SETECIENTOS', 'OCHOCIENTOS', 'NOVECIENTOS'];
+
+    const convertGroup = (n: number): string => {
+        if (n === 0) return '';
+        if (n === 100) return 'CIEN';
+        let output = '';
+        if (n >= 100) { output += centenas[Math.floor(n / 100)] + ' '; n %= 100; }
+        if (n >= 10 && n <= 19) { output += diez_veinte[n - 10]; } 
+        else if (n >= 20) { 
+            output += decenas[Math.floor(n / 10)]; 
+            if (n % 10 > 0) output += ' Y ' + unidades[n % 10]; 
+        } 
+        else if (n > 0) { output += unidades[n]; }
+        return output.trim();
+    };
+
+    const integerPart = Math.floor(num);
+    const decimalPart = Math.round((num - integerPart) * 100);
+    let text = '';
+    if (integerPart === 0) text = 'CERO';
+    else if (integerPart >= 1000000) {
+        const millions = Math.floor(integerPart / 1000000);
+        const remainder = integerPart % 1000000;
+        text += (millions === 1 ? 'UN MILLON' : convertGroup(millions) + ' MILLONES');
+        if (remainder > 0) {
+            if (remainder >= 1000) {
+                text += ' ' + convertGroup(Math.floor(remainder / 1000)) + ' MIL ' + convertGroup(remainder % 1000);
+            } else {
+                text += ' ' + convertGroup(remainder);
+            }
+        }
+    } 
+    else if (integerPart >= 1000) {
+        const thousands = Math.floor(integerPart / 1000);
+        const remainder = integerPart % 1000;
+        text += (thousands === 1 ? 'MIL' : convertGroup(thousands) + ' MIL');
+        if (remainder > 0) text += ' ' + convertGroup(remainder);
+    } 
+    else { text = convertGroup(integerPart); }
+    return `${text} CON ${decimalPart.toString().padStart(2, '0')}/100 LEMPIRAS`.toUpperCase();
+};
 
 const ReturnsWarranties: React.FC = () => {
   const [warranties, setWarranties] = useState<Garantia[]>([]);
   const [products, setProducts] = useState<ProductoUnified[]>([]);
   const [clients, setClients] = useState<Cliente[]>([]);
+  const [companyConfig, setCompanyConfig] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   
-  // Create / Edit Flow
+  // Modals
   const [showModal, setShowModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
   const [showExchangeModal, setShowExchangeModal] = useState(false);
-  const [selectedWarranty, setSelectedWarranty] = useState<Garantia | null>(null);
   
-  // Creation Form
+  // Selection
+  const [selectedWarranty, setSelectedWarranty] = useState<Garantia | null>(null);
+  const [editForm, setEditForm] = useState<Partial<Garantia>>({});
+  
+  // Creation Flow
   const [invoiceSearch, setInvoiceSearch] = useState('');
   const [foundInvoice, setFoundInvoice] = useState<Venta | null>(null);
   const [selectedDetail, setSelectedDetail] = useState<DetalleVenta | null>(null);
@@ -31,6 +84,7 @@ const ReturnsWarranties: React.FC = () => {
   // Exchange Form
   const [newProductSearch, setNewProductSearch] = useState('');
   const [selectedNewProduct, setSelectedNewProduct] = useState<ProductoUnified | null>(null);
+  const [newProductPrice, setNewProductPrice] = useState<number>(0);
 
   useEffect(() => { loadData(); loadDependencies(); }, []);
 
@@ -44,12 +98,14 @@ const ReturnsWarranties: React.FC = () => {
 
   const loadDependencies = async () => {
       try {
-          const [p, c] = await Promise.all([
+          const [p, c, cfg] = await Promise.all([
               InventoryService.getUnifiedProducts(),
-              ClientService.getAll()
+              ClientService.getAll(),
+              ConfigService.get()
           ]);
           setProducts(p || []);
           setClients(c || []);
+          setCompanyConfig(cfg);
       } catch (e) { console.error(e); }
   };
 
@@ -77,7 +133,7 @@ const ReturnsWarranties: React.FC = () => {
               tipo_producto: (selectedDetail.tipoProducto as any) || 'TELEFONO',
               falla_reportada: falla,
               identidad_cliente: foundInvoice.identidadCliente,
-              costo_original: 0, 
+              costo_original: Number((selectedDetail as any).precioCompra || 0), 
               precio_venta_original: Number(selectedDetail.precioVenta || 0),
               observaciones: obs
           };
@@ -90,22 +146,52 @@ const ReturnsWarranties: React.FC = () => {
       } catch (e: any) { Swal.fire('Error', e.message, 'error'); }
   };
 
+  const handleUpdateWarranty = async () => {
+      if (!selectedWarranty) return;
+      try {
+          await WarrantyService.update(selectedWarranty.id_garantia, editForm);
+          setShowEditModal(false);
+          loadData();
+          Swal.fire('Actualizado', 'Registro modificado.', 'success');
+      } catch (e: any) { Swal.fire('Error', e.message, 'error'); }
+  };
+
+  const handleDeleteWarranty = async (id: number) => {
+      const result = await Swal.fire({
+          title: '¿Eliminar Registro?',
+          text: 'Esta acción no se puede deshacer.',
+          icon: 'warning',
+          showCancelButton: true,
+          confirmButtonColor: '#ef4444'
+      });
+      if (result.isConfirmed) {
+          try {
+              await WarrantyService.delete(id);
+              loadData();
+              Swal.fire('Eliminado', '', 'success');
+          } catch (e: any) { Swal.fire('Error', e.message, 'error'); }
+      }
+  };
+
   const exchangeCalculations = useMemo(() => {
     if (!selectedWarranty || !selectedNewProduct) return null;
     
+    // Utilidad original: Precio Venta Original - Costo Original
     const s1 = Number(selectedWarranty.precio_venta_original || 0);
     const c1 = Number(selectedWarranty.costo_original || 0);
     const u1 = s1 - c1;
 
-    const s2 = Number(selectedNewProduct.precioVenta || 0);
-    const realC2 = (selectedNewProduct as any).precioCompra || (s2 * 0.75);
+    // Utilidad nueva: Precio Pactado Nuevo - Costo Nuevo
+    const s2 = Number(newProductPrice || 0);
+    // Intentar obtener el precio de compra real del nuevo producto, si no existe estimar 75%
+    const realC2 = (selectedNewProduct as any).precioCompra || (Number(selectedNewProduct.precioVenta) * 0.75);
     const u2 = s2 - realC2;
 
     const diferenciaEfectivo = s2 - s1;
     const utilidadDiferencia = u2 - u1;
 
     return { s1, c1, u1, s2, c2: realC2, u2, diferenciaEfectivo, utilidadDiferencia };
-  }, [selectedWarranty, selectedNewProduct]);
+  }, [selectedWarranty, selectedNewProduct, newProductPrice]);
 
   const processExchange = async () => {
       if (!selectedWarranty || !selectedNewProduct || !exchangeCalculations) return;
@@ -115,7 +201,7 @@ const ReturnsWarranties: React.FC = () => {
           html: `
             <div class="text-left text-sm space-y-2">
                 <p><b>Diferencia a cobrar:</b> L. ${exchangeCalculations.diferenciaEfectivo.toFixed(2)}</p>
-                <p><b>Impacto Contable:</b> ${exchangeCalculations.utilidadDiferencia >= 0 ? 'INGRESO' : 'GASTO'} de L. ${Math.abs(exchangeCalculations.utilidadDiferencia).toFixed(2)}</p>
+                <p><b>Ajuste de Utilidad:</b> ${exchangeCalculations.utilidadDiferencia >= 0 ? 'INGRESO' : 'GASTO'} de L. ${Math.abs(exchangeCalculations.utilidadDiferencia).toFixed(2)}</p>
             </div>
           `,
           icon: 'warning',
@@ -133,8 +219,87 @@ const ReturnsWarranties: React.FC = () => {
               });
               setShowExchangeModal(false);
               loadData();
-              Swal.fire('Procesado', 'El inventario y caja han sido actualizados.', 'success');
+              Swal.fire('Procesado', 'Inventario y caja actualizados.', 'success');
           } catch (e: any) { Swal.fire('Error', e.message, 'error'); }
+      }
+  };
+
+  const generateWarrantyPDF = (g: Garantia) => {
+      try {
+          const doc = new jsPDF();
+          const LOGO_BASE64 = ""; 
+          const cfg = companyConfig || {};
+          const nombreEmpresa = (cfg.nombreempresa || 'SMARTCLOUD ERP').toUpperCase();
+          const rtnEmpresa = cfg.rtn || 'N/A';
+          const direccionEmpresa = cfg.direccion || 'N/A';
+          const telefonoEmpresa = cfg.telefono || 'N/A';
+          const correoEmpresa = cfg.correo || 'N/A';
+
+          const pageWidth = doc.internal.pageSize.width;
+          const pageHeight = doc.internal.pageSize.height;
+          
+          const primaryColor = "#1e3a8a";   
+          const accentColor = "#3b82f6";    
+          const lightGray = "#f1f5f9";      
+
+          doc.setFillColor(primaryColor);
+          doc.triangle(0, 0, pageWidth, 0, pageWidth, 35, 'F');
+          doc.triangle(0, 0, pageWidth, 35, 0, 50, 'F');
+          doc.setFillColor(accentColor);
+          doc.triangle(0, 0, 100, 0, 0, 50, 'F');
+
+          if (LOGO_BASE64) doc.addImage(LOGO_BASE64, 'PNG', 15, 12, 18, 18);
+
+          doc.setTextColor(255, 255, 255);
+          doc.setFont("helvetica", "bold");
+          doc.setFontSize(16);
+          doc.text(nombreEmpresa, 38, 18);
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(9);
+          doc.text(direccionEmpresa, 38, 25);
+          doc.text(`Tel: ${telefonoEmpresa}`, 38, 30);
+
+          doc.setFontSize(22);
+          doc.setFont("helvetica", "bold");
+          doc.text("HOJA DE GARANTÍA", pageWidth - 15, 20, { align: "right" });
+          doc.setFontSize(10);
+          doc.text(`ID REGISTRO: GR-${String(g.id_garantia).padStart(5, '0')}`, pageWidth - 15, 29, { align: "right" });
+
+          const topY = 60;
+          doc.setFillColor(lightGray);
+          doc.roundedRect(14, topY, 182, 35, 3, 3, 'F');
+          doc.setTextColor(0, 0, 0);
+          doc.setFontSize(10);
+          doc.setFont("helvetica", "bold");
+          doc.text("DATOS DEL CLIENTE:", 18, topY + 8);
+          doc.setFont("helvetica", "normal");
+          doc.text(`Nombre: ${g.nombre_cliente?.toUpperCase() || 'N/A'}`, 18, topY + 16);
+          doc.text(`Identidad: ${g.identidad_cliente || 'N/A'}`, 18, topY + 22);
+          doc.text(`Fecha Ingreso: ${new Date(g.fecha_ingreso).toLocaleString()}`, 18, topY + 28);
+
+          doc.text(`Factura Origen: ${g.cod_venta}`, 120, topY + 16);
+          doc.text(`Estado Actual: ${g.estado_garantia.toUpperCase()}`, 120, topY + 22);
+
+          // @ts-ignore
+          doc.autoTable({
+              startY: topY + 45,
+              head: [['EQUIPO EN RECLAMO', 'FALLA REPORTADA']],
+              body: [[`${g.tipo_producto}: ${g.id_producto_original}`.toUpperCase(), g.falla_reportada.toUpperCase()]],
+              theme: 'grid',
+              headStyles: { fillColor: [30, 58, 138] }
+          });
+
+          // @ts-ignore
+          let finalY = doc.lastAutoTable.finalY + 15;
+          doc.setFont("helvetica", "bold");
+          doc.text("OBSERVACIONES TÉCNICAS / RECEPCIÓN:", 14, finalY);
+          doc.setFont("helvetica", "normal");
+          doc.text(g.observaciones || "SIN OBSERVACIONES ADICIONALES", 14, finalY + 8, { maxWidth: 180 });
+
+          doc.save(`Garantia_GR-${g.id_garantia}.pdf`);
+      } catch (e) {
+          console.error(e);
+          Swal.fire('Error PDF', 'No se pudo generar el documento.', 'error');
       }
   };
 
@@ -181,11 +346,11 @@ const ReturnsWarranties: React.FC = () => {
             </div>
 
             <div className="flex-1 overflow-auto custom-scrollbar">
-                <table className="w-full text-left min-w-[750px]">
+                <table className="w-full text-left min-w-[800px]">
                     <thead className="bg-slate-50 text-[10px] font-black text-slate-400 uppercase sticky top-0 z-10 tracking-widest border-b">
                         <tr>
                             <th className="p-4">Factura / Fecha</th>
-                            <th className="p-4">Producto</th>
+                            <th className="p-4">Producto en Reclamo</th>
                             <th className="p-4">Cliente</th>
                             <th className="p-4">Estado</th>
                             <th className="p-4 text-right">Acciones</th>
@@ -211,20 +376,22 @@ const ReturnsWarranties: React.FC = () => {
                                 </td>
                                 <td className="p-4">
                                     <p className="text-xs font-bold text-slate-600">{g.nombre_cliente || 'N/A'}</p>
+                                    <p className="text-[10px] text-slate-400">{g.identidad_cliente}</p>
                                 </td>
                                 <td className="p-4">
                                     <button onClick={() => updateStatus(g)} className={`px-3 py-1 rounded-full text-[9px] font-black uppercase flex items-center gap-1.5 transition-all hover:scale-105 ${g.estado_garantia === 'Cambiado' ? 'bg-indigo-100 text-indigo-700' : g.estado_garantia === 'Listo' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
-                                        {g.estado_garantia === 'Listo' ? <CheckCircle size={12}/> : <Clock size={12}/>}
+                                        {g.estado_garantia === 'Listo' || g.estado_garantia === 'Cambiado' ? <CheckCircle size={12}/> : <Clock size={12}/>}
                                         {g.estado_garantia}
                                     </button>
                                 </td>
                                 <td className="p-4 text-right">
                                     <div className="flex justify-end gap-1.5 transition-opacity">
                                         {g.estado_garantia !== 'Cambiado' && (
-                                            <button onClick={() => { setSelectedWarranty(g); setSelectedNewProduct(null); setShowExchangeModal(true); }} className="p-2 bg-indigo-600 text-white hover:bg-indigo-700 rounded-xl shadow-md shadow-indigo-600/20" title="Cambio de Equipo"><ArrowRightLeft size={16}/></button>
+                                            <button onClick={() => { setSelectedWarranty(g); setSelectedNewProduct(null); setNewProductPrice(0); setShowExchangeModal(true); }} className="p-2 bg-indigo-600 text-white hover:bg-indigo-700 rounded-xl shadow-md shadow-indigo-600/20" title="Cambio de Equipo"><ArrowRightLeft size={16}/></button>
                                         )}
-                                        <button onClick={() => {}} className="p-2 text-slate-400 hover:bg-slate-100 rounded-xl"><FileText size={16}/></button>
-                                        <button onClick={() => {}} className="p-2 text-red-400 hover:bg-red-50 rounded-xl"><Trash2 size={16}/></button>
+                                        <button onClick={() => generateWarrantyPDF(g)} className="p-2 text-indigo-500 hover:bg-indigo-50 rounded-xl" title="Imprimir"><Printer size={16}/></button>
+                                        <button onClick={() => { setSelectedWarranty(g); setEditForm(g); setShowEditModal(true); }} className="p-2 text-blue-400 hover:bg-blue-50 rounded-xl"><Edit2 size={16}/></button>
+                                        <button onClick={() => handleDeleteWarranty(g.id_garantia)} className="p-2 text-red-400 hover:bg-red-50 rounded-xl"><Trash2 size={16}/></button>
                                     </div>
                                 </td>
                             </tr>
@@ -296,6 +463,33 @@ const ReturnsWarranties: React.FC = () => {
             </div>
         )}
 
+        {/* MODAL EDITAR GARANTIA */}
+        {showEditModal && selectedWarranty && (
+            <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                <div className="bg-white rounded-3xl w-full max-w-md p-6 shadow-2xl">
+                    <div className="flex justify-between items-center mb-6">
+                        <h3 className="text-lg font-bold">Editar Registro GR-{selectedWarranty.id_garantia}</h3>
+                        <button onClick={()=>setShowEditModal(false)}><X className="text-slate-400"/></button>
+                    </div>
+                    <div className="space-y-4">
+                        <div>
+                            <label className="text-xs font-bold text-slate-500 uppercase">Falla Reportada</label>
+                            <textarea className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none mt-1" value={editForm.falla_reportada} onChange={e=>setEditForm({...editForm, falla_reportada: e.target.value})}/>
+                        </div>
+                        <div>
+                            <label className="text-xs font-bold text-slate-500 uppercase">Observaciones</label>
+                            <textarea className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none mt-1" value={editForm.observaciones} onChange={e=>setEditForm({...editForm, observaciones: e.target.value})}/>
+                        </div>
+                        <div>
+                            <label className="text-xs font-bold text-slate-500 uppercase">Fecha Resolución</label>
+                            <input type="date" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none mt-1" value={editForm.fecha_resolucion?.split('T')[0] || ''} onChange={e=>setEditForm({...editForm, fecha_resolucion: e.target.value})}/>
+                        </div>
+                        <button onClick={handleUpdateWarranty} className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-black shadow-lg">GUARDAR CAMBIOS</button>
+                    </div>
+                </div>
+            </div>
+        )}
+
         {/* MODAL INTERCAMBIO FINANCIERO */}
         {showExchangeModal && selectedWarranty && (
             <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-md z-50 flex items-center justify-center p-2 md:p-4">
@@ -319,9 +513,9 @@ const ReturnsWarranties: React.FC = () => {
                             </div>
                             <div className="flex-1 space-y-2">
                                 {products.filter(p => p.nombre.toLowerCase().includes(newProductSearch.toLowerCase()) && p.stock > 0).map(p => (
-                                    <button key={p.id} onClick={() => setSelectedNewProduct(p)} className={`w-full p-3 rounded-2xl border text-left transition-all ${selectedNewProduct?.id === p.id ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-700 border-slate-100 hover:border-indigo-300'}`}>
+                                    <button key={p.id} onClick={() => { setSelectedNewProduct(p); setNewProductPrice(Number(p.precioVenta)); }} className={`w-full p-3 rounded-2xl border text-left transition-all ${selectedNewProduct?.id === p.id ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-700 border-slate-100 hover:border-indigo-300'}`}>
                                         <p className="text-xs font-bold leading-tight">{p.nombre}</p>
-                                        <p className={`text-[9px] font-black uppercase mt-1 ${selectedNewProduct?.id === p.id ? 'text-indigo-200' : 'text-slate-400'}`}>L. {Number(p.precioVenta || 0).toFixed(2)}</p>
+                                        <p className={`text-[9px] font-black uppercase mt-1 ${selectedNewProduct?.id === p.id ? 'text-indigo-200' : 'text-slate-400'}`}>L. {Number(p.precioVenta).toFixed(2)}</p>
                                     </button>
                                 ))}
                             </div>
@@ -331,14 +525,14 @@ const ReturnsWarranties: React.FC = () => {
                             <div className="space-y-6">
                                 <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
                                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Resumen de Cambio</p>
-                                    <div className="space-y-2">
+                                    <div className="space-y-4">
                                         <div className="flex justify-between text-xs">
                                             <span className="text-slate-500">Equipo Original:</span>
                                             <span className="font-bold">L. {Number(selectedWarranty.precio_venta_original || 0).toFixed(2)}</span>
                                         </div>
-                                        <div className="flex justify-between text-xs">
-                                            <span className="text-slate-500">Equipo Nuevo:</span>
-                                            <span className="font-bold">L. {selectedNewProduct ? Number(selectedNewProduct.precioVenta || 0).toFixed(2) : '0.00'}</span>
+                                        <div>
+                                            <label className="text-[10px] font-black text-slate-400 uppercase mb-1 block">Precio Pactado Nuevo Equipo (Editable)</label>
+                                            <input type="number" className="w-full p-3 border border-slate-200 rounded-xl font-black text-indigo-600" value={newProductPrice} onChange={e=>setNewProductPrice(Number(e.target.value))} />
                                         </div>
                                         <div className="pt-2 border-t flex justify-between items-center">
                                             <span className="text-xs font-black text-indigo-600 uppercase">Diferencia Efectivo:</span>
@@ -363,7 +557,7 @@ const ReturnsWarranties: React.FC = () => {
                                 )}
                             </div>
 
-                            <button onClick={processExchange} disabled={!selectedNewProduct} className="w-full mt-4 py-4 bg-indigo-600 text-white rounded-2xl font-black shadow-xl hover:bg-indigo-700 transition-all flex items-center justify-center gap-3 uppercase tracking-widest text-sm disabled:opacity-50">
+                            <button onClick={processExchange} disabled={!selectedNewProduct} className="w-full mt-4 py-4 bg-indigo-600 text-white rounded-2xl font-black shadow-xl hover:bg-indigo-700 transition-all flex items-center justify-center gap-3 uppercase tracking-widest text-sm disabled:opacity-50 active:scale-95">
                                 <Check size={20}/> PROCESAR INTERCAMBIO
                             </button>
                         </div>
