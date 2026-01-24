@@ -107,7 +107,8 @@ export const WarrantyService = {
   create: (data: Partial<Garantia>) => request('/garantias', { method: 'POST', body: JSON.stringify(data) }),
   update: (id: number, data: Partial<Garantia>) => request(`/garantias/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   delete: (id: number) => request(`/garantias/${id}`, { method: 'DELETE' }),
-  exchange: (idGarantia: number, data: { idNuevoProducto: string, tipoNuevo: string, diferenciaEfectivo: number, utilidadDiferencia: number, descripcionGastoIngreso: string }) => 
+  // Fix: Added estadoRetorno to the exchange data object type definition
+  exchange: (idGarantia: number, data: { idNuevoProducto: string, tipoNuevo: string, diferenciaEfectivo: number, utilidadDiferencia: number, descripcionGastoIngreso: string, estadoRetorno: string }) => 
     request(`/garantias/${idGarantia}/exchange`, { method: 'POST', body: JSON.stringify(data) }),
 };
 

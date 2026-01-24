@@ -108,9 +108,10 @@ const Inventory: React.FC = () => {
   };
 
   const handleConsign = (item: Telefono | Inventario, type: 'TELEFONO' | 'ACCESORIO') => {
+      // Fix: Added required precioCompra property to both branches of the conditional to match ProductoUnified interface
       const prod: ProductoUnified = type === 'TELEFONO' 
-        ? { id: (item as Telefono).codigo, tipo: 'TELEFONO', nombre: `${(item as Telefono).marca} ${(item as Telefono).modelo}`, codigo: (item as Telefono).codigo, precioVenta: (item as Telefono).precioVenta, stock: 1, imei: (item as Telefono).imei1, ubicacion: (item as Telefono).idubicacion }
-        : { id: (item as Inventario).codInventario, tipo: 'ACCESORIO', nombre: (item as Inventario).descripcionAccesorio || 'Accesorio', codigo: (item as Inventario).codInventario, precioVenta: (item as Inventario).precioVenta, stock: (item as Inventario).cantidad, ubicacion: (item as Inventario).idubicacion, categoria: (item as Inventario).categoriaAccesorio };
+        ? { id: (item as Telefono).codigo, tipo: 'TELEFONO', nombre: `${(item as Telefono).marca} ${(item as Telefono).modelo}`, codigo: (item as Telefono).codigo, precioVenta: (item as Telefono).precioVenta, precioCompra: (item as Telefono).precioCompra, stock: 1, imei: (item as Telefono).imei1, ubicacion: (item as Telefono).idubicacion }
+        : { id: (item as Inventario).codInventario, tipo: 'ACCESORIO', nombre: (item as Inventario).descripcionAccesorio || 'Accesorio', codigo: (item as Inventario).codInventario, precioVenta: (item as Inventario).precioVenta, precioCompra: (item as Inventario).precioCompra, stock: (item as Inventario).cantidad, ubicacion: (item as Inventario).idubicacion, categoria: (item as Inventario).categoriaAccesorio };
       
       navigate('/consignments', { state: { consignItem: prod } });
   };

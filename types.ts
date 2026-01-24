@@ -185,6 +185,8 @@ export interface DetalleVenta {
   idIngreso?: string;
   cantidad: number;
   precioVenta: number;
+  // Fix: Added precioCompra property to match backend response and usage in components
+  precioCompra?: number;
   descripcionProducto?: string;
   tipoProducto?: 'TELEFONO' | 'ACCESORIO' | 'SERVICIO';
   estado?: EstadoGeneral;
@@ -215,7 +217,8 @@ export interface Garantia {
   id_producto_original: string;
   tipo_producto: 'TELEFONO' | 'ACCESORIO';
   falla_reportada: string;
-  estado_garantia: 'Pendiente' | 'En Taller' | 'Proveedor' | 'Listo' | 'Cambiado';
+  // Fix: Added 'Entregado' to possible status values to match component logic
+  estado_garantia: 'Pendiente' | 'En Taller' | 'Proveedor' | 'Listo' | 'Cambiado' | 'Entregado';
   fecha_ingreso: string;
   fecha_resolucion?: string;
   costo_original: number;
