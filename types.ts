@@ -136,6 +136,8 @@ export interface ProductoUnified {
   nombre: string;
   codigo: string;
   precioVenta: number;
+  /* Added precioCompra to ProductoUnified interface */
+  precioCompra: number;
   stock: number;
   imei?: string;
   ubicacion: string;

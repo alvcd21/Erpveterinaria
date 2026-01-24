@@ -10,6 +10,7 @@ import {
 import Swal from 'sweetalert2';
 import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
+import { useAuth } from '../context/AuthContext';
 
 const numeroALetras = (num: number): string => {
     const unidades = ['', 'UN', 'DOS', 'TRES', 'CUATRO', 'CINCO', 'SEIS', 'SIETE', 'OCHO', 'NUEVE'];
@@ -58,6 +59,7 @@ const numeroALetras = (num: number): string => {
 };
 
 const ReturnsWarranties: React.FC = () => {
+  const { user } = useAuth();
   const [warranties, setWarranties] = useState<Garantia[]>([]);
   const [products, setProducts] = useState<ProductoUnified[]>([]);
   const [clients, setClients] = useState<Cliente[]>([]);
@@ -176,21 +178,35 @@ const ReturnsWarranties: React.FC = () => {
   const exchangeCalculations = useMemo(() => {
     if (!selectedWarranty || !selectedNewProduct) return null;
     
-    // Utilidad original: Precio Venta Original - Costo Original
-    const s1 = Number(selectedWarranty.precio_venta_original || 0);
-    const c1 = Number(selectedWarranty.costo_original || 0);
-    const u1 = s1 - c1;
+    // 1. Costo del teléfono que devuelve (de la base de datos de garantía)
+    const costoAnterior = Number(selectedWarranty.costo_original || 0);
+    
+    // 2. Precio Anterior Cobrado (lo que el cliente pagó originalmente)
+    const precioVentaAnterior = Number(selectedWarranty.precio_venta_original || 0);
 
-    // Utilidad nueva: Precio Pactado Nuevo - Costo Nuevo
-    const s2 = Number(newProductPrice || 0);
-    // Intentar obtener el precio de compra real del nuevo producto, si no existe estimar 75%
-    const realC2 = (selectedNewProduct as any).precioCompra || (Number(selectedNewProduct.precioVenta) * 0.75);
-    const u2 = s2 - realC2;
+    // 3. Precio Pactado Nuevo (lo que cobraremos por el nuevo)
+    const precioNuevoPactado = Number(newProductPrice || 0);
 
-    const diferenciaEfectivo = s2 - s1;
-    const utilidadDiferencia = u2 - u1;
+    // 4. Costo Nuevo Producto (precio de compra del inventario actual)
+    /* Fixed type error: Removed 'as any' as precioCompra is now in ProductoUnified interface */
+    const costoNuevo = Number(selectedNewProduct.precioCompra || 0);
 
-    return { s1, c1, u1, s2, c2: realC2, u2, diferenciaEfectivo, utilidadDiferencia };
+    // 5. Diferencia en Efectivo (lo que entra a caja hoy)
+    const diferenciaEfectivo = precioNuevoPactado - precioVentaAnterior;
+
+    // 6. FÓRMULA SOLICITADA:
+    // Utilidad = (Costo Anterior + Diferencia Venta) - Costo Nuevo
+    // Si da positivo es Ingreso, negativo es Egreso.
+    const utilidadDiferencia = (costoAnterior + diferenciaEfectivo) - costoNuevo;
+
+    return { 
+        s1: precioVentaAnterior, 
+        c1: costoAnterior, 
+        s2: precioNuevoPactado, 
+        c2: costoNuevo, 
+        diferenciaEfectivo, 
+        utilidadDiferencia 
+    };
   }, [selectedWarranty, selectedNewProduct, newProductPrice]);
 
   const processExchange = async () => {
@@ -200,8 +216,9 @@ const ReturnsWarranties: React.FC = () => {
           title: '¿Confirmar Intercambio?',
           html: `
             <div class="text-left text-sm space-y-2">
-                <p><b>Diferencia a cobrar:</b> L. ${exchangeCalculations.diferenciaEfectivo.toFixed(2)}</p>
-                <p><b>Ajuste de Utilidad:</b> ${exchangeCalculations.utilidadDiferencia >= 0 ? 'INGRESO' : 'GASTO'} de L. ${Math.abs(exchangeCalculations.utilidadDiferencia).toFixed(2)}</p>
+                <p><b>Efectivo a recibir:</b> L. ${exchangeCalculations.diferenciaEfectivo.toFixed(2)}</p>
+                <p><b>Impacto Contable:</b> ${exchangeCalculations.utilidadDiferencia >= 0 ? 'INGRESO (Utilidad)' : 'EGRESO (Pérdida)'} de L. ${Math.abs(exchangeCalculations.utilidadDiferencia).toFixed(2)}</p>
+                <p class="text-[10px] text-slate-400 mt-2 italic">* El cálculo se basa en el costo del equipo devuelto más la diferencia cobrada menos el costo del equipo que lleva.</p>
             </div>
           `,
           icon: 'warning',
@@ -219,7 +236,7 @@ const ReturnsWarranties: React.FC = () => {
               });
               setShowExchangeModal(false);
               loadData();
-              Swal.fire('Procesado', 'Inventario y caja actualizados.', 'success');
+              Swal.fire('Procesado', 'El inventario y caja han sido actualizados.', 'success');
           } catch (e: any) { Swal.fire('Error', e.message, 'error'); }
       }
   };
@@ -229,7 +246,7 @@ const ReturnsWarranties: React.FC = () => {
           const doc = new jsPDF();
           const LOGO_BASE64 = ""; 
           const cfg = companyConfig || {};
-          const nombreEmpresa = (cfg.nombreempresa || 'SMARTCLOUD ERP').toUpperCase();
+          const nombreEmpresa = (cfg.nombreempresa || cfg.nombreEmpresa || 'SMARTCLOUD ERP').toUpperCase();
           const rtnEmpresa = cfg.rtn || 'N/A';
           const direccionEmpresa = cfg.direccion || 'N/A';
           const telefonoEmpresa = cfg.telefono || 'N/A';
@@ -273,7 +290,9 @@ const ReturnsWarranties: React.FC = () => {
           doc.setFont("helvetica", "bold");
           doc.text("DATOS DEL CLIENTE:", 18, topY + 8);
           doc.setFont("helvetica", "normal");
-          doc.text(`Nombre: ${g.nombre_cliente?.toUpperCase() || 'N/A'}`, 18, topY + 16);
+          
+          // CORRECCIÓN: Usar nombres de campo exactos del objeto Garantia (lowercase del backend)
+          doc.text(`Nombre: ${(g.nombre_cliente || 'N/A').toUpperCase()}`, 18, topY + 16);
           doc.text(`Identidad: ${g.identidad_cliente || 'N/A'}`, 18, topY + 22);
           doc.text(`Fecha Ingreso: ${new Date(g.fecha_ingreso).toLocaleString()}`, 18, topY + 28);
 
@@ -515,7 +534,10 @@ const ReturnsWarranties: React.FC = () => {
                                 {products.filter(p => p.nombre.toLowerCase().includes(newProductSearch.toLowerCase()) && p.stock > 0).map(p => (
                                     <button key={p.id} onClick={() => { setSelectedNewProduct(p); setNewProductPrice(Number(p.precioVenta)); }} className={`w-full p-3 rounded-2xl border text-left transition-all ${selectedNewProduct?.id === p.id ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-700 border-slate-100 hover:border-indigo-300'}`}>
                                         <p className="text-xs font-bold leading-tight">{p.nombre}</p>
-                                        <p className={`text-[9px] font-black uppercase mt-1 ${selectedNewProduct?.id === p.id ? 'text-indigo-200' : 'text-slate-400'}`}>L. {Number(p.precioVenta).toFixed(2)}</p>
+                                        <div className="flex justify-between items-center mt-1">
+                                            <p className={`text-[9px] font-black uppercase ${selectedNewProduct?.id === p.id ? 'text-indigo-200' : 'text-slate-400'}`}>P. Venta: L. {Number(p.precioVenta).toFixed(2)}</p>
+                                            <p className={`text-[9px] font-black uppercase ${selectedNewProduct?.id === p.id ? 'text-indigo-200' : 'text-slate-300'}`}>Costo: L. {Number(p.precioCompra || 0).toFixed(2)}</p>
+                                        </div>
                                     </button>
                                 ))}
                             </div>
@@ -527,7 +549,7 @@ const ReturnsWarranties: React.FC = () => {
                                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Resumen de Cambio</p>
                                     <div className="space-y-4">
                                         <div className="flex justify-between text-xs">
-                                            <span className="text-slate-500">Equipo Original:</span>
+                                            <span className="text-slate-500">Cobrado Anteriormente:</span>
                                             <span className="font-bold">L. {Number(selectedWarranty.precio_venta_original || 0).toFixed(2)}</span>
                                         </div>
                                         <div>
@@ -535,7 +557,7 @@ const ReturnsWarranties: React.FC = () => {
                                             <input type="number" className="w-full p-3 border border-slate-200 rounded-xl font-black text-indigo-600" value={newProductPrice} onChange={e=>setNewProductPrice(Number(e.target.value))} />
                                         </div>
                                         <div className="pt-2 border-t flex justify-between items-center">
-                                            <span className="text-xs font-black text-indigo-600 uppercase">Diferencia Efectivo:</span>
+                                            <span className="text-xs font-black text-indigo-600 uppercase">Efectivo a Recibir:</span>
                                             <span className={`text-lg font-black ${exchangeCalculations?.diferenciaEfectivo && exchangeCalculations.diferenciaEfectivo < 0 ? 'text-red-600' : 'text-emerald-600'}`}>
                                                 L. {exchangeCalculations?.diferenciaEfectivo.toFixed(2) || '0.00'}
                                             </span>
@@ -547,9 +569,9 @@ const ReturnsWarranties: React.FC = () => {
                                     <div className={`p-4 rounded-2xl border flex items-start gap-3 ${exchangeCalculations.utilidadDiferencia >= 0 ? 'bg-emerald-50 border-emerald-100' : 'bg-red-50 border-red-100'}`}>
                                         {exchangeCalculations.utilidadDiferencia >= 0 ? <TrendingUp className="text-emerald-600"/> : <AlertTriangle className="text-red-600"/>}
                                         <div>
-                                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Impacto en Utilidad</p>
+                                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Ajuste de Utilidad</p>
                                             <p className={`text-sm font-bold ${exchangeCalculations.utilidadDiferencia >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
-                                                {exchangeCalculations.utilidadDiferencia >= 0 ? 'INCREMENTO DE GANANCIA' : 'PÉRDIDA DE MARGEN'}
+                                                {exchangeCalculations.utilidadDiferencia >= 0 ? 'INGRESO POR CAMBIO' : 'EGRESO POR PÉRDIDA'}
                                             </p>
                                             <p className="text-xs font-medium text-slate-600 mt-1">Monto: L. {Math.abs(exchangeCalculations.utilidadDiferencia).toFixed(2)}</p>
                                         </div>

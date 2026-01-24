@@ -177,6 +177,8 @@ export const getMockUnifiedProducts = (): ProductoUnified[] => {
         nombre: `${t.marca} ${t.modelo}`,
         codigo: t.codigo,
         precioVenta: t.precioVenta,
+        /* Included precioCompra in unified mock data */
+        precioCompra: t.precioCompra,
         stock: 1, // Phones are unique
         imei: t.imei1,
         ubicacion: t.idubicacion
@@ -194,6 +196,8 @@ export const getMockUnifiedProducts = (): ProductoUnified[] => {
         nombre: acc.descripcion,
         codigo: acc.codAccesorio,
         precioVenta: inv.precioVenta,
+        /* Included precioCompra in unified mock data */
+        precioCompra: inv.precioCompra,
         stock: inv.cantidad,
         ubicacion: inv.idubicacion
       });
