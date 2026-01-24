@@ -1,5 +1,4 @@
 
-
 export type EstadoGeneral = 'Activo' | 'Inactivo' | 'Disponible' | 'Vendido' | 'Completada' | 'Anulada' | 'Cerrada' | 'Registrado';
 
 // Clasificación unificada para compatibilidad con DB
@@ -191,10 +190,14 @@ export interface DetalleVenta {
 
 export interface Reparacion {
   id_reparacion: number;
-  cod_venta?: string;
+  identidad_cliente?: string;
+  nombre_cliente?: string;
   descripcion_falla: string;
   imei_equipo?: string;
-  marca_modelo: string;
+  marca: string;
+  modelo: string;
+  marca_modelo?: string; // Legacy
+  complementos?: string; // Cargador, cobertor, etc.
   costo_tecnico: number;
   precio_cliente: number;
   nombre_tecnico: string;
@@ -215,7 +218,6 @@ export interface Consignacion {
   fecha_salida: string;
   fecha_limite?: string;
   nombre_producto?: string;
-  /* Added missing property returned by backend to fix TS error in Consignments.tsx line 229 */
   codigo_referencia?: string;
 }
 

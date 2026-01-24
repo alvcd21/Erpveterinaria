@@ -95,8 +95,10 @@ export const SalesService = {
 export const RepairService = {
   getAll: () => request<Reparacion[]>('/reparaciones'),
   create: (data: Partial<Reparacion>) => request('/reparaciones', { method: 'POST', body: JSON.stringify(data) }),
+  update: (id: number, data: Partial<Reparacion>) => request(`/reparaciones/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   updateStatus: (id: number, estado: string) => request(`/reparaciones/${id}/estado`, { method: 'PUT', body: JSON.stringify({ estado }) }),
   payTechnician: (id: number) => request(`/reparaciones/${id}/pago-tecnico`, { method: 'PUT' }),
+  delete: (id: number) => request(`/reparaciones/${id}`, { method: 'DELETE' }),
 };
 
 export const ConsignService = {

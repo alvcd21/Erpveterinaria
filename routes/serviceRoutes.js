@@ -9,9 +9,10 @@ const { authenticateToken } = require('../middleware/auth');
 router.get('/reparaciones', authenticateToken, async (req, res) => {
     try {
         const query = `
-            SELECT r.*, v.total as "ventaTotal"
+            SELECT r.*, v.total as "ventaTotal", c.nombre || ' ' || c.apellido as "nombre_cliente"
             FROM reparaciones r
             LEFT JOIN ventas v ON r.cod_venta = v.codVenta
+            LEFT JOIN clientes c ON r.identidad_cliente = c.identidad
             ORDER BY r.fecha_ingreso DESC
         `;
         const result = await pool.query(query);
@@ -21,13 +22,60 @@ router.get('/reparaciones', authenticateToken, async (req, res) => {
 
 router.post('/reparaciones', authenticateToken, async (req, res) => {
     try {
-        const { descripcion_falla, imei_equipo, marca_modelo, costo_tecnico, precio_cliente, nombre_tecnico, fecha_entrega_estimada } = req.body;
+        const { 
+            descripcion_falla, imei_equipo, marca, modelo, 
+            costo_tecnico, precio_cliente, nombre_tecnico, 
+            fecha_entrega_estimada, complementos, identidad_cliente 
+        } = req.body;
+        
         const query = `
-            INSERT INTO reparaciones (descripcion_falla, imei_equipo, marca_modelo, costo_tecnico, precio_cliente, nombre_tecnico, fecha_entrega_estimada)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            INSERT INTO reparaciones (
+                descripcion_falla, imei_equipo, marca, modelo, 
+                costo_tecnico, precio_cliente, nombre_tecnico, 
+                fecha_entrega_estimada, complementos, identidad_cliente, marca_modelo
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
         `;
-        await pool.query(query, [descripcion_falla, imei_equipo, marca_modelo, costo_tecnico, precio_cliente, nombre_tecnico, fecha_entrega_estimada]);
+        await pool.query(query, [
+            descripcion_falla, imei_equipo, marca, modelo, 
+            costo_tecnico, precio_cliente, nombre_tecnico, 
+            fecha_entrega_estimada || null, complementos, identidad_cliente || null,
+            `${marca} ${modelo}`
+        ]);
         res.status(201).json({ message: 'Orden de servicio creada' });
+    } catch(e) { handleDbError(res, e); }
+});
+
+router.put('/reparaciones/:id', authenticateToken, async (req, res) => {
+    try {
+        const { 
+            descripcion_falla, imei_equipo, marca, modelo, 
+            costo_tecnico, precio_cliente, nombre_tecnico, 
+            fecha_entrega_estimada, complementos, identidad_cliente, estado_reparacion 
+        } = req.body;
+
+        const query = `
+            UPDATE reparaciones SET 
+                descripcion_falla=$1, imei_equipo=$2, marca=$3, modelo=$4, 
+                costo_tecnico=$5, precio_cliente=$6, nombre_tecnico=$7, 
+                fecha_entrega_estimada=$8, complementos=$9, identidad_cliente=$10,
+                estado_reparacion=$11, marca_modelo=$12
+            WHERE id_reparacion=$13
+        `;
+        await pool.query(query, [
+            descripcion_falla, imei_equipo, marca, modelo, 
+            costo_tecnico, precio_cliente, nombre_tecnico, 
+            fecha_entrega_estimada || null, complementos, identidad_cliente || null,
+            estado_reparacion, `${marca} ${modelo}`, req.params.id
+        ]);
+        res.json({ message: 'Orden actualizada' });
+    } catch(e) { handleDbError(res, e); }
+});
+
+router.delete('/reparaciones/:id', authenticateToken, async (req, res) => {
+    try {
+        await pool.query('DELETE FROM reparaciones WHERE id_reparacion = $1', [req.params.id]);
+        res.json({ message: 'Eliminado con éxito' });
     } catch(e) { handleDbError(res, e); }
 });
 
@@ -95,7 +143,6 @@ router.post('/consignaciones', authenticateToken, async (req, res) => {
         for (const item of items) {
             const { id_producto, tipo_producto, negocio_destino, cantidad_prestada, precio_especial_pago, fecha_limite } = item;
             
-            // Validar Stock (FIXED: Usar codInventario para accesorios)
             if (tipo_producto === 'TELEFONO') {
                 const tel = await client.query('SELECT estado FROM telefonos WHERE codigo = $1', [id_producto]);
                 if (tel.rows[0]?.estado !== 'Disponible') throw new Error(`El teléfono ${id_producto} no está disponible`);
@@ -174,7 +221,6 @@ router.put('/consignaciones/:id/liquidar', authenticateToken, async (req, res) =
         const cons = consRes.rows[0];
         if (!cons || cons.estado_consignacion !== 'Prestado') throw new Error('Esta consignación ya fue cerrada');
 
-        // Obtener costo original
         let costoOriginal = 0;
         if (cons.tipo_producto === 'TELEFONO') {
             const tel = await client.query('SELECT precioCompra FROM telefonos WHERE codigo = $1', [cons.id_producto]);

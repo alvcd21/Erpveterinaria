@@ -1,24 +1,55 @@
 
-import React, { useState, useEffect } from 'react';
-import { RepairService } from '../services/api';
-import { Reparacion } from '../types';
-// Add missing FileText import from lucide-react
+import React, { useState, useEffect, useMemo } from 'react';
+import { RepairService, InventoryService, ClientService, ConfigService } from '../services/api';
+import { Reparacion, Telefono, Cliente } from '../types';
 import { 
-  Wrench, PlusCircle, Search, Clock, CheckCircle, Package, DollarSign, User, Smartphone, X, Save, RefreshCw, AlertCircle, FileText
+  Wrench, PlusCircle, Search, Clock, CheckCircle, Package, DollarSign, User, Smartphone, X, Save, RefreshCw, AlertCircle, FileText, Trash2, Edit2, Printer, Check, Info
 } from 'lucide-react';
 import Swal from 'sweetalert2';
+import { jsPDF } from 'jspdf';
+import 'jspdf-autotable';
+
+const COMPLEMENTOS_OPCIONES = [
+    "Cargador", "Cobertor/Case", "Cable USB", "Memoria MicroSD", "Chip/SIM", "Batería", "Lápiz/Stylus"
+];
 
 const Repairs: React.FC = () => {
   const [repairs, setRepairs] = useState<Reparacion[]>([]);
+  const [phones, setPhones] = useState<Telefono[]>([]);
+  const [clients, setClients] = useState<Cliente[]>([]);
+  const [companyConfig, setCompanyConfig] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  
   const [showModal, setShowModal] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [currentId, setCurrentId] = useState<number | null>(null);
+
   const [form, setForm] = useState<Partial<Reparacion>>({
       estado_reparacion: 'Pendiente',
-      pago_tecnico_estado: 'Pendiente'
+      pago_tecnico_estado: 'Pendiente',
+      complementos: '',
+      marca: '',
+      modelo: '',
+      identidad_cliente: ''
   });
 
-  useEffect(() => { loadData(); }, []);
+  const [selectedComplementos, setSelectedComplementos] = useState<string[]>([]);
+
+  useEffect(() => { loadData(); loadDependencies(); }, []);
+
+  const loadDependencies = async () => {
+      try {
+          const [p, c, cfg] = await Promise.all([
+              InventoryService.getTelefonos(),
+              ClientService.getAll(),
+              ConfigService.get()
+          ]);
+          setPhones(p || []);
+          setClients(c || []);
+          setCompanyConfig(cfg);
+      } catch (e) { console.error(e); }
+  };
 
   const loadData = async () => {
     setLoading(true);
@@ -28,128 +59,290 @@ const Repairs: React.FC = () => {
     } catch (e) { console.error(e); } finally { setLoading(false); }
   };
 
+  const uniqueBrands = useMemo(() => Array.from(new Set(phones.map(p => p.marca))).sort(), [phones]);
+  const availableModels = useMemo(() => {
+      if (!form.marca) return [];
+      return Array.from(new Set(phones.filter(p => p.marca === form.marca).map(p => p.modelo))).sort();
+  }, [phones, form.marca]);
+
+  const toggleComplemento = (comp: string) => {
+      setSelectedComplementos(prev => 
+          prev.includes(comp) ? prev.filter(c => c !== comp) : [...prev, comp]
+      );
+  };
+
+  const openNew = () => {
+      setIsEditing(false);
+      setCurrentId(null);
+      setSelectedComplementos([]);
+      setForm({
+          estado_reparacion: 'Pendiente',
+          pago_tecnico_estado: 'Pendiente',
+          complementos: '',
+          marca: '',
+          modelo: '',
+          identidad_cliente: '',
+          descripcion_falla: '',
+          imei_equipo: '',
+          nombre_tecnico: '',
+          costo_tecnico: 0,
+          precio_cliente: 0
+      });
+      setShowModal(true);
+  };
+
+  const openEdit = (r: Reparacion) => {
+      setIsEditing(true);
+      setCurrentId(r.id_reparacion);
+      const comps = r.complementos ? r.complementos.split(', ') : [];
+      setSelectedComplementos(comps);
+      setForm(r);
+      setShowModal(true);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-        await RepairService.create(form);
+        const payload = { 
+            ...form, 
+            complementos: selectedComplementos.join(', '),
+            marca_modelo: `${form.marca} ${form.modelo}` // Fallback para legacy
+        };
+        
+        if (isEditing && currentId) {
+            await RepairService.update(currentId, payload);
+            Swal.fire('Actualizado', 'Orden modificada', 'success');
+        } else {
+            await RepairService.create(payload);
+            Swal.fire('Éxito', 'Orden de servicio creada', 'success');
+        }
         setShowModal(false);
         loadData();
-        Swal.fire('Éxito', 'Orden de servicio creada', 'success');
     } catch (e: any) { Swal.fire('Error', e.message, 'error'); }
+  };
+
+  const handleDelete = async (id: number) => {
+      const result = await Swal.fire({
+          title: '¿Eliminar Reparación?',
+          text: 'Se borrará permanentemente el registro.',
+          icon: 'warning',
+          showCancelButton: true,
+          confirmButtonColor: '#ef4444'
+      });
+      if (result.isConfirmed) {
+          try {
+              await RepairService.delete(id);
+              loadData();
+              Swal.fire('Eliminado', '', 'success');
+          } catch (e: any) { Swal.fire('Error', e.message, 'error'); }
+      }
+  };
+
+  const generatePDF = (r: Reparacion) => {
+      const doc = new jsPDF();
+      const cfg = companyConfig || {};
+      const LOGO_BASE64 = ""; // Si tienes el logo podrías inyectarlo aquí
+
+      const primaryColor = "#1e3a8a";
+      const secondaryColor = "#334155";
+      const pageWidth = doc.internal.pageSize.width;
+
+      // Diseño del Header (Igual que facturación)
+      doc.setFillColor(primaryColor);
+      doc.triangle(0, 0, pageWidth, 0, pageWidth, 40, 'F');
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(22);
+      doc.setFont("helvetica", "bold");
+      doc.text("ORDEN DE SERVICIO", 15, 22);
+      doc.setFontSize(10);
+      doc.text(`ORDEN NO: RPR-${String(r.id_reparacion).padStart(5, '0')}`, 15, 30);
+
+      // Info Empresa
+      doc.setFontSize(14);
+      doc.text((cfg.nombreEmpresa || "SMARTCLOUD ERP").toUpperCase(), pageWidth - 15, 18, { align: "right" });
+      doc.setFontSize(8);
+      doc.setFont("helvetica", "normal");
+      doc.text(cfg.direccion || "CHOLUTECA, HONDURAS", pageWidth - 15, 23, { align: "right" });
+      doc.text(`RTN: ${cfg.rtn || "N/A"} | TEL: ${cfg.telefono || "N/A"}`, pageWidth - 15, 27, { align: "right" });
+
+      // Cuerpo del Reporte
+      let y = 55;
+      doc.setTextColor(primaryColor);
+      doc.setFontSize(12);
+      doc.setFont("helvetica", "bold");
+      doc.text("INFORMACIÓN DEL CLIENTE", 15, y);
+      
+      doc.setTextColor(0);
+      doc.setFontSize(10);
+      doc.setFont("helvetica", "normal");
+      y += 8;
+      const cliente = clients.find(c => c.identidad === r.identidad_cliente);
+      doc.text(`Nombre: ${cliente ? `${cliente.nombre} ${cliente.apellido}` : r.nombre_cliente || 'Consumidor Final'}`, 15, y);
+      doc.text(`Identidad/RTN: ${r.identidad_cliente || 'N/A'}`, 110, y);
+      y += 6;
+      doc.text(`Teléfono: ${cliente?.telefono || 'N/A'}`, 15, y);
+      doc.text(`Fecha Ingreso: ${new Date(r.fecha_ingreso).toLocaleString()}`, 110, y);
+
+      y += 15;
+      doc.setTextColor(primaryColor);
+      doc.setFont("helvetica", "bold");
+      doc.text("DATOS DEL DISPOSITIVO", 15, y);
+      
+      // @ts-ignore
+      doc.autoTable({
+          startY: y + 5,
+          head: [['MARCA', 'MODELO', 'IMEI / SERIE']],
+          body: [[r.marca?.toUpperCase(), r.modelo?.toUpperCase(), r.imei_equipo || 'N/A']],
+          theme: 'grid',
+          headStyles: { fillColor: [30, 58, 138] }
+      });
+
+      // @ts-ignore
+      y = doc.lastAutoTable.finalY + 12;
+      doc.setTextColor(primaryColor);
+      doc.setFont("helvetica", "bold");
+      doc.text("DIAGNÓSTICO Y COMPLEMENTOS", 15, y);
+      
+      // @ts-ignore
+      doc.autoTable({
+          startY: y + 5,
+          head: [['FALLA REPORTADA', 'ARTÍCULOS ADICIONALES DEJADOS']],
+          body: [[r.descripcion_falla?.toUpperCase(), r.complementos?.toUpperCase() || 'NINGUNO']],
+          theme: 'striped',
+          styles: { fontSize: 9 },
+          columnStyles: { 0: { cellWidth: 100 }, 1: { cellWidth: 80 } }
+      });
+
+      // @ts-ignore
+      y = doc.lastAutoTable.finalY + 15;
+      doc.setFillColor(248, 250, 252);
+      doc.rect(130, y, 65, 25, 'F');
+      doc.setTextColor(secondaryColor);
+      doc.setFontSize(9);
+      doc.text("TOTAL ESTIMADO:", 135, y + 10);
+      doc.setTextColor(primaryColor);
+      doc.setFontSize(16);
+      doc.setFont("helvetica", "bold");
+      doc.text(`L. ${Number(r.precio_cliente).toFixed(2)}`, 135, y + 20);
+
+      // Términos Legales
+      y += 40;
+      doc.setTextColor(secondaryColor);
+      doc.setFontSize(8);
+      doc.setFont("helvetica", "bold");
+      doc.text("TÉRMINOS Y CONDICIONES DEL SERVICIO:", 15, y);
+      doc.setFont("helvetica", "normal");
+      doc.text("1. El taller no se hace responsable por pérdida de datos. Realice su respaldo.", 15, y + 5);
+      doc.text("2. Todo equipo abandonado por más de 30 días será propiedad de la empresa.", 15, y + 10);
+      doc.text("3. La garantía solo cubre la falla descrita en este documento.", 15, y + 15);
+
+      // Firmas
+      y += 40;
+      doc.line(15, y, 75, y);
+      doc.text("Firma Cliente", 35, y + 5);
+      doc.line(120, y, 180, y);
+      doc.text("Recibido por", 140, y + 5);
+
+      doc.save(`Orden_${r.id_reparacion}.pdf`);
   };
 
   const updateStatus = async (id: number, currentStatus: string) => {
     const { value: newStatus } = await Swal.fire({
       title: 'Cambiar Estado',
       input: 'select',
-      inputOptions: {
-        'Pendiente': 'Pendiente',
-        'En Taller': 'En Taller',
-        'Listo': 'Listo',
-        'Entregado': 'Entregado'
-      },
+      inputOptions: { 'Pendiente': 'Pendiente', 'En Taller': 'En Taller', 'Listo': 'Listo', 'Entregado': 'Entregado' },
       inputValue: currentStatus,
       showCancelButton: true
     });
-
-    if (newStatus) {
-      try {
-        await RepairService.updateStatus(id, newStatus);
-        loadData();
-      } catch (e: any) { Swal.fire('Error', e.message, 'error'); }
-    }
+    if (newStatus) { try { await RepairService.updateStatus(id, newStatus); loadData(); } catch (e: any) { Swal.fire('Error', e.message, 'error'); } }
   };
 
   const payTechnician = async (id: number) => {
-      const result = await Swal.fire({
-          title: '¿Marcar como Pagado?',
-          text: 'Se registrará un egreso de caja con el costo del técnico.',
-          icon: 'question',
-          showCancelButton: true,
-          confirmButtonText: 'Sí, Pagar'
-      });
-
-      if (result.isConfirmed) {
-          try {
-              await RepairService.payTechnician(id);
-              loadData();
-              Swal.fire('Pagado', 'Gasto registrado en caja.', 'success');
-          } catch (e: any) { Swal.fire('Error', e.message, 'error'); }
-      }
+      const result = await Swal.fire({ title: '¿Pagar Técnico?', text: 'Registra egreso de caja.', icon: 'question', showCancelButton: true });
+      if (result.isConfirmed) { try { await RepairService.payTechnician(id); loadData(); Swal.fire('Pagado', 'Gasto registrado.', 'success'); } catch (e: any) { Swal.fire('Error', e.message, 'error'); } }
   };
 
   const filtered = repairs.filter(r => 
-      r.marca_modelo.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (r.marca_modelo || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      r.marca?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      r.modelo?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       r.nombre_tecnico.toLowerCase().includes(searchTerm.toLowerCase()) ||
       r.imei_equipo?.includes(searchTerm)
   );
 
   return (
-    <div className="space-y-6 animate-fade-in h-full flex flex-col">
+    <div className="space-y-6 animate-fade-in h-full flex flex-col pb-10">
         <div className="flex flex-col md:flex-row justify-between items-end gap-4">
             <div>
-                <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
-                    <Wrench className="text-indigo-600"/> Gestión de Reparaciones
-                </h2>
-                <p className="text-slate-500 text-sm">Control de órdenes de servicio y pagos a terceros.</p>
+                <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2"><Wrench className="text-indigo-600"/> Servicio Técnico Especializado</h2>
+                <p className="text-slate-500 text-sm">Control integral de reparaciones, garantías y técnicos.</p>
             </div>
-            <button onClick={() => setShowModal(true)} className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-xl flex items-center gap-2 font-bold shadow-lg shadow-indigo-600/20 transition-all">
-                <PlusCircle size={20}/> Nueva Orden
+            <button onClick={openNew} className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-xl flex items-center gap-2 font-bold shadow-lg shadow-indigo-600/20 transition-all active:scale-95">
+                <PlusCircle size={20}/> Nueva Reparación
             </button>
         </div>
 
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 flex-1 overflow-hidden flex flex-col">
-            <div className="p-4 border-b bg-slate-50 flex gap-4">
+        <div className="bg-white rounded-3xl shadow-sm border border-slate-200 flex-1 overflow-hidden flex flex-col">
+            <div className="p-4 border-b bg-slate-50/50 flex gap-4">
                 <div className="relative flex-1 max-w-md">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-                    <input type="text" placeholder="Buscar por equipo, técnico o IMEI..." className="w-full pl-10 pr-4 py-2 border rounded-xl text-sm" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
+                    <input type="text" placeholder="Buscar por equipo, técnico o IMEI..." className="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500/20" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
                 </div>
-                <button onClick={loadData} className="p-2 text-slate-500 hover:bg-slate-200 rounded-lg border border-slate-200 bg-white">
+                <button onClick={loadData} className="p-2.5 text-slate-500 hover:bg-white rounded-xl border border-transparent hover:border-slate-200 shadow-sm transition-all">
                     <RefreshCw size={20} className={loading ? "animate-spin" : ""} />
                 </button>
             </div>
 
-            <div className="flex-1 overflow-auto">
+            <div className="flex-1 overflow-auto custom-scrollbar">
                 <table className="w-full text-left">
-                    <thead className="bg-slate-100 text-xs font-bold text-slate-500 uppercase sticky top-0 z-10">
+                    <thead className="bg-slate-50 text-[10px] font-black text-slate-400 uppercase sticky top-0 z-10 tracking-widest border-b">
                         <tr>
-                            <th className="p-4">Equipo / IMEI</th>
-                            <th className="p-4">Técnico</th>
-                            <th className="p-4">Estado Taller</th>
-                            <th className="p-4 text-right">Precios</th>
-                            <th className="p-4 text-center">Pago Técnico</th>
-                            <th className="p-4 text-right">Acción</th>
+                            <th className="p-4">Dispositivo</th>
+                            <th className="p-4">Cliente / Técnico</th>
+                            <th className="p-4">Progreso</th>
+                            <th className="p-4 text-right">Monto</th>
+                            <th className="p-4 text-center">Pago Téc.</th>
+                            <th className="p-4 text-right">Acciones</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                        {filtered.map(r => (
-                            <tr key={r.id_reparacion} className="hover:bg-slate-50 transition-colors">
+                        {filtered.length === 0 ? (
+                            <tr><td colSpan={6} className="p-10 text-center text-slate-400 italic">No hay órdenes registradas.</td></tr>
+                        ) : filtered.map(r => (
+                            <tr key={r.id_reparacion} className="hover:bg-slate-50/50 transition-colors group">
                                 <td className="p-4">
-                                    <p className="font-bold text-slate-800">{r.marca_modelo}</p>
-                                    <p className="text-[10px] font-mono text-slate-400">{r.imei_equipo || 'N/A'}</p>
+                                    <div className="flex items-center gap-3">
+                                        <div className="bg-slate-100 p-2.5 rounded-2xl text-slate-500 group-hover:bg-indigo-50 group-hover:text-indigo-600 transition-colors"><Smartphone size={20}/></div>
+                                        <div>
+                                            <p className="font-bold text-slate-800 text-sm">{r.marca} {r.modelo}</p>
+                                            <p className="text-[10px] font-mono text-slate-400 uppercase">{r.imei_equipo || 'SIN IMEI'}</p>
+                                        </div>
+                                    </div>
                                 </td>
-                                <td className="p-4 text-sm text-slate-600">{r.nombre_tecnico}</td>
                                 <td className="p-4">
-                                    <button onClick={() => updateStatus(r.id_reparacion, r.estado_reparacion)} className={`px-3 py-1 rounded-full text-[10px] font-black uppercase flex items-center gap-1.5 ${r.estado_reparacion === 'Entregado' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                                    <p className="text-xs font-bold text-slate-600">{r.nombre_cliente || 'Consumidor Final'}</p>
+                                    <p className="text-[10px] text-slate-400 flex items-center gap-1 mt-1"><Wrench size={10}/> Téc: {r.nombre_tecnico}</p>
+                                </td>
+                                <td className="p-4">
+                                    <button onClick={() => updateStatus(r.id_reparacion, r.estado_reparacion)} className={`px-3 py-1 rounded-full text-[9px] font-black uppercase flex items-center gap-1.5 transition-all hover:scale-105 ${r.estado_reparacion === 'Entregado' ? 'bg-emerald-100 text-emerald-700' : r.estado_reparacion === 'Listo' ? 'bg-indigo-100 text-indigo-700' : 'bg-amber-100 text-amber-700'}`}>
                                         {r.estado_reparacion === 'Entregado' ? <CheckCircle size={12}/> : <Clock size={12}/>}
                                         {r.estado_reparacion}
                                     </button>
                                 </td>
-                                <td className="p-4 text-right">
-                                    <div className="text-xs">
-                                        <p className="text-slate-400">Cliente: <span className="font-bold text-slate-800">L. {Number(r.precio_cliente).toFixed(2)}</span></p>
-                                        <p className="text-slate-400">Técnico: <span className="font-bold text-slate-800">L. {Number(r.costo_tecnico).toFixed(2)}</span></p>
-                                    </div>
-                                </td>
+                                <td className="p-4 text-right font-black text-indigo-600 text-sm">L. {Number(r.precio_cliente).toFixed(2)}</td>
                                 <td className="p-4 text-center">
                                     {r.pago_tecnico_estado === 'Pagado' ? (
-                                        <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded">LIQUIDADO</span>
+                                        <span className="text-[9px] font-black text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full uppercase">Pagado</span>
                                     ) : (
-                                        <button onClick={() => payTechnician(r.id_reparacion)} className="text-[10px] font-black text-red-600 border border-red-200 px-2 py-1 rounded hover:bg-red-50 transition-all">PAGAR AHORA</button>
+                                        <button onClick={() => payTechnician(r.id_reparacion)} className="text-[9px] font-black text-red-600 border border-red-200 px-2.5 py-1 rounded-full hover:bg-red-50 transition-all uppercase">Pendiente</button>
                                     )}
                                 </td>
                                 <td className="p-4 text-right">
-                                    <button className="text-slate-400 hover:text-indigo-600"><FileText size={18}/></button>
+                                    <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <button onClick={() => generatePDF(r)} className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg" title="Imprimir Comprobante"><Printer size={16}/></button>
+                                        <button onClick={() => openEdit(r)} className="p-2 text-blue-500 hover:bg-blue-50 rounded-lg" title="Editar"><Edit2 size={16}/></button>
+                                        <button onClick={() => handleDelete(r.id_reparacion)} className="p-2 text-red-400 hover:bg-red-50 rounded-lg" title="Eliminar"><Trash2 size={16}/></button>
+                                    </div>
                                 </td>
                             </tr>
                         ))}
@@ -159,25 +352,105 @@ const Repairs: React.FC = () => {
         </div>
 
         {showModal && (
-            <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-                <div className="bg-white rounded-3xl w-full max-w-lg shadow-2xl overflow-hidden animate-fade-in flex flex-col max-h-[90vh]">
-                    <div className="p-6 border-b flex justify-between items-center bg-slate-50">
-                        <h3 className="text-xl font-bold">Nueva Orden de Servicio</h3>
-                        <button onClick={() => setShowModal(false)} className="text-slate-400 hover:text-red-500"><X/></button>
+            <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-md z-50 flex items-center justify-center p-4">
+                <div className="bg-white rounded-[2rem] w-full max-w-2xl shadow-2xl overflow-hidden animate-fade-in flex flex-col max-h-[90vh]">
+                    <div className="p-6 border-b flex justify-between items-center bg-white">
+                        <div className="flex items-center gap-3">
+                            <div className="bg-indigo-600 p-2 rounded-xl text-white"><Wrench size={24}/></div>
+                            <div>
+                                <h3 className="text-xl font-bold">{isEditing ? 'Actualizar Reparación' : 'Nueva Orden de Servicio'}</h3>
+                                <p className="text-xs text-slate-400 font-bold uppercase tracking-widest">Servicio Técnico SmartCloud</p>
+                            </div>
+                        </div>
+                        <button onClick={() => setShowModal(false)} className="text-slate-400 hover:text-red-500 transition-colors p-2 hover:bg-red-50 rounded-full"><X/></button>
                     </div>
-                    <form onSubmit={handleSubmit} className="p-6 space-y-4 overflow-y-auto">
-                        <div className="grid grid-cols-2 gap-4">
-                            <div><label className="text-[10px] font-black text-slate-400 uppercase">Marca/Modelo</label><input required className="w-full p-3 border rounded-xl" value={form.marca_modelo || ''} onChange={e => setForm({...form, marca_modelo: e.target.value})} placeholder="Ej: Samsung S23" /></div>
-                            <div><label className="text-[10px] font-black text-slate-400 uppercase">IMEI / Serie</label><input className="w-full p-3 border rounded-xl font-mono" value={form.imei_equipo || ''} onChange={e => setForm({...form, imei_equipo: e.target.value})} placeholder="0000..." /></div>
+                    <form onSubmit={handleSubmit} className="p-8 space-y-6 overflow-y-auto custom-scrollbar bg-slate-50/30">
+                        {/* SECCIÓN CLIENTE */}
+                        <div className="space-y-4">
+                            <h4 className="text-[10px] font-black text-indigo-600 uppercase tracking-[0.2em] flex items-center gap-2"><User size={14}/> Propietario</h4>
+                            <select required className="w-full p-3 bg-white border border-slate-200 rounded-2xl text-sm font-bold shadow-sm outline-none focus:ring-2 focus:ring-indigo-500/20" value={form.identidad_cliente} onChange={e => setForm({...form, identidad_cliente: e.target.value})}>
+                                <option value="">-- Vincular Cliente --</option>
+                                {clients.map(c => <option key={c.identidad} value={c.identidad}>{c.nombre} {c.apellido} ({c.identidad})</option>)}
+                            </select>
                         </div>
-                        <div><label className="text-[10px] font-black text-slate-400 uppercase">Falla Reportada</label><textarea required className="w-full p-3 border rounded-xl" value={form.descripcion_falla || ''} onChange={e => setForm({...form, descripcion_falla: e.target.value})} rows={2} /></div>
-                        <div><label className="text-[10px] font-black text-slate-400 uppercase">Técnico Asignado</label><input required className="w-full p-3 border rounded-xl" value={form.nombre_tecnico || ''} onChange={e => setForm({...form, nombre_tecnico: e.target.value})} placeholder="Nombre del taller o técnico" /></div>
-                        <div className="grid grid-cols-2 gap-4 bg-slate-50 p-4 rounded-2xl border border-slate-100">
-                            <div><label className="text-[10px] font-black text-slate-400 uppercase">Lo que COBRAMOS</label><input type="number" required className="w-full p-3 border border-indigo-200 rounded-xl font-bold text-indigo-700" value={form.precio_cliente || ''} onChange={e => setForm({...form, precio_cliente: Number(e.target.value)})} /></div>
-                            <div><label className="text-[10px] font-black text-slate-400 uppercase">Lo que el TECNICO nos COBRA</label><input type="number" required className="w-full p-3 border border-red-200 rounded-xl font-bold text-red-700" value={form.costo_tecnico || ''} onChange={e => setForm({...form, costo_tecnico: Number(e.target.value)})} /></div>
+
+                        {/* SECCIÓN DISPOSITIVO */}
+                        <div className="space-y-4 pt-4 border-t border-slate-100">
+                            <h4 className="text-[10px] font-black text-indigo-600 uppercase tracking-[0.2em] flex items-center gap-2"><Smartphone size={14}/> Dispositivo</h4>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="text-[10px] font-black text-slate-400 uppercase mb-1 block ml-1">Marca</label>
+                                    <input required list="brands-repair" className="w-full p-3 bg-white border border-slate-200 rounded-2xl text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-500/20" value={form.marca || ''} onChange={e => setForm({...form, marca: e.target.value, modelo: ''})} placeholder="Ej: Samsung" />
+                                    <datalist id="brands-repair">{uniqueBrands.map(b => <option key={b} value={b}/>)}</datalist>
+                                </div>
+                                <div>
+                                    <label className="text-[10px] font-black text-slate-400 uppercase mb-1 block ml-1">Modelo</label>
+                                    <input required list="models-repair" className="w-full p-3 bg-white border border-slate-200 rounded-2xl text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-500/20" value={form.modelo || ''} onChange={e => setForm({...form, modelo: e.target.value})} placeholder="Ej: Galaxy S22" disabled={!form.marca} />
+                                    <datalist id="models-repair">{availableModels.map(m => <option key={m} value={m}/>)}</datalist>
+                                </div>
+                            </div>
+                            <div>
+                                <label className="text-[10px] font-black text-slate-400 uppercase mb-1 block ml-1">IMEI o Serie</label>
+                                <input className="w-full p-3 bg-white border border-slate-200 rounded-2xl text-sm font-mono outline-none focus:ring-2 focus:ring-indigo-500/20" value={form.imei_equipo || ''} onChange={e => setForm({...form, imei_equipo: e.target.value})} placeholder="0000 0000 0000 000" />
+                            </div>
                         </div>
-                        <div><label className="text-[10px] font-black text-slate-400 uppercase">Entrega Estimada</label><input type="date" className="w-full p-3 border rounded-xl" value={form.fecha_entrega_estimada || ''} onChange={e => setForm({...form, fecha_entrega_estimada: e.target.value})} /></div>
-                        <button type="submit" className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-black shadow-xl hover:bg-indigo-700 transition-all flex items-center justify-center gap-2"><Save size={18}/> CREAR ORDEN</button>
+
+                        {/* SECCIÓN FALLA Y COMPLEMENTOS */}
+                        <div className="space-y-4 pt-4 border-t border-slate-100">
+                            <h4 className="text-[10px] font-black text-indigo-600 uppercase tracking-[0.2em] flex items-center gap-2"><AlertCircle size={14}/> Detalle de Recepción</h4>
+                            <div>
+                                <label className="text-[10px] font-black text-slate-400 uppercase mb-1 block ml-1">Falla Reportada</label>
+                                <textarea required className="w-full p-3 bg-white border border-slate-200 rounded-2xl text-sm outline-none focus:ring-2 focus:ring-indigo-500/20" value={form.descripcion_falla || ''} onChange={e => setForm({...form, descripcion_falla: e.target.value})} rows={2} placeholder="Describa el problema..." />
+                            </div>
+                            <div>
+                                <label className="text-[10px] font-black text-slate-400 uppercase mb-2 block ml-1">Artículos Adicionales</label>
+                                <div className="flex flex-wrap gap-2">
+                                    {COMPLEMENTOS_OPCIONES.map(c => (
+                                        <button key={c} type="button" onClick={() => toggleComplemento(c)} className={`px-3 py-1.5 rounded-xl text-[10px] font-bold border transition-all ${selectedComplementos.includes(c) ? 'bg-indigo-600 border-indigo-600 text-white shadow-md' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`}>
+                                            {selectedComplementos.includes(c) && <Check size={10} className="inline mr-1"/>} {c}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* SECCIÓN COSTOS */}
+                        <div className="space-y-4 pt-4 border-t border-slate-100">
+                             <h4 className="text-[10px] font-black text-indigo-600 uppercase tracking-[0.2em] flex items-center gap-2"><DollarSign size={14}/> Presupuesto y Técnico</h4>
+                             <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="text-[10px] font-black text-slate-400 uppercase mb-1 block ml-1">Precio Cliente (L.)</label>
+                                    <input type="number" required className="w-full p-3 bg-indigo-50 border-none rounded-2xl font-black text-indigo-700 text-lg outline-none" value={form.precio_cliente || ''} onChange={e => setForm({...form, precio_cliente: Number(e.target.value)})} />
+                                </div>
+                                <div>
+                                    <label className="text-[10px] font-black text-slate-400 uppercase mb-1 block ml-1">Costo Técnico (L.)</label>
+                                    <input type="number" required className="w-full p-3 bg-red-50 border-none rounded-2xl font-black text-red-700 text-lg outline-none" value={form.costo_tecnico || ''} onChange={e => setForm({...form, costo_tecnico: Number(e.target.value)})} />
+                                </div>
+                             </div>
+                             <div>
+                                <label className="text-[10px] font-black text-slate-400 uppercase mb-1 block ml-1">Técnico/Taller Asignado</label>
+                                <input required className="w-full p-3 bg-white border border-slate-200 rounded-2xl text-sm font-bold outline-none" value={form.nombre_tecnico || ''} onChange={e => setForm({...form, nombre_tecnico: e.target.value})} placeholder="Nombre del encargado" />
+                            </div>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="text-[10px] font-black text-slate-400 uppercase mb-1 block ml-1">Entrega Estimada</label>
+                                    <input type="date" className="w-full p-3 bg-white border border-slate-200 rounded-2xl text-sm font-bold" value={form.fecha_entrega_estimada || ''} onChange={e => setForm({...form, fecha_entrega_estimada: e.target.value})} />
+                                </div>
+                                <div>
+                                    <label className="text-[10px] font-black text-slate-400 uppercase mb-1 block ml-1">Estado Inicial</label>
+                                    <select className="w-full p-3 bg-white border border-slate-200 rounded-2xl text-sm font-bold outline-none" value={form.estado_reparacion} onChange={e => setForm({...form, estado_reparacion: e.target.value as any})}>
+                                        <option value="Pendiente">Pendiente</option>
+                                        <option value="En Taller">En Taller</option>
+                                        <option value="Listo">Listo</option>
+                                        <option value="Entregado">Entregado</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+
+                        <button type="submit" className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-black shadow-xl hover:bg-indigo-700 transition-all flex items-center justify-center gap-3 uppercase tracking-widest text-sm active:scale-95">
+                            <Save size={20}/> {isEditing ? 'GUARDAR CAMBIOS' : 'GENERAR ORDEN'}
+                        </button>
                     </form>
                 </div>
             </div>
