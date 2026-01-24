@@ -43,11 +43,6 @@ router.get('/ventas/historial', authenticateToken, async (req, res) => {
         const { fecha } = req.query; 
         const { codUsuario, idCaja } = req.user;
         
-        // Se corrigió la lógica de visibilidad:
-        // 1. Siempre se ven ventas KrediYa con depósito pendiente (Global).
-        // 2. Un usuario solo ve SUS ventas en SU caja asignada (Privado).
-        // Se eliminó la condición de Administrador para este historial específico de caja,
-        // ya que el administrador debe ver sus propios movimientos de su caja actual.
         let query = `
             SELECT v.codVenta as "codVenta", v.fecha, v.total, v.estado, v.identidadCliente as "identidadCliente",
             v.tipoCompra as "tipoCompra", v.estado_pago_financiera as "estado_pago_financiera",
@@ -104,15 +99,16 @@ router.get('/ventas/:id/detalles', authenticateToken, async (req, res) => {
                 dv.idVenta as "idVenta",
                 dv.idTelefono as "idTelefono",
                 dv.idAccesorio as "idAccesorio",
+                dv.idAccesorio as "idInventario",
                 dv.cantidad as "cantidad",
                 dv.precioVenta as "precioVenta",
                 dv.tipoProducto as "tipoProducto",
                 COALESCE(t.precioCompra, inv.precioCompra) as "precioCompra",
-                COALESCE(t.marca || ' ' || t.modelo, a.descripcion) as "descripcionProducto"
+                COALESCE(t.marca || ' ' || t.modelo, acc.descripcion, 'PRODUCTO') as "descripcionProducto"
             FROM detalleventa dv
             LEFT JOIN telefonos t ON dv.idTelefono = t.codigo
-            LEFT JOIN accesorios a ON dv.idAccesorio = a.codAccesorio
             LEFT JOIN inventario inv ON dv.idAccesorio = inv.codInventario
+            LEFT JOIN accesorios acc ON inv.codAccesorio = acc.codAccesorio
             WHERE dv.idVenta = $1
         `;
         const r = await pool.query(query, [req.params.id]);
@@ -128,9 +124,9 @@ router.post('/ventas', authenticateToken, async (req, res) => {
     
     await client.query('BEGIN');
 
-    // SEGURIDAD: Obtener la caja actual del usuario directamente de la DB para evitar desincronización con el token
+    // CORRECCIÓN: Usar idcaja en minúsculas para coincidir con el retorno de PG
     const userRes = await client.query('SELECT idCaja FROM usuarios WHERE codUsuario = $1', [codUsuario]);
-    const idCajaActual = userRes.rows[0]?.idCaja;
+    const idCajaActual = userRes.rows[0]?.idcaja;
 
     if (!idCajaActual) {
         throw new Error('El usuario no tiene una caja asignada para realizar ventas.');
@@ -204,9 +200,8 @@ router.put('/ventas/:id/deposito-krediya', authenticateToken, async (req, res) =
     const client = await pool.connect();
     try {
         const codVenta = req.params.id;
-        // SEGURIDAD: Obtener la caja actual del usuario directamente de la DB
         const userRes = await client.query('SELECT idCaja FROM usuarios WHERE codUsuario = $1', [req.user.codUsuario]);
-        const idCajaActual = userRes.rows[0]?.idCaja;
+        const idCajaActual = userRes.rows[0]?.idcaja;
 
         if (!idCajaActual) throw new Error('Usuario sin caja asignada');
 
