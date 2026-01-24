@@ -8,12 +8,60 @@ import {
 import Swal from 'sweetalert2';
 import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
+import { useAuth } from '../context/AuthContext';
 
 const COMPLEMENTOS_OPCIONES = [
     "Cargador", "Cobertor/Case", "Cable USB", "Memoria MicroSD", "Chip/SIM", "Batería", "Lápiz/Stylus"
 ];
 
+const numeroALetras = (num: number): string => {
+    const unidades = ['', 'UN', 'DOS', 'TRES', 'CUATRO', 'CINCO', 'SEIS', 'SIETE', 'OCHO', 'NUEVE'];
+    const decenas = ['', 'DIEZ', 'VEINTE', 'TREINTA', 'CUARENTA', 'CINCUENTA', 'SESENTA', 'SETENTA', 'OCHENTA', 'NOVENTA'];
+    const diez_veinte = ['DIEZ', 'ONCE', 'DOCE', 'TRECE', 'CATORCE', 'QUINCE', 'DIECISEIS', 'DIECISIETE', 'DIECIOCHO', 'DIECINUEVE'];
+    const centenas = ['', 'CIENTO', 'DOSCIENTOS', 'TRESCIENTOS', 'CUATROCIENTOS', 'QUINIENTOS', 'SEISCIENTOS', 'SETECIENTOS', 'OCHOCIENTOS', 'NOVECIENTOS'];
+
+    const convertGroup = (n: number): string => {
+        if (n === 0) return '';
+        if (n === 100) return 'CIEN';
+        let output = '';
+        if (n >= 100) { output += centenas[Math.floor(n / 100)] + ' '; n %= 100; }
+        if (n >= 10 && n <= 19) { output += diez_veinte[n - 10]; } 
+        else if (n >= 20) { 
+            output += decenas[Math.floor(n / 10)]; 
+            if (n % 10 > 0) output += ' Y ' + unidades[n % 10]; 
+        } 
+        else if (n > 0) { output += unidades[n]; }
+        return output.trim();
+    };
+
+    const integerPart = Math.floor(num);
+    const decimalPart = Math.round((num - integerPart) * 100);
+    let text = '';
+    if (integerPart === 0) text = 'CERO';
+    else if (integerPart >= 1000000) {
+        const millions = Math.floor(integerPart / 1000000);
+        const remainder = integerPart % 1000000;
+        text += (millions === 1 ? 'UN MILLON' : convertGroup(millions) + ' MILLONES');
+        if (remainder > 0) {
+            if (remainder >= 1000) {
+                text += ' ' + convertGroup(Math.floor(remainder / 1000)) + ' MIL ' + convertGroup(remainder % 1000);
+            } else {
+                text += ' ' + convertGroup(remainder);
+            }
+        }
+    } 
+    else if (integerPart >= 1000) {
+        const thousands = Math.floor(integerPart / 1000);
+        const remainder = integerPart % 1000;
+        text += (thousands === 1 ? 'MIL' : convertGroup(thousands) + ' MIL');
+        if (remainder > 0) text += ' ' + convertGroup(remainder);
+    } 
+    else { text = convertGroup(integerPart); }
+    return `${text} CON ${decimalPart.toString().padStart(2, '0')}/100 LEMPIRAS`.toUpperCase();
+};
+
 const Repairs: React.FC = () => {
+  const { user } = useAuth();
   const [repairs, setRepairs] = useState<Reparacion[]>([]);
   const [phones, setPhones] = useState<Telefono[]>([]);
   const [clients, setClients] = useState<Cliente[]>([]);
@@ -139,111 +187,184 @@ const Repairs: React.FC = () => {
   };
 
   const generatePDF = (r: Reparacion) => {
-      const doc = new jsPDF();
-      const cfg = companyConfig || {};
-      const LOGO_BASE64 = ""; // Si tienes el logo podrías inyectarlo aquí
+      try {
+          const doc = new jsPDF();
+          const LOGO_BASE64 = ""; // Pegar imagen base64 aquí
+          
+          const cfg = companyConfig || {};
+          const nombreEmpresa = (cfg.nombreempresa || cfg.nombreEmpresa || 'SMARTCLOUD ERP').toUpperCase();
+          const rtnEmpresa = cfg.rtn || 'N/A';
+          const direccionEmpresa = cfg.direccion || 'N/A';
+          const telefonoEmpresa = cfg.telefono || 'N/A';
+          const correoEmpresa = cfg.correo || 'N/A';
+          const caiEmpresa = cfg.cai || 'N/A';
+          const fechaLim = cfg.fechalimite ? new Date(cfg.fechalimite).toLocaleDateString('es-HN') : 'N/A';
 
-      const primaryColor = "#1e3a8a";
-      const secondaryColor = "#334155";
-      const pageWidth = doc.internal.pageSize.width;
+          const pageWidth = doc.internal.pageSize.width;
+          const pageHeight = doc.internal.pageSize.height;
+          
+          const primaryColor = "#1e3a8a";   
+          const accentColor = "#3b82f6";    
+          const grayColor = "#64748b";      
+          const lightGray = "#f1f5f9";      
 
-      // Diseño del Header (Igual que facturación)
-      doc.setFillColor(primaryColor);
-      doc.triangle(0, 0, pageWidth, 0, pageWidth, 40, 'F');
-      doc.setTextColor(255, 255, 255);
-      doc.setFontSize(22);
-      doc.setFont("helvetica", "bold");
-      doc.text("ORDEN DE SERVICIO", 15, 22);
-      doc.setFontSize(10);
-      doc.text(`ORDEN NO: RPR-${String(r.id_reparacion).padStart(5, '0')}`, 15, 30);
+          // 1. Header Geométrico (Mismo estilo que POS)
+          doc.setFillColor(primaryColor);
+          doc.triangle(0, 0, pageWidth, 0, pageWidth, 35, 'F');
+          doc.triangle(0, 0, pageWidth, 35, 0, 50, 'F');
+          doc.setFillColor(accentColor);
+          doc.triangle(0, 0, 100, 0, 0, 50, 'F');
 
-      // Info Empresa
-      doc.setFontSize(14);
-      doc.text((cfg.nombreEmpresa || "SMARTCLOUD ERP").toUpperCase(), pageWidth - 15, 18, { align: "right" });
-      doc.setFontSize(8);
-      doc.setFont("helvetica", "normal");
-      doc.text(cfg.direccion || "CHOLUTECA, HONDURAS", pageWidth - 15, 23, { align: "right" });
-      doc.text(`RTN: ${cfg.rtn || "N/A"} | TEL: ${cfg.telefono || "N/A"}`, pageWidth - 15, 27, { align: "right" });
+          // 2. Logo
+          if (LOGO_BASE64) {
+              doc.addImage(LOGO_BASE64, 'PNG', 15, 12, 18, 18);
+          }
 
-      // Cuerpo del Reporte
-      let y = 55;
-      doc.setTextColor(primaryColor);
-      doc.setFontSize(12);
-      doc.setFont("helvetica", "bold");
-      doc.text("INFORMACIÓN DEL CLIENTE", 15, y);
-      
-      doc.setTextColor(0);
-      doc.setFontSize(10);
-      doc.setFont("helvetica", "normal");
-      y += 8;
-      const cliente = clients.find(c => c.identidad === r.identidad_cliente);
-      doc.text(`Nombre: ${cliente ? `${cliente.nombre} ${cliente.apellido}` : r.nombre_cliente || 'Consumidor Final'}`, 15, y);
-      doc.text(`Identidad/RTN: ${r.identidad_cliente || 'N/A'}`, 110, y);
-      y += 6;
-      doc.text(`Teléfono: ${cliente?.telefono || 'N/A'}`, 15, y);
-      doc.text(`Fecha Ingreso: ${new Date(r.fecha_ingreso).toLocaleString()}`, 110, y);
+          // 3. Info Empresa
+          doc.setTextColor(255, 255, 255);
+          doc.setFont("helvetica", "bold");
+          doc.setFontSize(16);
+          doc.text(nombreEmpresa, 38, 18);
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(9);
+          doc.text(direccionEmpresa, 38, 25);
+          doc.text(`Tel: ${telefonoEmpresa} | ${correoEmpresa}`, 38, 30);
 
-      y += 15;
-      doc.setTextColor(primaryColor);
-      doc.setFont("helvetica", "bold");
-      doc.text("DATOS DEL DISPOSITIVO", 15, y);
-      
-      // @ts-ignore
-      doc.autoTable({
-          startY: y + 5,
-          head: [['MARCA', 'MODELO', 'IMEI / SERIE']],
-          body: [[r.marca?.toUpperCase(), r.modelo?.toUpperCase(), r.imei_equipo || 'N/A']],
-          theme: 'grid',
-          headStyles: { fillColor: [30, 58, 138] }
-      });
+          // 4. Título Orden de Servicio
+          doc.setFontSize(22);
+          doc.setFont("helvetica", "bold");
+          doc.text("ORDEN SERVICIO", pageWidth - 15, 20, { align: "right" });
+          doc.setFontSize(10);
+          doc.text(`NO. RPR-${String(r.id_reparacion).padStart(5, '0')}`, pageWidth - 15, 29, { align: "right" });
 
-      // @ts-ignore
-      y = doc.lastAutoTable.finalY + 12;
-      doc.setTextColor(primaryColor);
-      doc.setFont("helvetica", "bold");
-      doc.text("DIAGNÓSTICO Y COMPLEMENTOS", 15, y);
-      
-      // @ts-ignore
-      doc.autoTable({
-          startY: y + 5,
-          head: [['FALLA REPORTADA', 'ARTÍCULOS ADICIONALES DEJADOS']],
-          body: [[r.descripcion_falla?.toUpperCase(), r.complementos?.toUpperCase() || 'NINGUNO']],
-          theme: 'striped',
-          styles: { fontSize: 9 },
-          columnStyles: { 0: { cellWidth: 100 }, 1: { cellWidth: 80 } }
-      });
+          // 5. Bloque de Cliente
+          const topInfoY = 60;
+          doc.setFillColor(lightGray);
+          doc.roundedRect(14, topInfoY, 95, 38, 3, 3, 'F');
+          
+          doc.setTextColor(primaryColor);
+          doc.setFontSize(10);
+          doc.setFont("helvetica", "bold");
+          doc.text("DATOS DEL CLIENTE:", 18, topInfoY + 8);
+          
+          doc.setTextColor(0, 0, 0);
+          const cliente = clients.find(c => c.identidad === r.identidad_cliente);
+          doc.setFontSize(13);
+          doc.text(cliente ? `${cliente.nombre} ${cliente.apellido}`.toUpperCase() : (r.nombre_cliente || "CONSUMIDOR FINAL").toUpperCase(), 18, topInfoY + 18);
+          
+          doc.setFontSize(9);
+          doc.setFont("helvetica", "normal");
+          doc.setTextColor(grayColor);
+          doc.text(`RTN/DNI: ${r.identidad_cliente || "N/A"}`, 18, topInfoY + 26);
+          doc.text(`${cliente?.direccion || "CHOLUTECA, HONDURAS"}`, 18, topInfoY + 32);
 
-      // @ts-ignore
-      y = doc.lastAutoTable.finalY + 15;
-      doc.setFillColor(248, 250, 252);
-      doc.rect(130, y, 65, 25, 'F');
-      doc.setTextColor(secondaryColor);
-      doc.setFontSize(9);
-      doc.text("TOTAL ESTIMADO:", 135, y + 10);
-      doc.setTextColor(primaryColor);
-      doc.setFontSize(16);
-      doc.setFont("helvetica", "bold");
-      doc.text(`L. ${Number(r.precio_cliente).toFixed(2)}`, 135, y + 20);
+          // 6. Datos de Recepción
+          const rightColX = 120;
+          const metaY = topInfoY + 5;
+          const spacing = 6;
+          doc.setFontSize(9);
+          doc.setFont("helvetica", "bold");
+          doc.setTextColor(grayColor);
+          
+          const labels = ["FECHA INGRESO:", "ENTREGA ESTIMADA:", "ESTADO INICIAL:", "TÉCNICO:", "RTN EMISOR:"];
+          const values = [
+              new Date(r.fecha_ingreso).toLocaleString('es-HN'),
+              r.fecha_entrega_estimada ? new Date(r.fecha_entrega_estimada).toLocaleDateString('es-HN') : 'N/A',
+              r.estado_reparacion.toUpperCase(),
+              r.nombre_tecnico.toUpperCase(),
+              rtnEmpresa
+          ];
 
-      // Términos Legales
-      y += 40;
-      doc.setTextColor(secondaryColor);
-      doc.setFontSize(8);
-      doc.setFont("helvetica", "bold");
-      doc.text("TÉRMINOS Y CONDICIONES DEL SERVICIO:", 15, y);
-      doc.setFont("helvetica", "normal");
-      doc.text("1. El taller no se hace responsable por pérdida de datos. Realice su respaldo.", 15, y + 5);
-      doc.text("2. Todo equipo abandonado por más de 30 días será propiedad de la empresa.", 15, y + 10);
-      doc.text("3. La garantía solo cubre la falla descrita en este documento.", 15, y + 15);
+          labels.forEach((label, i) => {
+              doc.text(label, rightColX, metaY + (i * spacing));
+              doc.setTextColor(0, 0, 0);
+              doc.text(String(values[i]), rightColX + 40, metaY + (i * spacing));
+              doc.setTextColor(grayColor);
+          });
 
-      // Firmas
-      y += 40;
-      doc.line(15, y, 75, y);
-      doc.text("Firma Cliente", 35, y + 5);
-      doc.line(120, y, 180, y);
-      doc.text("Recibido por", 140, y + 5);
+          // 7. Datos del Equipo
+          doc.setTextColor(primaryColor);
+          doc.setFontSize(11);
+          doc.setFont("helvetica", "bold");
+          doc.text("ESPECIFICACIONES DEL DISPOSITIVO:", 14, topInfoY + 50);
 
-      doc.save(`Orden_${r.id_reparacion}.pdf`);
+          // @ts-ignore
+          doc.autoTable({
+              startY: topInfoY + 55,
+              head: [['MARCA', 'MODELO', 'IMEI / NÚMERO DE SERIE']],
+              body: [[r.marca.toUpperCase(), r.modelo.toUpperCase(), r.imei_equipo || 'N/A']],
+              theme: 'grid',
+              headStyles: { fillColor: [30, 58, 138], halign: 'center' },
+              styles: { fontSize: 10, halign: 'center' }
+          });
+
+          // 8. Falla y Accesorios
+          // @ts-ignore
+          let tableY = doc.lastAutoTable.finalY + 10;
+          doc.setTextColor(primaryColor);
+          doc.setFontSize(11);
+          doc.setFont("helvetica", "bold");
+          doc.text("DIAGNÓSTICO Y COMPLEMENTOS:", 14, tableY);
+
+          // @ts-ignore
+          doc.autoTable({
+              startY: tableY + 5,
+              head: [['FALLA REPORTADA POR CLIENTE', 'ACCESORIOS / ARTÍCULOS RECIBIDOS']],
+              body: [[r.descripcion_falla.toUpperCase(), r.complementos?.toUpperCase() || 'NINGUNO']],
+              theme: 'striped',
+              headStyles: { fillColor: [59, 130, 246] },
+              styles: { fontSize: 9 },
+              columnStyles: { 0: { cellWidth: 100 }, 1: { cellWidth: 82 } }
+          });
+
+          // 9. Total Estimado (Mismo diseño que POS)
+          // @ts-ignore
+          let finalY = doc.lastAutoTable.finalY + 15;
+          const totalsX = 135;
+          
+          doc.setFillColor(lightGray);
+          doc.roundedRect(totalsX - 5, finalY - 5, 65, 25, 3, 3, 'F');
+          
+          doc.setFontSize(10);
+          doc.setTextColor(grayColor);
+          doc.setFont("helvetica", "normal");
+          doc.text("TOTAL ESTIMADO:", totalsX, finalY + 5);
+          
+          doc.setFont("helvetica", "bold"); 
+          doc.setTextColor(primaryColor);
+          doc.setFontSize(16);
+          doc.text(`L. ${Number(r.precio_cliente).toFixed(2)}`, totalsX, finalY + 15);
+
+          // Letras
+          doc.setTextColor(grayColor);
+          doc.setFontSize(9);
+          doc.text("SON: " + numeroALetras(r.precio_cliente), 14, finalY + 25);
+
+          // 10. Términos Legales
+          let footerY = pageHeight - 55;
+          doc.setFontSize(8);
+          doc.setTextColor(grayColor);
+          doc.setFont("helvetica", "bold");
+          doc.text("TÉRMINOS Y CONDICIONES DEL SERVICIO:", 14, footerY);
+          doc.setFont("helvetica", "normal");
+          doc.text("1. El taller NO se hace responsable por pérdida de información. Realice su respaldo.", 14, footerY + 5);
+          doc.text("2. Todo equipo abandonado por más de 30 días calendario pasará a ser propiedad de la empresa.", 14, footerY + 10);
+          doc.text("3. La garantía es válida únicamente por la falla descrita en este documento.", 14, footerY + 15);
+
+          // Firmas
+          footerY += 30;
+          doc.setDrawColor(grayColor);
+          doc.line(20, footerY, 85, footerY);
+          doc.text("Firma de Aceptación Cliente", 30, footerY + 5);
+
+          doc.line(pageWidth - 85, footerY, pageWidth - 20, footerY);
+          doc.text("Recibido por (Firma y Sello)", pageWidth - 75, footerY + 5);
+
+          doc.save(`Orden_Reparacion_${r.id_reparacion}.pdf`);
+      } catch (err) {
+          console.error(err);
+          Swal.fire('Error PDF', 'No se pudo generar la orden de servicio.', 'error');
+      }
   };
 
   const updateStatus = async (id: number, currentStatus: string) => {
@@ -272,29 +393,29 @@ const Repairs: React.FC = () => {
 
   return (
     <div className="space-y-6 animate-fade-in h-full flex flex-col pb-10">
-        <div className="flex flex-col md:flex-row justify-between items-end gap-4">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
             <div>
                 <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2"><Wrench className="text-indigo-600"/> Servicio Técnico Especializado</h2>
                 <p className="text-slate-500 text-sm">Control integral de reparaciones, garantías y técnicos.</p>
             </div>
-            <button onClick={openNew} className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-xl flex items-center gap-2 font-bold shadow-lg shadow-indigo-600/20 transition-all active:scale-95">
+            <button onClick={openNew} className="w-full md:w-auto bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-3 rounded-xl flex items-center justify-center gap-2 font-bold shadow-lg shadow-indigo-600/20 transition-all active:scale-95">
                 <PlusCircle size={20}/> Nueva Reparación
             </button>
         </div>
 
-        <div className="bg-white rounded-3xl shadow-sm border border-slate-200 flex-1 overflow-hidden flex flex-col">
-            <div className="p-4 border-b bg-slate-50/50 flex gap-4">
-                <div className="relative flex-1 max-w-md">
+        <div className="bg-white rounded-2xl md:rounded-3xl shadow-sm border border-slate-200 flex-1 overflow-hidden flex flex-col">
+            <div className="p-4 border-b bg-slate-50/50 flex flex-col md:flex-row gap-4">
+                <div className="relative flex-1">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                     <input type="text" placeholder="Buscar por equipo, técnico o IMEI..." className="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500/20" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
                 </div>
-                <button onClick={loadData} className="p-2.5 text-slate-500 hover:bg-white rounded-xl border border-transparent hover:border-slate-200 shadow-sm transition-all">
+                <button onClick={loadData} className="w-full md:w-auto p-2.5 text-slate-500 hover:bg-white rounded-xl border border-transparent hover:border-slate-200 shadow-sm transition-all flex items-center justify-center">
                     <RefreshCw size={20} className={loading ? "animate-spin" : ""} />
                 </button>
             </div>
 
             <div className="flex-1 overflow-auto custom-scrollbar">
-                <table className="w-full text-left">
+                <table className="w-full text-left min-w-[700px]">
                     <thead className="bg-slate-50 text-[10px] font-black text-slate-400 uppercase sticky top-0 z-10 tracking-widest border-b">
                         <tr>
                             <th className="p-4">Dispositivo</th>
@@ -309,10 +430,10 @@ const Repairs: React.FC = () => {
                         {filtered.length === 0 ? (
                             <tr><td colSpan={6} className="p-10 text-center text-slate-400 italic">No hay órdenes registradas.</td></tr>
                         ) : filtered.map(r => (
-                            <tr key={r.id_reparacion} className="hover:bg-slate-50/50 transition-colors group">
+                            <tr key={r.id_reparacion} className="hover:bg-slate-50/50 transition-colors">
                                 <td className="p-4">
                                     <div className="flex items-center gap-3">
-                                        <div className="bg-slate-100 p-2.5 rounded-2xl text-slate-500 group-hover:bg-indigo-50 group-hover:text-indigo-600 transition-colors"><Smartphone size={20}/></div>
+                                        <div className="bg-slate-100 p-2.5 rounded-2xl text-slate-500"><Smartphone size={20}/></div>
                                         <div>
                                             <p className="font-bold text-slate-800 text-sm">{r.marca} {r.modelo}</p>
                                             <p className="text-[10px] font-mono text-slate-400 uppercase">{r.imei_equipo || 'SIN IMEI'}</p>
@@ -338,7 +459,7 @@ const Repairs: React.FC = () => {
                                     )}
                                 </td>
                                 <td className="p-4 text-right">
-                                    <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <div className="flex justify-end gap-1 transition-opacity">
                                         <button onClick={() => generatePDF(r)} className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg" title="Imprimir Comprobante"><Printer size={16}/></button>
                                         <button onClick={() => openEdit(r)} className="p-2 text-blue-500 hover:bg-blue-50 rounded-lg" title="Editar"><Edit2 size={16}/></button>
                                         <button onClick={() => handleDelete(r.id_reparacion)} className="p-2 text-red-400 hover:bg-red-50 rounded-lg" title="Eliminar"><Trash2 size={16}/></button>
@@ -352,19 +473,19 @@ const Repairs: React.FC = () => {
         </div>
 
         {showModal && (
-            <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-md z-50 flex items-center justify-center p-4">
-                <div className="bg-white rounded-[2rem] w-full max-w-2xl shadow-2xl overflow-hidden animate-fade-in flex flex-col max-h-[90vh]">
-                    <div className="p-6 border-b flex justify-between items-center bg-white">
+            <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-md z-50 flex items-center justify-center p-2 md:p-4">
+                <div className="bg-white rounded-3xl w-full max-w-2xl shadow-2xl overflow-hidden animate-fade-in flex flex-col h-[90vh]">
+                    <div className="p-5 md:p-6 border-b flex justify-between items-center bg-white">
                         <div className="flex items-center gap-3">
                             <div className="bg-indigo-600 p-2 rounded-xl text-white"><Wrench size={24}/></div>
                             <div>
-                                <h3 className="text-xl font-bold">{isEditing ? 'Actualizar Reparación' : 'Nueva Orden de Servicio'}</h3>
-                                <p className="text-xs text-slate-400 font-bold uppercase tracking-widest">Servicio Técnico SmartCloud</p>
+                                <h3 className="text-lg md:text-xl font-bold">{isEditing ? 'Actualizar Reparación' : 'Nueva Orden de Servicio'}</h3>
+                                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Servicio Técnico SmartCloud</p>
                             </div>
                         </div>
                         <button onClick={() => setShowModal(false)} className="text-slate-400 hover:text-red-500 transition-colors p-2 hover:bg-red-50 rounded-full"><X/></button>
                     </div>
-                    <form onSubmit={handleSubmit} className="p-8 space-y-6 overflow-y-auto custom-scrollbar bg-slate-50/30">
+                    <form onSubmit={handleSubmit} className="p-5 md:p-8 space-y-6 overflow-y-auto custom-scrollbar bg-slate-50/30">
                         {/* SECCIÓN CLIENTE */}
                         <div className="space-y-4">
                             <h4 className="text-[10px] font-black text-indigo-600 uppercase tracking-[0.2em] flex items-center gap-2"><User size={14}/> Propietario</h4>
@@ -377,7 +498,7 @@ const Repairs: React.FC = () => {
                         {/* SECCIÓN DISPOSITIVO */}
                         <div className="space-y-4 pt-4 border-t border-slate-100">
                             <h4 className="text-[10px] font-black text-indigo-600 uppercase tracking-[0.2em] flex items-center gap-2"><Smartphone size={14}/> Dispositivo</h4>
-                            <div className="grid grid-cols-2 gap-4">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div>
                                     <label className="text-[10px] font-black text-slate-400 uppercase mb-1 block ml-1">Marca</label>
                                     <input required list="brands-repair" className="w-full p-3 bg-white border border-slate-200 rounded-2xl text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-500/20" value={form.marca || ''} onChange={e => setForm({...form, marca: e.target.value, modelo: ''})} placeholder="Ej: Samsung" />
