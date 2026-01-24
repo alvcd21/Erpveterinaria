@@ -278,6 +278,7 @@ const ReturnsWarranties: React.FC = () => {
           doc.text("DATOS DEL CLIENTE:", 18, topY + 8);
           doc.setFont("helvetica", "normal");
           
+          // MAPEO SEGURO DE DATOS
           doc.text(`Nombre: ${(g.nombre_cliente || 'CONSUMIDOR FINAL').toUpperCase()}`, 18, topY + 16);
           doc.text(`Identidad: ${g.identidad_cliente || 'N/A'}`, 18, topY + 22);
           doc.text(`Fecha Ingreso: ${new Date(g.fecha_ingreso).toLocaleString('es-HN')}`, 18, topY + 28);
@@ -285,11 +286,18 @@ const ReturnsWarranties: React.FC = () => {
           doc.text(`Factura Origen: ${g.cod_venta || 'N/A'}`, 120, topY + 16);
           doc.text(`Estado Actual: ${(g.estado_garantia || 'PENDIENTE').toUpperCase()}`, 120, topY + 22);
 
+          // Obtener nombre del dispositivo buscando marca/modelo
+          let nombreDispositivo = g.id_producto_original;
+          if (g.tipo_producto === 'TELEFONO') {
+              const prodInfo = products.find(p => p.id === g.id_producto_original);
+              if (prodInfo) nombreDispositivo = `${prodInfo.marca} ${prodInfo.nombre}`;
+          }
+
           // @ts-ignore
           doc.autoTable({
               startY: topY + 45,
               head: [['EQUIPO EN RECLAMO', 'FALLA REPORTADA']],
-              body: [[`${g.tipo_producto}: ${g.id_producto_original}`.toUpperCase(), (g.falla_reportada || 'N/A').toUpperCase()]],
+              body: [[`${g.tipo_producto}: ${nombreDispositivo}`.toUpperCase(), (g.falla_reportada || 'N/A').toUpperCase()]],
               theme: 'grid',
               headStyles: { fillColor: [30, 58, 138] }
           });
@@ -379,8 +387,8 @@ const ReturnsWarranties: React.FC = () => {
                                     <div className="flex items-center gap-3">
                                         <div className="bg-slate-100 p-2 rounded-xl text-slate-500"><Smartphone size={18}/></div>
                                         <div>
-                                            <p className="text-xs font-bold text-slate-700">{g.id_producto_original}</p>
-                                            <p className="text-[9px] text-slate-400 uppercase font-black">{g.tipo_producto}</p>
+                                            <p className="text-xs font-bold text-slate-700">{g.dispositivo_nombre || g.id_producto_original}</p>
+                                            <p className="text-[9px] text-slate-400 uppercase font-black">{g.tipo_producto}: {g.id_producto_original}</p>
                                         </div>
                                     </div>
                                 </td>

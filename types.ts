@@ -1,4 +1,5 @@
 
+
 export type EstadoGeneral = 'Activo' | 'Inactivo' | 'Disponible' | 'Vendido' | 'Completada' | 'Anulada' | 'Cerrada' | 'Registrado' | 'Garantia' | 'Defectuoso';
 
 // Clasificación unificada para compatibilidad con DB
@@ -226,6 +227,8 @@ export interface Garantia {
   observaciones?: string;
   identidad_cliente: string;
   nombre_cliente?: string;
+  // Fix: Added dispositivo_nombre to match backend response
+  dispositivo_nombre?: string;
 }
 
 export interface Consignacion {

@@ -95,9 +95,11 @@ router.get('/garantias', authenticateToken, async (req, res) => {
                 g.precio_venta_original, 
                 g.observaciones, 
                 g.identidad_cliente,
-                COALESCE(c.nombre || ' ' || c.apellido, 'CONSUMIDOR FINAL') as "nombre_cliente"
+                COALESCE(c.nombre || ' ' || c.apellido, 'CONSUMIDOR FINAL') as "nombre_cliente",
+                COALESCE(t.marca || ' ' || t.modelo, 'ACCESORIO') as "dispositivo_nombre"
             FROM garantias g
             LEFT JOIN clientes c ON g.identidad_cliente = c.identidad
+            LEFT JOIN telefonos t ON g.id_producto_original = t.codigo AND g.tipo_producto = 'TELEFONO'
             ORDER BY g.fecha_ingreso DESC
         `;
         const result = await pool.query(query);
@@ -143,17 +145,22 @@ router.post('/garantias/:id/exchange', authenticateToken, async (req, res) => {
         const gRes = await client.query("SELECT * FROM garantias WHERE id_garantia = $1", [idGarantia]);
         const g = gRes.rows[0];
 
+        // Obtener info del nuevo producto para las observaciones
+        let nombreNuevoProd = idNuevoProducto;
+        if (tipoNuevo === 'TELEFONO') {
+            const tRes = await client.query("SELECT marca, modelo FROM telefonos WHERE codigo = $1", [idNuevoProducto]);
+            if (tRes.rows.length > 0) nombreNuevoProd = `${tRes.rows[0].marca} ${tRes.rows[0].modelo}`;
+            await client.query("UPDATE telefonos SET estado = 'Vendido' WHERE codigo = $1", [idNuevoProducto]);
+        } else {
+            const aRes = await client.query("SELECT a.descripcion FROM inventario i JOIN accesorios a ON i.codAccesorio = a.codAccesorio WHERE i.codInventario = $1", [idNuevoProducto]);
+            if (aRes.rows.length > 0) nombreNuevoProd = aRes.rows[0].descripcion;
+            await client.query("UPDATE inventario SET cantidad = cantidad - 1 WHERE codInventario = $1", [idNuevoProducto]);
+        }
+
         if (g.tipo_producto === 'TELEFONO') {
             await client.query("UPDATE telefonos SET estado = $1 WHERE codigo = $2", [estadoRetorno, g.id_producto_original]);
         }
 
-        if (tipoNuevo === 'TELEFONO') {
-            await client.query("UPDATE telefonos SET estado = 'Vendido' WHERE codigo = $1", [idNuevoProducto]);
-        } else {
-            await client.query("UPDATE inventario SET cantidad = cantidad - 1 WHERE codInventario = $1", [idNuevoProducto]);
-        }
-
-        // SOLUCIÓN AL ERROR ENUM: Usamos 'Venta' y 'Gasto Operativo' si falla el enum específico
         if (utilidadDiferencia > 0) {
             const idI = await generateNextId('ingresos', 'idIngreso', 'INGR', client);
             await client.query(
@@ -172,7 +179,7 @@ router.post('/garantias/:id/exchange', authenticateToken, async (req, res) => {
 
         await client.query(
             "UPDATE garantias SET estado_garantia = 'Cambiado', fecha_resolucion = $1, observaciones = $2 WHERE id_garantia = $3",
-            [hndTime, `CAMBIO POR: ${idNuevoProducto}. EL ANTERIOR QUEDÓ: ${estadoRetorno}`, idGarantia]
+            [hndTime, `CAMBIO POR: ${nombreNuevoProd} (${idNuevoProducto}). EL ANTERIOR QUEDÓ: ${estadoRetorno}`, idGarantia]
         );
 
         await updateArqueoBalance(idCaja, client);
@@ -188,7 +195,7 @@ router.delete('/garantias/:id', authenticateToken, async (req, res) => {
     } catch(e) { handleDbError(res, e); }
 });
 
-// --- CONSIGNACIONES (RESTAURADO) ---
+// --- CONSIGNACIONES ---
 router.get('/consignaciones', authenticateToken, async (req, res) => {
     try {
         const query = `
@@ -196,11 +203,13 @@ router.get('/consignaciones', authenticateToken, async (req, res) => {
                 c.id_consignacion, c.id_producto, c.tipo_producto, c.negocio_destino, 
                 c.cantidad_prestada, c.precio_especial_pago, c.estado_consignacion, 
                 c.fecha_salida, c.fecha_limite,
-                COALESCE(t.marca || ' ' || t.modelo, a.descripcion) as "nombre_producto",
-                COALESCE(t.codigo, a.codAccesorio) as "codigo_referencia"
+                CASE 
+                    WHEN c.tipo_producto = 'TELEFONO' THEN (SELECT t.marca || ' ' || t.modelo FROM telefonos t WHERE t.codigo = c.id_producto)
+                    WHEN c.tipo_producto = 'ACCESORIO' THEN (SELECT a.descripcion FROM inventario i JOIN accesorios a ON i.codAccesorio = a.codAccesorio WHERE i.codInventario = c.id_producto)
+                    ELSE 'PRODUCTO DESCONOCIDO'
+                END as "nombre_producto",
+                c.id_producto as "codigo_referencia"
             FROM consignaciones c
-            LEFT JOIN telefonos t ON c.id_producto = t.codigo AND c.tipo_producto = 'TELEFONO'
-            LEFT JOIN accesorios a ON c.id_producto = a.codAccesorio AND c.tipo_producto = 'ACCESORIO'
             ORDER BY c.fecha_salida DESC
         `;
         const result = await pool.query(query);
@@ -249,18 +258,20 @@ router.put('/consignaciones/:id/liquidar', authenticateToken, async (req, res) =
         const hndTime = getLocalTimestamp();
         await client.query('BEGIN');
         const cRes = await client.query(`
-            SELECT c.*, COALESCE(t.marca || ' ' || t.modelo, a.descripcion) as nombre_prod
+            SELECT c.*, 
+            CASE 
+                WHEN c.tipo_producto = 'TELEFONO' THEN (SELECT t.marca || ' ' || t.modelo FROM telefonos t WHERE t.codigo = c.id_producto)
+                ELSE (SELECT a.descripcion FROM inventario i JOIN accesorios a ON i.codAccesorio = a.codAccesorio WHERE i.codInventario = c.id_producto)
+            END as nombre_prod
             FROM consignaciones c
-            LEFT JOIN telefonos t ON c.id_producto = t.codigo AND c.tipo_producto = 'TELEFONO'
-            LEFT JOIN accesorios a ON c.id_producto = a.codAccesorio AND c.tipo_producto = 'ACCESORIO'
             WHERE id_consignacion = $1
         `, [req.params.id]);
         const c = cRes.rows[0];
         const idI = await generateNextId('ingresos', 'idIngreso', 'INGR', client);
         await client.query(
             `INSERT INTO ingresos (idIngreso, idCaja, descripcion, monto, costo, subtipo_movimiento, fechaCreacion, estado)
-             VALUES ($1, $2, $3, $4, 0, 'Cobro Consignacion', $5, 'Completada')`,
-            [idI, idCaja, `LIQUIDACIÓN: ${c.nombre_prod} (${c.negocio_destino})`, c.precio_especial_pago * c.cantidad_prestada, hndTime]
+             VALUES ($1, $2, $3, $4, 0, 'Venta', $5, 'Completada')`,
+            [idI, idCaja, `LIQUIDACIÓN CONSIGNACIÓN: ${c.nombre_prod} (${c.negocio_destino})`, c.precio_especial_pago * c.cantidad_prestada, hndTime]
         );
         await client.query("UPDATE consignaciones SET estado_consignacion = 'Vendido_Pagado' WHERE id_consignacion = $1", [req.params.id]);
         if (c.tipo_producto === 'TELEFONO') {
