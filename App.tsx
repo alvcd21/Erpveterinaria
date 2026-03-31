@@ -4,6 +4,7 @@ import React from 'react';
 import * as ReactRouterDOM from 'react-router-dom';
 const { HashRouter, Routes, Route, Navigate } = ReactRouterDOM as any;
 import { AuthProvider } from './context/AuthContext';
+import OfflineBanner from './components/OfflineBanner';
 import ProtectedRoute from './components/ProtectedRoute';
 import Layout from './components/Layout';
 import Dashboard from './pages/Dashboard';
@@ -29,6 +30,7 @@ import ReturnsWarranties from './pages/ReturnsWarranties';
 const App: React.FC = () => {
   return (
     <AuthProvider>
+      <OfflineBanner />
       <HashRouter>
         <Routes>
           <Route path="/login" element={<Login />} />
