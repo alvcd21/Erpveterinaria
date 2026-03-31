@@ -39,6 +39,7 @@
     "node": ">=18.0.0"
   },
   "devDependencies": {
+    "jimp": "^1.6.0",
     "vite-plugin-pwa": "^1.2.0"
   }
 }

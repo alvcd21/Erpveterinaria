@@ -1,6 +1,10 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
+import { preloadLogo } from './services/logoLoader';
+
+// Precarga el logo al iniciar para que este disponible en la generacion de PDFs
+preloadLogo();
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {

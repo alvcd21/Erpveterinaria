@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { CashService, SalesService, PackagesService, ConfigService, AccountingService } from '../services/api';
+import { getLogoSync } from '../services/logoLoader';
 import { Arqueo, Ingreso, Egreso, Venta, Saldo, Paquete, EmpresaConfig, SubtipoIngreso, SubtipoEgreso, Socio } from '../types';
 import { 
   Lock, PlusCircle, Smartphone, Ban, ShoppingCart, ArrowDownCircle, ArrowUpCircle, Wallet, Edit2, Trash2, X, CloudLightning, FileText, Printer, UserCheck, RefreshCw, Package, CheckCircle
@@ -193,7 +194,7 @@ const CashRegister: React.FC = () => {
               ConfigService.get()
           ]);
           if (!sale) return;
-          const LOGO_BASE64 = ""; 
+          const LOGO_BASE64 = getLogoSync();
           const doc = new jsPDF();
           const nombreEmpresa = (cfg.nombreEmpresa || 'SMARTCLOUD ERP').toUpperCase();
           const rtnEmpresa = cfg.rtn || 'N/A';

@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { WarrantyService, SalesService, InventoryService, ClientService, ConfigService } from '../services/api';
+import { getLogoSync } from '../services/logoLoader';
 import { Garantia, Venta, ProductoUnified, DetalleVenta, Cliente } from '../types';
 import { 
   ShieldCheck, Search, PlusCircle, Clock, CheckCircle, RefreshCcw, X, Save, 
@@ -233,7 +234,7 @@ const ReturnsWarranties: React.FC = () => {
   const generateWarrantyPDF = (g: Garantia) => {
       try {
           const doc = new jsPDF();
-          const LOGO_BASE64 = ""; 
+          const LOGO_BASE64 = getLogoSync();
           const cfg = companyConfig || {};
           const nombreEmpresa = (cfg.nombreempresa || cfg.nombreEmpresa || 'SMARTCLOUD ERP').toUpperCase();
           const rtnEmpresa = cfg.rtn || 'N/A';

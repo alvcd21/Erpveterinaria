@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { RepairService, InventoryService, ClientService, ConfigService } from '../services/api';
+import { getLogoSync } from '../services/logoLoader';
 import { Reparacion, Telefono, Cliente } from '../types';
 import { 
   Wrench, PlusCircle, Search, Clock, CheckCircle, Package, DollarSign, User, Smartphone, X, Save, RefreshCw, AlertCircle, FileText, Trash2, Edit2, Printer, Check, Info, ShoppingCart
@@ -189,8 +190,7 @@ const Repairs: React.FC = () => {
   const generatePDF = (r: Reparacion) => {
       try {
           const doc = new jsPDF();
-          // ESPACIO PARA LOGO BASE64
-          const LOGO_BASE64 = ""; 
+          const LOGO_BASE64 = getLogoSync();
           
           const cfg = companyConfig || {};
           const nombreEmpresa = (cfg.nombreempresa || cfg.nombreEmpresa || 'SMARTCLOUD ERP').toUpperCase();

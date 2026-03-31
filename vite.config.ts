@@ -7,13 +7,21 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['icons/icon-192.png', 'icons/icon-512.png'],
+      includeAssets: [
+        'icons/icon-192.png',
+        'icons/icon-512.png',
+        'icons/icon-maskable-192.png',
+        'icons/icon-maskable-512.png',
+        'apple-touch-icon.png',
+        'favicon-32.png',
+        'favicon-16.png'
+      ],
       manifest: {
         name: 'SmartCloud ERP',
         short_name: 'SmartCloud',
         description: 'Sistema ERP para gestion de tiendas de telefonia movil',
         theme_color: '#4f46e5',
-        background_color: '#ffffff',
+        background_color: '#4f46e5',
         display: 'standalone',
         scope: '/',
         start_url: '/',
@@ -22,13 +30,26 @@ export default defineConfig({
           {
             src: 'icons/icon-192.png',
             sizes: '192x192',
-            type: 'image/png'
+            type: 'image/png',
+            purpose: 'any'
           },
           {
             src: 'icons/icon-512.png',
             sizes: '512x512',
             type: 'image/png',
-            purpose: 'any maskable'
+            purpose: 'any'
+          },
+          {
+            src: 'icons/icon-maskable-192.png',
+            sizes: '192x192',
+            type: 'image/png',
+            purpose: 'maskable'
+          },
+          {
+            src: 'icons/icon-maskable-512.png',
+            sizes: '512x512',
+            type: 'image/png',
+            purpose: 'maskable'
           }
         ]
       },
