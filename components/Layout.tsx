@@ -4,8 +4,9 @@ import React, { useState } from 'react';
 import * as ReactRouterDOM from 'react-router-dom';
 const { Link, useLocation, useNavigate } = ReactRouterDOM as any;
 import { useAuth } from '../context/AuthContext';
-import { 
-  LayoutDashboard, ShoppingCart, Users, DollarSign, FileText, LogOut, Menu, X, Bell, CloudLightning, ShieldCheck, Truck, ChevronDown, ChevronRight, Package, Briefcase, Box, UserCog, Calculator, Smartphone, Activity, Tag, Settings, PieChart, Wrench, Hand, ShieldAlert
+import { AuthService } from '../services/api';
+import {
+  LayoutDashboard, ShoppingCart, Users, DollarSign, FileText, LogOut, Menu, X, Bell, CloudLightning, ShieldCheck, Truck, ChevronDown, ChevronRight, Package, Briefcase, Box, UserCog, Calculator, Smartphone, Activity, Tag, Settings, PieChart, Wrench, Hand, ShieldAlert, KeyRound, Eye, EyeOff
 } from 'lucide-react';
 
 interface LayoutProps {
@@ -22,10 +23,34 @@ interface NavItem {
 
 const Layout: React.FC<LayoutProps> = ({ children }) => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [expandedMenus, setExpandedMenus] = useState<string[]>(['Comercial', 'Logística', 'Finanzas', 'Administración']); 
-  const { user, logout, hasPermission } = useAuth();
+  const [expandedMenus, setExpandedMenus] = useState<string[]>(['Comercial', 'Logística', 'Finanzas', 'Administración']);
+  const [showChangePwd, setShowChangePwd] = useState(false);
+  const [pwdForm, setPwdForm] = useState({ current: '', next: '', confirm: '' });
+  const [pwdError, setPwdError] = useState('');
+  const [pwdLoading, setPwdLoading] = useState(false);
+  const [showCurrent, setShowCurrent] = useState(false);
+  const [showNext, setShowNext] = useState(false);
+  const { user, logout, hasPermission, clearPasswordChangeFlag } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
+
+  const handleChangePwd = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPwdError('');
+    if (pwdForm.next !== pwdForm.confirm) { setPwdError('Las contraseñas nuevas no coinciden'); return; }
+    if (pwdForm.next.length < 6) { setPwdError('La contraseña debe tener al menos 6 caracteres'); return; }
+    setPwdLoading(true);
+    try {
+      await AuthService.changePassword(pwdForm.current, pwdForm.next);
+      clearPasswordChangeFlag();
+      setShowChangePwd(false);
+      setPwdForm({ current: '', next: '', confirm: '' });
+    } catch (err: any) {
+      setPwdError(err.message || 'Error al cambiar contraseña');
+    } finally {
+      setPwdLoading(false);
+    }
+  };
 
   const handleLogout = () => {
     logout();
@@ -203,7 +228,14 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
               <p className="text-xs text-slate-400 truncate">{user?.rol || 'Sin Rol'}</p>
             </div>
           </div>
-          <button 
+          <button
+            onClick={() => { setPwdForm({ current: '', next: '', confirm: '' }); setPwdError(''); setShowChangePwd(true); }}
+            className="flex items-center justify-center gap-2 w-full px-4 py-2 mb-2 text-slate-300 hover:text-white hover:bg-indigo-500/10 hover:text-indigo-400 rounded-lg transition-colors text-xs font-medium border border-transparent hover:border-indigo-500/20"
+          >
+            <KeyRound size={16} />
+            <span>Cambiar Contraseña</span>
+          </button>
+          <button
             onClick={handleLogout}
             className="flex items-center justify-center gap-2 w-full px-4 py-2 text-slate-300 hover:text-white hover:bg-red-500/10 hover:text-red-400 rounded-lg transition-colors text-xs font-medium border border-transparent hover:border-red-500/20"
           >
@@ -277,10 +309,82 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                         <p className="text-xs">{user?.rol}</p>
                     </div>
                 </div>
+                <button onClick={() => { setIsMobileMenuOpen(false); setPwdForm({ current: '', next: '', confirm: '' }); setPwdError(''); setShowChangePwd(true); }} className="w-full py-2.5 mb-2 bg-indigo-600/10 text-indigo-400 rounded-lg text-sm font-bold flex items-center justify-center gap-2">
+                    <KeyRound size={16}/> Cambiar Contraseña
+                </button>
                 <button onClick={handleLogout} className="w-full py-3 bg-red-600/10 text-red-400 rounded-lg text-sm font-bold flex items-center justify-center gap-2">
                     <LogOut size={16}/> Salir
                 </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {showChangePwd && (
+        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl p-6 animate-fade-in">
+            <div className="flex justify-between items-center mb-5 border-b border-slate-100 pb-4">
+              <div className="flex items-center gap-2">
+                <KeyRound className="text-indigo-500" size={22} />
+                <h3 className="text-lg font-bold text-slate-800">Cambiar Contraseña</h3>
+              </div>
+              <button onClick={() => setShowChangePwd(false)} className="text-slate-400 hover:text-red-500 transition-colors"><X size={22}/></button>
+            </div>
+            <form onSubmit={handleChangePwd} className="space-y-4">
+              <div>
+                <label className="text-xs font-bold text-slate-500 uppercase">Contraseña Actual</label>
+                <div className="relative mt-1">
+                  <input
+                    type={showCurrent ? 'text' : 'password'}
+                    required
+                    className="w-full p-3 pr-10 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none"
+                    value={pwdForm.current}
+                    onChange={e => setPwdForm({...pwdForm, current: e.target.value})}
+                    placeholder="Contraseña actual"
+                  />
+                  <button type="button" onClick={() => setShowCurrent(v => !v)} className="absolute right-3 top-3.5 text-slate-400 hover:text-slate-600">
+                    {showCurrent ? <EyeOff size={16}/> : <Eye size={16}/>}
+                  </button>
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-500 uppercase">Nueva Contraseña</label>
+                <div className="relative mt-1">
+                  <input
+                    type={showNext ? 'text' : 'password'}
+                    required
+                    className="w-full p-3 pr-10 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none"
+                    value={pwdForm.next}
+                    onChange={e => setPwdForm({...pwdForm, next: e.target.value})}
+                    placeholder="Mínimo 6 caracteres"
+                  />
+                  <button type="button" onClick={() => setShowNext(v => !v)} className="absolute right-3 top-3.5 text-slate-400 hover:text-slate-600">
+                    {showNext ? <EyeOff size={16}/> : <Eye size={16}/>}
+                  </button>
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-500 uppercase">Confirmar Contraseña</label>
+                <input
+                  type="password"
+                  required
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl mt-1 focus:ring-2 focus:ring-indigo-500 outline-none"
+                  value={pwdForm.confirm}
+                  onChange={e => setPwdForm({...pwdForm, confirm: e.target.value})}
+                  placeholder="Repetir contraseña"
+                />
+              </div>
+              {pwdError && <p className="text-xs text-red-500 bg-red-50 px-3 py-2 rounded-lg">{pwdError}</p>}
+              <div className="flex gap-3 pt-2">
+                <button type="button" onClick={() => setShowChangePwd(false)} className="flex-1 py-2.5 text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl text-sm font-bold transition-colors">
+                  Cancelar
+                </button>
+                <button type="submit" disabled={pwdLoading} className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-xl text-sm font-bold transition-colors flex items-center justify-center gap-2">
+                  {pwdLoading ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"/> : <KeyRound size={14}/>}
+                  {pwdLoading ? 'Guardando...' : 'Actualizar'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

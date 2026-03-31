@@ -213,6 +213,14 @@ export const CostsService = {
   delete: (id: string) => request(`/costos/${id}`, { method: 'DELETE' }),
 };
 
+export const AuthService = {
+  changePassword: (currentPassword: string, newPassword: string) =>
+    request<{ message: string }>('/auth/change-password', {
+      method: 'POST',
+      body: JSON.stringify({ currentPassword, newPassword }),
+    }),
+};
+
 export const AccountingService = {
   getAuditTransactions: (startDate: string, endDate: string) => request<any[]>(`/accounting/audit/transactions?startDate=${startDate}&endDate=${endDate}`),
   getProfitabilityReport: (startDate: string, endDate: string) => request<any>(`/accounting/report/profitability?startDate=${startDate}&endDate=${endDate}`),

@@ -7,9 +7,11 @@ interface AuthContextType {
   token: string | null;
   isAuthenticated: boolean;
   isInitializing: boolean;
+  requiresPasswordChange: boolean;
   login: (credentials: LoginCredentials) => Promise<void>;
   logout: () => void;
   hasPermission: (requiredPermission?: string) => boolean;
+  clearPasswordChangeFlag: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -42,6 +44,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [user, setUser] = useState<UserSession | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [isInitializing, setIsInitializing] = useState(true);
+  const [requiresPasswordChange, setRequiresPasswordChange] = useState(false);
 
   const clearSession = () => {
     setUser(null);
@@ -54,9 +57,19 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const applySession = (accessToken: string, userData: UserSession, refreshToken?: string) => {
     setToken(accessToken);
     setUser(userData);
+    setRequiresPasswordChange(!!(userData as any).requiresPasswordChange);
     localStorage.setItem(KEYS.token, accessToken);
     localStorage.setItem(KEYS.user, JSON.stringify(userData));
     if (refreshToken) localStorage.setItem(KEYS.refresh, refreshToken);
+  };
+
+  const clearPasswordChangeFlag = () => {
+    setRequiresPasswordChange(false);
+    if (user) {
+      const updated = { ...user, requiresPasswordChange: false };
+      setUser(updated as any);
+      localStorage.setItem(KEYS.user, JSON.stringify(updated));
+    }
   };
 
   const silentRefresh = useCallback(async (): Promise<boolean> => {
@@ -96,8 +109,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       if (storedToken && storedUser) {
         if (!isTokenExpired(storedToken)) {
           // Token de acceso aún válido
+          const parsedUser = JSON.parse(storedUser);
           setToken(storedToken);
-          setUser(JSON.parse(storedUser));
+          setUser(parsedUser);
+          setRequiresPasswordChange(!!(parsedUser as any).requiresPasswordChange);
         } else {
           // Token expirado → intentar refresh silencioso
           const ok = await silentRefresh();
@@ -137,7 +152,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   return (
-    <AuthContext.Provider value={{ user, token, isAuthenticated: !!user, isInitializing, login, logout, hasPermission }}>
+    <AuthContext.Provider value={{ user, token, isAuthenticated: !!user, isInitializing, requiresPasswordChange, login, logout, hasPermission, clearPasswordChangeFlag }}>
       {children}
     </AuthContext.Provider>
   );

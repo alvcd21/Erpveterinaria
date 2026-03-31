@@ -173,6 +173,7 @@ router.get('/users', authenticateToken, async (req, res) => {
     try {
         const result = await pool.query(`
             SELECT u.codUsuario as "codUsuario", u.usuario, u.identidad, u.idCaja as "idCaja", u.idrol, u.estado,
+            COALESCE(u.requires_password_change, FALSE) as "requiresPasswordChange",
             e.nombre || ' ' || e.apellido as "nombreEmpleado", r.nombre as "nombreRol"
             FROM usuarios u
             LEFT JOIN empleado e ON u.identidad = e.identidad
@@ -184,12 +185,16 @@ router.get('/users', authenticateToken, async (req, res) => {
 
 router.post('/users', authenticateToken, async (req, res) => {
     try {
-        const { usuario, password, identidad, idrol, idCaja, estado } = req.body;
+        const { usuario, identidad, idrol, idCaja, estado } = req.body;
         const codUsuario = await generateNextId('usuarios', 'codUsuario', 'USER');
-        const hashedPassword = await bcrypt.hash(password, 10);
-        await pool.query(`INSERT INTO usuarios (codUsuario, usuario, password, identidad, idCaja, idrol, estado, fechaCreacion) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())`,
+        // Generate a temporary password; admin must share it with the user
+        const tempPassword = `Temp@${Math.floor(1000 + Math.random() * 9000)}`;
+        const hashedPassword = await bcrypt.hash(tempPassword, 10);
+        await pool.query(
+            `INSERT INTO usuarios (codUsuario, usuario, password, identidad, idCaja, idrol, estado, requires_password_change, fechaCreacion)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, TRUE, NOW())`,
             [codUsuario, usuario, hashedPassword, identidad, idCaja, idrol, estado]);
-        res.status(201).json({ message: 'OK', codUsuario });
+        res.status(201).json({ message: 'OK', codUsuario, tempPassword });
     } catch(e) { handleDbError(res, e); }
 });
 

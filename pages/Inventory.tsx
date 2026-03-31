@@ -17,6 +17,7 @@ import {
 import Swal from 'sweetalert2';
 import { jsPDF } from 'jspdf';
 import JsBarcode from 'jsbarcode';
+import QRCode from 'qrcode';
 import * as ReactRouterDOM from 'react-router-dom';
 const { useNavigate } = ReactRouterDOM as any;
 
@@ -135,52 +136,133 @@ const Inventory: React.FC = () => {
       try {
           const category = type === 'TELEFONO' ? 'TELEPHONE' : 'ACCESSORY';
           const template = await LabelService.getDefault(category);
-          if (!template) return Swal.fire('Sin Plantilla', `No hay una etiqueta predeterminada para ${category}.`, 'warning');
-          
+          if (!template) return Swal.fire('Sin Plantilla', `No hay una etiqueta predeterminada para la categoría "${category}". Crea una en el Diseñador de Etiquetas y márcala como predeterminada.`, 'warning');
+
+          // Build data context to resolve {{variable}} placeholders
           let dataContext: any = {};
           if (type === 'TELEFONO') {
-              dataContext = { telefonos: { ...item, ubicacion: { nombre: item.nombreUbicacion, id: item.idubicacion }, proveedores: { id: item.codProveedor } } };
+              dataContext = {
+                  telefonos: { ...item, ubicacion: { nombre: item.nombreUbicacion, id: item.idubicacion }, proveedores: { id: item.codProveedor } }
+              };
           } else {
-              dataContext = { inventario: { ...item, accesorios: { codAccesorio: item.codAccesorio, descripcion: item.descripcionAccesorio, categoria: { tipo: item.categoriaAccesorio } }, ubicacion: { nombre: item.nombreUbicacion, id: item.idubicacion }, proveedores: { id: item.codProveedor } } };
+              dataContext = {
+                  inventario: { ...item, accesorios: { codAccesorio: item.codAccesorio, descripcion: item.descripcionAccesorio, categoria: { tipo: item.categoriaAccesorio } }, ubicacion: { nombre: item.nombreUbicacion, id: item.idubicacion }, proveedores: { id: item.codProveedor } }
+              };
           }
-          
-          const scratchDoc = new jsPDF(); 
-          let totalShiftY = 0;
-          const sortedElements = [...template.elements].sort((a, b) => (a.y || 0) - (b.y || 0));
-          
-          const layoutElements = sortedElements.map(el => {
-              const elY = el.y || 0; const elH = el.height || 0; const elW = el.width || 0; const elX = el.x || 0;
-              let finalY = elY + totalShiftY; let finalHeight = elH; let finalContent = el.content;
-              if (el.type === 'TEXT') {
-                  finalContent = el.content.replace(/{{([\w.]+)}}/g, (match: string, path: string) => {
-                      const keys = path.split('.');
-                      let current = dataContext;
-                      for (const key of keys) {
-                          if (current === null || typeof current !== 'object') return '';
-                          const foundKey = Object.keys(current).find(k => k.toLowerCase() === key.toLowerCase());
-                          if (foundKey) { current = current[foundKey]; } else { return ''; }
-                      }
-                      return String(current || '');
-                  });
-              }
-              return { ...el, y: finalY, height: finalHeight, width: elW, x: elX, computedContent: finalContent };
-          });
 
-          const baseW = template.width || 50; const baseH = template.height || 25;
+          // Resolve {{path.to.field}} variables from dataContext
+          const resolveVars = (content: string): string =>
+              content.replace(/{{([\w.]+)}}/g, (_, path: string) => {
+                  const keys = path.split('.');
+                  let cur: any = dataContext;
+                  for (const key of keys) {
+                      if (!cur || typeof cur !== 'object') return '';
+                      const found = Object.keys(cur).find(k => k.toLowerCase() === key.toLowerCase());
+                      if (found) cur = cur[found]; else return '';
+                  }
+                  return cur != null ? String(cur) : '';
+              });
+
+          // Parse hex color string to RGB components
+          const hexToRGB = (hex: string): { r: number; g: number; b: number } => {
+              const clean = hex.replace('#', '');
+              const full = clean.length === 3 ? clean.split('').map(c => c + c).join('') : clean;
+              const num = parseInt(full, 16);
+              return { r: (num >> 16) & 255, g: (num >> 8) & 255, b: num & 255 };
+          };
+
+          // Map any CSS font family name to the three fonts jsPDF supports
+          const mapFont = (ff?: string): string => {
+              const f = (ff || '').toLowerCase();
+              if (f.includes('times') || (f.includes('serif') && !f.includes('sans'))) return 'times';
+              if (f.includes('courier') || f.includes('mono')) return 'courier';
+              return 'helvetica';
+          };
+
+          const baseW = template.width || 50;
+          const baseH = template.height || 25;
           const doc = new jsPDF({ orientation: baseW > baseH ? 'landscape' : 'portrait', unit: 'mm', format: [baseW, baseH] });
-          
-          for (const el of layoutElements) {
+
+          for (const el of template.elements) {
+              const x = el.x || 0;
+              const y = el.y || 0;
+              const w = el.width || 10;
+              const h = el.height || 10;
+
               if (el.type === 'TEXT') {
+                  const content = resolveVars(el.content);
+                  // Font family + weight
+                  const fontStyle = el.fontWeight === 'bold' ? 'bold' : 'normal';
+                  doc.setFont(mapFont(el.fontFamily), fontStyle);
                   doc.setFontSize(el.fontSize || 10);
-                  doc.text(String(el.computedContent || ''), el.x, el.y, { baseline: 'top' });
+                  // Text color
+                  const colorHex = el.color || '#000000';
+                  if (colorHex !== 'transparent') {
+                      try { const { r, g, b } = hexToRGB(colorHex); doc.setTextColor(r, g, b); }
+                      catch { doc.setTextColor(0, 0, 0); }
+                  }
+                  // Alignment: shift x based on align setting
+                  const alignX = el.textAlign === 'center' ? x + w / 2 : el.textAlign === 'right' ? x + w : x;
+                  const pdfAlign = (el.textAlign === 'center' || el.textAlign === 'right') ? el.textAlign : 'left';
+                  if (el.isMultiline) {
+                      doc.text(content, alignX, y, { align: pdfAlign as any, baseline: 'top', maxWidth: w });
+                  } else {
+                      doc.text(content, alignX, y, { align: pdfAlign as any, baseline: 'top' });
+                  }
+                  doc.setTextColor(0, 0, 0); // reset color
+
               } else if (el.type === 'BARCODE') {
+                  const content = resolveVars(el.content) || '000000';
                   const canvas = document.createElement('canvas');
-                  JsBarcode(canvas, String(el.computedContent || '12345'), { format: "CODE128", displayValue: false });
-                  doc.addImage(canvas.toDataURL("image/png"), 'PNG', el.x, el.y, el.width, el.height);
+                  try {
+                      JsBarcode(canvas, content, {
+                          format: (el.barcodeFormat as any) || 'CODE128',
+                          displayValue: el.displayValue ?? false,
+                          margin: 0, width: 2, height: 50, fontSize: 20
+                      });
+                      doc.addImage(canvas.toDataURL('image/png'), 'PNG', x, y, w, h);
+                  } catch { /* skip unrenderable barcodes */ }
+
+              } else if (el.type === 'QR') {
+                  const content = resolveVars(el.content) || 'N/A';
+                  try {
+                      const qrDataUrl = await QRCode.toDataURL(content, { margin: 0 });
+                      doc.addImage(qrDataUrl, 'PNG', x, y, w, h);
+                  } catch { /* skip */ }
+
+              } else if (el.type === 'SHAPE') {
+                  const strokeColor = el.stroke || '#000000';
+                  const fillColor = el.fill || 'transparent';
+                  const hasFill = fillColor && fillColor !== 'transparent' && fillColor !== 'none';
+                  // Convert px strokeWidth to mm (1px ≈ 0.2646 mm)
+                  doc.setLineWidth(Math.max(0.1, (el.strokeWidth || 1) * 0.2646));
+                  try { const { r, g, b } = hexToRGB(strokeColor); doc.setDrawColor(r, g, b); } catch { doc.setDrawColor(0); }
+                  if (hasFill) {
+                      try { const { r, g, b } = hexToRGB(fillColor); doc.setFillColor(r, g, b); } catch { doc.setFillColor(255, 255, 255); }
+                  }
+                  const style = hasFill ? 'FD' : 'S';
+                  if (el.shapeType === 'CIRCLE') {
+                      doc.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, style);
+                  } else if (el.shapeType === 'LINE') {
+                      doc.line(x, y + h / 2, x + w, y + h / 2);
+                  } else {
+                      doc.rect(x, y, w, h, style);
+                  }
+                  // Reset drawing state
+                  doc.setDrawColor(0); doc.setFillColor(255, 255, 255); doc.setLineWidth(0.5);
+
+              } else if (el.type === 'IMAGE') {
+                  if (el.content) {
+                      try { doc.addImage(el.content, 'PNG', x, y, w, h); } catch { /* skip */ }
+                  }
               }
           }
-          doc.save(`Label_${type}.pdf`);
-      } catch (error) { console.error(error); Swal.fire('Error', 'No se pudo generar la etiqueta.', 'error'); }
+
+          doc.save(`Etiqueta_${type}_${item.codigo || item.codInventario || Date.now()}.pdf`);
+      } catch (error) {
+          console.error(error);
+          Swal.fire('Error', 'No se pudo generar la etiqueta.', 'error');
+      }
   };
 
   const openModal = (item?: any) => {

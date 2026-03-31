@@ -119,6 +119,10 @@ const initDB = async () => {
                     ALTER TABLE arqueo ADD COLUMN ganancia NUMERIC(10,2) DEFAULT 0;
                 EXCEPTION WHEN duplicate_column THEN NULL; END;
 
+                BEGIN
+                    ALTER TABLE usuarios ADD COLUMN requires_password_change BOOLEAN DEFAULT FALSE;
+                EXCEPTION WHEN duplicate_column THEN NULL; END;
+
                 -- INTENTO DE AMPLIAR ENUMS SI EXISTEN
                 BEGIN
                     ALTER TYPE subtipo_movimiento_contable ADD VALUE IF NOT EXISTS 'Ajuste Utilidad Cambio';
@@ -147,6 +151,7 @@ app.post('/api/auth/login', async (req, res) => {
   try {
     const query = `
       SELECT u.codUsuario as "codUsuario", u.usuario, u.password, u.identidad, u.idCaja as "idCaja", u.idrol, u.estado,
+        COALESCE(u.requires_password_change, FALSE) as "requiresPasswordChange",
         r.nombre as "rol_nombre", e.nombre as "emp_nombre", e.apellido as "emp_apellido"
       FROM usuarios u
       LEFT JOIN roles r ON u.idrol = r.idrol
@@ -164,13 +169,14 @@ app.post('/api/auth/login', async (req, res) => {
     const permResult = await pool.query(`SELECT idPermiso FROM rol_permisos WHERE idRol = $1`, [userRaw.idrol]);
     const permisos = permResult.rows.map(r => r.idpermiso);
 
-    const userData = { 
-      codUsuario: userRaw.codUsuario, 
-      usuario: userRaw.usuario, 
-      rol: userRaw.rol_nombre || 'Sin Rol', 
+    const userData = {
+      codUsuario: userRaw.codUsuario,
+      usuario: userRaw.usuario,
+      rol: userRaw.rol_nombre || 'Sin Rol',
       idCaja: userRaw.idCaja || 'Sin Caja',
       nombreEmpleado: userRaw.emp_nombre ? `${userRaw.emp_nombre} ${userRaw.emp_apellido}` : 'Empleado',
-      permisos: permisos
+      permisos: permisos,
+      requiresPasswordChange: userRaw.requiresPasswordChange || false
     };
 
     const REFRESH_SECRET = process.env.REFRESH_SECRET || (JWT_SECRET + '_refresh');
@@ -220,6 +226,24 @@ app.post('/api/auth/refresh', async (req, res) => {
   } catch (err) {
     res.status(403).json({ error: 'Refresh token inválido o expirado' });
   }
+});
+
+app.post('/api/auth/change-password', authenticateToken, async (req, res) => {
+  const { currentPassword, newPassword } = req.body;
+  if (!currentPassword || !newPassword) return res.status(400).json({ error: 'Se requieren contraseña actual y nueva' });
+  if (newPassword.length < 6) return res.status(400).json({ error: 'La contraseña debe tener al menos 6 caracteres' });
+  try {
+    const result = await pool.query('SELECT password FROM usuarios WHERE codUsuario = $1', [req.user.codUsuario]);
+    const userRaw = result.rows[0];
+    if (!userRaw) return res.status(404).json({ error: 'Usuario no encontrado' });
+
+    const valid = (userRaw.password === currentPassword) || (userRaw.password?.startsWith('$2a$') && await bcrypt.compare(currentPassword, userRaw.password));
+    if (!valid) return res.status(401).json({ error: 'La contraseña actual es incorrecta' });
+
+    const hashed = await bcrypt.hash(newPassword, 10);
+    await pool.query('UPDATE usuarios SET password = $1, requires_password_change = FALSE WHERE codUsuario = $2', [hashed, req.user.codUsuario]);
+    res.json({ message: 'Contraseña actualizada correctamente' });
+  } catch (err) { res.status(500).json({ error: 'Error interno' }); }
 });
 
 app.use(express.static(path.join(__dirname, 'build')));

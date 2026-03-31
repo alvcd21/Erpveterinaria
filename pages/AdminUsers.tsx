@@ -139,8 +139,23 @@ const AdminUsers: React.FC<AdminUsersProps> = ({ initialView }) => {
            return Swal.fire('Error', 'Seleccione Empleado, Rol y Caja', 'warning');
         }
         const userPayload = { ...userForm, estado: userForm.estado as EstadoGeneral };
-        if(isEditing) await AdminService.updateUser(currentId!, userPayload);
-        else await AdminService.createUser(userPayload);
+        if (isEditing) {
+          await AdminService.updateUser(currentId!, userPayload);
+        } else {
+          const result: any = await AdminService.createUser(userPayload);
+          setShowModal(false);
+          loadData();
+          await Swal.fire({
+            icon: 'success',
+            title: 'Usuario creado',
+            html: `<p class="text-sm text-slate-600 mb-2">Comparte esta contraseña temporal con el usuario:</p>
+                   <div class="bg-amber-50 border border-amber-300 rounded-lg px-4 py-3 text-lg font-mono font-bold text-amber-700 tracking-widest">${result.tempPassword}</div>
+                   <p class="text-xs text-slate-400 mt-2">El usuario deberá cambiarla en su primer inicio de sesión.</p>`,
+            confirmButtonText: 'Entendido',
+            confirmButtonColor: '#4f46e5'
+          });
+          return;
+        }
       } else if (activeTab === 'EMPLOYEES') {
         const empPayload = { ...empForm, estado: empForm.estado as EstadoGeneral };
         if (isEditing) await AdminService.updateEmpleado(currentId!, empPayload);
@@ -273,7 +288,12 @@ const AdminUsers: React.FC<AdminUsersProps> = ({ initialView }) => {
                 {activeTab === 'USERS' && users.map(u => (
                   <tr key={u.codUsuario} className="hover:bg-slate-50">
                      <td className="p-4">
-                        <div className="font-bold text-slate-700">{u.usuario}</div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-slate-700">{u.usuario}</span>
+                          {(u as any).requiresPasswordChange && (
+                            <span className="text-[10px] font-bold px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded-full border border-amber-300 whitespace-nowrap">Temp</span>
+                          )}
+                        </div>
                         <div className="text-xs text-slate-400">{u.nombreEmpleado}</div>
                      </td>
                      <td className="p-4 text-xs">
@@ -346,11 +366,13 @@ const AdminUsers: React.FC<AdminUsersProps> = ({ initialView }) => {
                             <input required className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl mt-1 focus:ring-2 focus:ring-indigo-500 outline-none" 
                                 value={userForm.usuario} onChange={e => setUserForm({...userForm, usuario: e.target.value})} placeholder="Ej: admin" />
                         </div>
-                        <div>
-                            <label className="text-xs font-bold text-slate-500 uppercase">Contraseña {isEditing && '(Dejar en blanco para mantener)'}</label>
-                            <input type="password" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl mt-1 focus:ring-2 focus:ring-indigo-500 outline-none" 
-                                value={userForm.password} onChange={e => setUserForm({...userForm, password: e.target.value})} placeholder={isEditing ? "******" : "Contraseña"} required={!isEditing}/>
-                        </div>
+                        {isEditing && (
+                          <div>
+                            <label className="text-xs font-bold text-slate-500 uppercase">Nueva Contraseña <span className="text-slate-400 normal-case font-normal">(dejar en blanco para mantener)</span></label>
+                            <input type="password" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl mt-1 focus:ring-2 focus:ring-indigo-500 outline-none"
+                                value={userForm.password} onChange={e => setUserForm({...userForm, password: e.target.value})} placeholder="Nueva contraseña (opcional)"/>
+                          </div>
+                        )}
                         <div>
                             <label className="text-xs font-bold text-slate-500 uppercase">Vincular a Empleado</label>
                             <select className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl mt-1 focus:ring-2 focus:ring-indigo-500 outline-none" 
