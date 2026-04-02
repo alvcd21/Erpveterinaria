@@ -335,9 +335,27 @@ export interface Costo {
   estado: EstadoGeneral;
 }
 
+export interface InvoiceColumn {
+  id: string;
+  header: string;
+  field: string;       // e.g. "{{item.descripcion}}"
+  widthPct: number;    // percentage of total width (0-100)
+  align: 'left' | 'center' | 'right';
+  format: 'TEXT' | 'CURRENCY' | 'NUMBER';
+}
+
+export interface SummaryRow {
+  id: string;
+  label: string;
+  field: string;       // e.g. "{{venta.total}}" or static text
+  format: 'TEXT' | 'CURRENCY' | 'NUMBER';
+  bold?: boolean;
+  separator?: boolean; // render a horizontal line above this row
+}
+
 export interface LabelElement {
   id: string;
-  type: 'TEXT' | 'BARCODE' | 'QR' | 'IMAGE' | 'SHAPE' | 'DETAIL_TABLE';
+  type: 'TEXT' | 'BARCODE' | 'QR' | 'IMAGE' | 'SHAPE' | 'INVOICE_TABLE' | 'SUMMARY_BOX' | 'COMPANY_HEADER';
   x: number;
   y: number;
   width: number;
@@ -357,6 +375,36 @@ export interface LabelElement {
   strokeWidth?: number;
   isMultiline?: boolean;
   isStretchWithOverflow?: boolean;
+  // Text extra
+  italic?: boolean;
+  underline?: boolean;
+  lineHeight?: number;
+  letterSpacing?: number;
+  backgroundColor?: string;
+  // Shape extra
+  borderRadius?: number;
+  // All elements
+  opacity?: number;
+  // INVOICE_TABLE specific
+  tableColumns?: InvoiceColumn[];
+  tableHeaderBg?: string;
+  tableHeaderColor?: string;
+  tableRowHeight?: number;
+  tableAlternateRows?: boolean;
+  tableAlternateBg?: string;
+  tableBorderColor?: string;
+  tableFontSize?: number;
+  // SUMMARY_BOX specific
+  summaryRows?: SummaryRow[];
+  summaryBg?: string;
+  summaryLabelColor?: string;
+  summaryValueColor?: string;
+  summaryFontSize?: number;
+  // COMPANY_HEADER specific
+  companyShowRTN?: boolean;
+  companyShowPhone?: boolean;
+  companyShowEmail?: boolean;
+  companyAlign?: 'left' | 'center' | 'right';
 }
 
 export interface LabelTemplate {
@@ -369,6 +417,11 @@ export interface LabelTemplate {
   width: number;
   height: number;
   elements: LabelElement[];
+  margins?: { top: number; bottom: number; left: number; right: number };
+  backgroundColor?: string;
+  snapEnabled?: boolean;
+  gridSize?: number;
+  showGrid?: boolean;
 }
 
 export interface GastoContable {

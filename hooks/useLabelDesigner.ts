@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { LabelTemplate, LabelElement } from '../types';
+import { LabelTemplate, LabelElement, InvoiceColumn, SummaryRow } from '../types';
 import { LabelService, AdminService } from '../services/api';
 import Swal from 'sweetalert2';
 
@@ -17,7 +17,10 @@ const INITIAL_TEMPLATE: LabelTemplate = {
   isDefault: false,
   width: 50, // mm default
   height: 25, // mm default
-  elements: []
+  elements: [],
+  snapEnabled: false,
+  gridSize: 5,
+  showGrid: false,
 };
 
 const generateId = () => `el_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -28,20 +31,29 @@ interface SchemaTable {
     relations: { column: string, foreignTable: string, foreignColumn: string }[];
 }
 
+const defaultInvoiceColumns: InvoiceColumn[] = [
+  { id: 'c1', header: 'Descripción', field: '{{item.descripcion}}', widthPct: 45, align: 'left', format: 'TEXT' },
+  { id: 'c2', header: 'Cant.', field: '{{item.cantidad}}', widthPct: 10, align: 'center', format: 'NUMBER' },
+  { id: 'c3', header: 'P. Unit.', field: '{{item.precioVenta}}', widthPct: 15, align: 'right', format: 'CURRENCY' },
+  { id: 'c4', header: 'ISV', field: '{{item.isv}}', widthPct: 10, align: 'right', format: 'CURRENCY' },
+  { id: 'c5', header: 'Total', field: '{{item.total}}', widthPct: 20, align: 'right', format: 'CURRENCY' },
+];
+
 export const useLabelDesigner = () => {
     // --- STATE ---
     const [template, setTemplate] = useState<LabelTemplate>(INITIAL_TEMPLATE);
     const [selectedId, setSelectedId] = useState<string | null>(null);
+    const [selectedIds, setSelectedIds] = useState<string[]>([]);
     const [zoom, setZoom] = useState(2); // Initial zoom factor
     const [history, setHistory] = useState<LabelTemplate[]>([]);
     const [historyIndex, setHistoryIndex] = useState(-1);
     const [dbSchema, setDbSchema] = useState<Record<string, SchemaTable>>({});
     const [clipboard, setClipboard] = useState<LabelElement | null>(null);
-    
+
     // Tools & Navigation
     const [tool, setTool] = useState<'SELECT' | 'HAND'>('SELECT');
     const [pan, setPan] = useState({ x: 0, y: 0 });
-    
+
     // Derived State for Unit Scale
     const scaleFactor = template.type === 'DOCUMENT' ? CM_TO_PX : MM_TO_PX;
     const unitLabel = template.type === 'DOCUMENT' ? 'cm' : 'mm';
@@ -52,14 +64,22 @@ export const useLabelDesigner = () => {
         startPos: { x: number, y: number };
         elementStart: { x: number, y: number, w: number, h: number, r: number };
         panStart: { x: number, y: number };
-        handle?: string; 
+        handle?: string;
     }>({ mode: 'NONE', startPos: {x:0, y:0}, elementStart: {x:0, y:0, w:0, h:0, r:0}, panStart: {x:0, y:0} });
+
+    // --- SNAP HELPER ---
+    const snapValue = (val: number): number => {
+        if (!template.snapEnabled || !template.gridSize) return val;
+        const gs = template.gridSize;
+        return Math.round(val / gs) * gs;
+    };
 
     // --- INITIALIZATION ---
     const loadTemplate = (tpl: LabelTemplate) => {
         setTemplate(tpl);
         setHistory([]);
         setHistoryIndex(-1);
+        setSelectedIds([]);
         // Adjust zoom based on document type for better UX
         setZoom(tpl.type === 'DOCUMENT' ? 0.8 : 2.5);
         setPan({ x: 0, y: 0 });
@@ -75,10 +95,14 @@ export const useLabelDesigner = () => {
             width: type === 'DOCUMENT' ? 21 : 50,
             height: type === 'DOCUMENT' ? 29.7 : 25,
             category: type === 'DOCUMENT' ? 'REPORT' : 'GENERAL',
-            elements: []
+            elements: [],
+            snapEnabled: false,
+            gridSize: type === 'DOCUMENT' ? 1 : 5,
+            showGrid: false,
         });
         setHistory([]);
         setHistoryIndex(-1);
+        setSelectedIds([]);
         setZoom(type === 'DOCUMENT' ? 0.8 : 2.5);
         setPan({ x: 0, y: 0 });
         setTool('SELECT');
@@ -150,22 +174,52 @@ export const useLabelDesigner = () => {
             content: type === 'TEXT' ? 'Texto' : '',
             fontSize: 10, color: '#000000', textAlign: 'left', fontWeight: 'normal', fontFamily: 'helvetica',
             barcodeFormat: 'CODE128', displayValue: true, shapeType: 'RECTANGLE',
-            isStretchWithOverflow: false, // Default false
+            isStretchWithOverflow: false,
+            opacity: 1,
             ...extra
         };
 
         if (type === 'BARCODE') { newEl.content = '123456'; newEl.width = isDoc?6:30; newEl.height = isDoc?2:10; }
         if (type === 'QR') { newEl.content = 'QR CODE'; newEl.width = isDoc?3:15; newEl.height = isDoc?3:15; }
         if (type === 'SHAPE') { newEl.fill = 'transparent'; newEl.stroke = '#000000'; newEl.strokeWidth = 0.5; newEl.width = isDoc?4:15; newEl.height = isDoc?4:15; }
-        if (type === 'DETAIL_TABLE') { 
-            newEl.width = template.width - (isDoc?2:10); 
-            newEl.height = isDoc?5:15; 
-            newEl.content = 'TABLA DETALLE'; 
+        if (type === 'INVOICE_TABLE') {
+            newEl.width = template.width - (isDoc?2:10);
+            newEl.height = isDoc?10:20;
+            newEl.content = 'TABLA DETALLE';
+            newEl.tableColumns = defaultInvoiceColumns;
+            newEl.tableHeaderBg = '#1e293b';
+            newEl.tableHeaderColor = '#ffffff';
+            newEl.tableRowHeight = isDoc ? 0.8 : 8;
+            newEl.tableAlternateRows = true;
+            newEl.tableAlternateBg = '#f8fafc';
+        }
+        if (type === 'SUMMARY_BOX') {
+            newEl.width = isDoc ? 5 : 30;
+            newEl.height = isDoc ? 2.5 : 20;
+            newEl.summaryRows = [
+                { id: 's1', label: 'Descuento:', field: '{{venta.descuento}}', format: 'CURRENCY', bold: false },
+                { id: 's2', label: 'ISV (15%):', field: '{{venta.isv}}', format: 'CURRENCY', bold: false },
+                { id: 's3', label: 'TOTAL:', field: '{{venta.total}}', format: 'CURRENCY', bold: true, separator: true },
+            ] as SummaryRow[];
+            newEl.summaryFontSize = 9;
+            newEl.summaryBg = 'transparent';
+            newEl.summaryLabelColor = '#1e293b';
+            newEl.summaryValueColor = '#1e293b';
+        }
+        if (type === 'COMPANY_HEADER') {
+            newEl.width = template.width - (isDoc ? 2 : 10);
+            newEl.height = isDoc ? 2.5 : 20;
+            newEl.fontSize = isDoc ? 9 : 8;
+            newEl.companyShowRTN = true;
+            newEl.companyShowPhone = true;
+            newEl.companyShowEmail = false;
+            newEl.companyAlign = 'center';
         }
 
         const newElements = [...template.elements, newEl];
         updateTemplate({ elements: newElements });
         setSelectedId(newEl.id);
+        setSelectedIds([newEl.id]);
         setTool('SELECT'); // Switch to select mode after adding
     };
 
@@ -174,6 +228,7 @@ export const useLabelDesigner = () => {
             const newElements = template.elements.filter(e => e.id !== selectedId);
             updateTemplate({ elements: newElements });
             setSelectedId(null);
+            setSelectedIds([]);
         }
     };
 
@@ -198,6 +253,55 @@ export const useLabelDesigner = () => {
         const newElements = [...template.elements];
         const [movedItem] = newElements.splice(fromIndex, 1);
         newElements.splice(toIndex, 0, movedItem);
+        updateTemplate({ elements: newElements });
+    };
+
+    // --- ALIGNMENT FUNCTIONS ---
+    const alignElements = (direction: 'left' | 'center-h' | 'right' | 'top' | 'center-v' | 'bottom') => {
+        if (selectedIds.length < 2) return;
+        const els = template.elements.filter(e => selectedIds.includes(e.id));
+        let newElements = [...template.elements];
+
+        if (direction === 'left') {
+            const minX = Math.min(...els.map(e => e.x));
+            newElements = newElements.map(e => selectedIds.includes(e.id) ? {...e, x: minX} : e);
+        } else if (direction === 'center-h') {
+            const minX = Math.min(...els.map(e => e.x));
+            const maxX = Math.max(...els.map(e => e.x + e.width));
+            const centerX = (minX + maxX) / 2;
+            newElements = newElements.map(e => selectedIds.includes(e.id) ? {...e, x: centerX - e.width/2} : e);
+        } else if (direction === 'right') {
+            const maxX = Math.max(...els.map(e => e.x + e.width));
+            newElements = newElements.map(e => selectedIds.includes(e.id) ? {...e, x: maxX - e.width} : e);
+        } else if (direction === 'top') {
+            const minY = Math.min(...els.map(e => e.y));
+            newElements = newElements.map(e => selectedIds.includes(e.id) ? {...e, y: minY} : e);
+        } else if (direction === 'center-v') {
+            const minY = Math.min(...els.map(e => e.y));
+            const maxY = Math.max(...els.map(e => e.y + e.height));
+            const centerY = (minY + maxY) / 2;
+            newElements = newElements.map(e => selectedIds.includes(e.id) ? {...e, y: centerY - e.height/2} : e);
+        } else if (direction === 'bottom') {
+            const maxY = Math.max(...els.map(e => e.y + e.height));
+            newElements = newElements.map(e => selectedIds.includes(e.id) ? {...e, y: maxY - e.height} : e);
+        }
+        updateTemplate({ elements: newElements });
+    };
+
+    const distributeH = () => {
+        if (selectedIds.length < 3) return;
+        const els = [...template.elements.filter(e => selectedIds.includes(e.id))].sort((a,b) => a.x - b.x);
+        const totalWidth = els.reduce((s,e) => s + e.width, 0);
+        const span = els[els.length-1].x + els[els.length-1].width - els[0].x;
+        const gap = (span - totalWidth) / (els.length - 1);
+        let curX = els[0].x;
+        const newElements = template.elements.map(e => {
+            const i = els.findIndex(s => s.id === e.id);
+            if (i === -1) return e;
+            const result = {...e, x: curX};
+            curX += e.width + gap;
+            return result;
+        });
         updateTemplate({ elements: newElements });
     };
 
@@ -231,7 +335,7 @@ export const useLabelDesigner = () => {
             if (selectedId) deleteSelected();
             return;
         }
-        
+
         if (selectedId && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
             e.preventDefault();
             const el = template.elements.find(x => x.id === selectedId);
@@ -247,8 +351,8 @@ export const useLabelDesigner = () => {
 
             updateElement(selectedId, { x: Number(x.toFixed(2)), y: Number(y.toFixed(2)) });
         }
-        
-        if (e.key === 'Escape') setSelectedId(null);
+
+        if (e.key === 'Escape') { setSelectedId(null); setSelectedIds([]); }
     };
 
     const saveTemplate = async () => {
@@ -261,19 +365,19 @@ export const useLabelDesigner = () => {
             }
             Swal.fire({ icon: 'success', title: 'Guardado', toast: true, position: 'bottom-end', timer: 2000, showConfirmButton: false });
             return true;
-        } catch (e: any) { 
-            Swal.fire('Error', e.message, 'error'); 
+        } catch (e: any) {
+            Swal.fire('Error', e.message, 'error');
             return false;
         }
     };
 
     // --- INTERACTION LOGIC (CANVAS) ---
-    // // Fix: Explicitly use React namespace for event types which require the React import.
     const handlePointerDown = (e: React.MouseEvent | React.TouchEvent, id: string | null, mode: 'MOVE'|'RESIZE'|'ROTATE'|'PANNING', handle?: string) => {
         e.stopPropagation();
-        
+
         const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
         const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+        const isShift = 'shiftKey' in e ? e.shiftKey : false;
 
         // If Tool is HAND, overwrite interaction to PANNING regardless of target
         if (tool === 'HAND') {
@@ -289,8 +393,21 @@ export const useLabelDesigner = () => {
         if (id) {
             const el = template.elements.find(x => x.id === id);
             if (!el) return;
-            
-            setSelectedId(id);
+
+            // Multi-select: shift+click
+            if (isShift && mode === 'MOVE') {
+                setSelectedIds(prev => {
+                    if (prev.includes(id)) return prev.filter(x => x !== id);
+                    return [...prev, id];
+                });
+                setSelectedId(id);
+            } else if (mode !== 'RESIZE' && mode !== 'ROTATE') {
+                setSelectedId(id);
+                setSelectedIds([id]);
+            } else {
+                setSelectedId(id);
+            }
+
             setInteraction({
                 mode,
                 startPos: { x: clientX, y: clientY },
@@ -301,16 +418,16 @@ export const useLabelDesigner = () => {
         } else {
             // Clicked on empty canvas -> Deselect
             setSelectedId(null);
+            setSelectedIds([]);
         }
     };
 
-    // // Fix: Explicitly use React namespace for event types which require the React import.
     const handlePointerMove = (e: React.MouseEvent | React.TouchEvent) => {
         if (interaction.mode === 'NONE') return;
-        
+
         const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
         const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
-        
+
         if (interaction.mode === 'PANNING') {
             e.preventDefault(); // Prevent scroll on touch
             const deltaX = clientX - interaction.startPos.x;
@@ -326,16 +443,19 @@ export const useLabelDesigner = () => {
 
         const deltaX = (clientX - interaction.startPos.x) / (scaleFactor * zoom);
         const deltaY = (clientY - interaction.startPos.y) / (scaleFactor * zoom);
-        
+
         const start = interaction.elementStart;
         let newEl = { ...template.elements.find(x => x.id === selectedId)! };
 
         if (interaction.mode === 'MOVE') {
-            newEl.x = Number((start.x + deltaX).toFixed(2));
-            newEl.y = Number((start.y + deltaY).toFixed(2));
+            newEl.x = snapValue(Number((start.x + deltaX).toFixed(2)));
+            newEl.y = snapValue(Number((start.y + deltaY).toFixed(2)));
         } else if (interaction.mode === 'RESIZE' && interaction.handle) {
-            if (interaction.handle.includes('e')) newEl.width = Math.max(0.5, Number((start.w + deltaX).toFixed(2)));
-            if (interaction.handle.includes('s')) newEl.height = Math.max(0.5, Number((start.h + deltaY).toFixed(2)));
+            const h = interaction.handle;
+            if (h.includes('e')) newEl.width = Math.max(1, Number((start.w + deltaX).toFixed(2)));
+            if (h.includes('s')) newEl.height = Math.max(0.5, Number((start.h + deltaY).toFixed(2)));
+            if (h.includes('w')) { newEl.x = Number((start.x + deltaX).toFixed(2)); newEl.width = Math.max(1, Number((start.w - deltaX).toFixed(2))); }
+            if (h.includes('n')) { newEl.y = Number((start.y + deltaY).toFixed(2)); newEl.height = Math.max(0.5, Number((start.h - deltaY).toFixed(2))); }
         } else if (interaction.mode === 'ROTATE') {
             newEl.rotation = (start.r + ((clientX - interaction.startPos.x)/2)) % 360;
         }
@@ -352,6 +472,7 @@ export const useLabelDesigner = () => {
     return {
         template, setTemplate,
         selectedId, setSelectedId,
+        selectedIds, setSelectedIds,
         zoom, setZoom,
         tool, setTool, pan, setPan,
         history, historyIndex,
@@ -361,7 +482,9 @@ export const useLabelDesigner = () => {
         addElement, updateElement, deleteSelected, updateTemplate,
         saveTemplate,
         moveLayer, reorderElements,
+        alignElements, distributeH,
         interaction, scaleFactor, unitLabel,
-        handlePointerDown, handlePointerMove, handlePointerUp
+        handlePointerDown, handlePointerMove, handlePointerUp,
+        snapValue,
     };
 };

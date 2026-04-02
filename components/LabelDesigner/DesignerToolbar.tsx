@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { Type, ScanLine, Shapes, Image as ImageIcon, Table as TableIcon, FileCog, QrCode, Layers, Hand, MousePointer2 } from 'lucide-react';
+import { Type, ScanLine, Shapes, Image as ImageIcon, Table as TableIcon, FileCog, QrCode, Layers, Hand, MousePointer2, Building2, ReceiptText } from 'lucide-react';
 import { LabelTemplate } from '../../types';
 
 interface ToolButtonProps {
@@ -51,7 +51,9 @@ const DesignerToolbar: React.FC<DesignerToolbarProps> = ({
                 <ToolButton icon={<Shapes size={20}/>} label="Forma" onClick={() => setShowShapeModal(true)} />
                 <ToolButton icon={<ImageIcon size={20}/>} label="Imagen" onClick={() => fileInputRef.current?.click()} />
                 
-                {template.type === 'DOCUMENT' && <ToolButton icon={<TableIcon size={20}/>} label="Tabla" onClick={() => addElement('DETAIL_TABLE')} color="text-purple-600 bg-purple-50" />}
+                {template.type === 'DOCUMENT' && <ToolButton icon={<TableIcon size={20}/>} label="Tabla" onClick={() => addElement('INVOICE_TABLE')} color="text-purple-600 bg-purple-50" />}
+                {template.type === 'DOCUMENT' && <ToolButton icon={<ReceiptText size={20}/>} label="Totales" onClick={() => addElement('SUMMARY_BOX')} color="text-emerald-600 bg-emerald-50" />}
+                {template.type === 'DOCUMENT' && <ToolButton icon={<Building2 size={20}/>} label="Empresa" onClick={() => addElement('COMPANY_HEADER')} color="text-amber-600 bg-amber-50" />}
             </div>
             
             <div className="mt-auto flex flex-col gap-4 w-full px-2 pt-4 border-t border-slate-100">

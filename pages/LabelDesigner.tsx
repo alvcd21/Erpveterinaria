@@ -3,10 +3,14 @@ import React, { useState, useEffect, useRef } from 'react';
 // Fix: Use namespace import to bypass missing named export errors in certain environments
 import * as ReactRouterDOM from 'react-router-dom';
 const { useNavigate } = ReactRouterDOM as any;
-import { 
+import {
   ArrowLeft, Save, Undo2, Redo2, Plus, Star, FileCog, Type, ScanLine, Shapes, Settings, ChevronDown, MoreVertical, X, Square, Circle, Minus,
-  Layers, Search, Database, Table, ChevronRight, Key, GripVertical, FileText, Tag, ChevronUp, Image as ImageIcon, Hand, Trash2, MousePointer2
+  Layers, Search, Database, Table, ChevronRight, Key, GripVertical, FileText, Tag, ChevronUp, Image as ImageIcon, Hand, Trash2, MousePointer2,
+  Printer, Eye
 } from 'lucide-react';
+import { printTemplate } from '../services/TemplateRenderer';
+import PreviewModal from '../components/LabelDesigner/PreviewModal';
+import { STARTER_TEMPLATES, StarterTemplateEntry } from '../services/StarterTemplates';
 import Swal from 'sweetalert2';
 import { LabelService } from '../services/api';
 import { LabelTemplate } from '../types';
@@ -82,6 +86,7 @@ const LabelDesigner: React.FC = () => {
   const {
       template, setTemplate,
       selectedId, setSelectedId,
+      selectedIds, setSelectedIds,
       zoom, setZoom,
       tool, setTool, pan, setPan,
       history: editHistory, historyIndex,
@@ -98,6 +103,8 @@ const LabelDesigner: React.FC = () => {
   const [isMobilePropOpen, setIsMobilePropOpen] = useState(false);
   const [showVarModal, setShowVarModal] = useState(false);
   const [showShapeModal, setShowShapeModal] = useState(false);
+  const [showPreviewModal, setShowPreviewModal] = useState(false);
+  const [selectedStarter, setSelectedStarter] = useState<StarterTemplateEntry | null>(null);
   
   // Drag and Drop
   const dragItem = useRef<number | null>(null);
@@ -114,13 +121,22 @@ const LabelDesigner: React.FC = () => {
 
   const initCreation = () => {
       if(!newDesignName || newDesignName.trim() === '' || !selectedType) return;
-      
-      createNew(selectedType, newDesignName);
+
+      if (selectedStarter) {
+          // Load a pre-built starter template
+          loadTemplate({
+              ...selectedStarter.template,
+              id: '',
+              name: newDesignName,
+          } as any);
+      } else {
+          createNew(selectedType, newDesignName);
+      }
       setShowCreateModal(false);
       setView('DESIGNER');
-      // Reset states
       setNewDesignName('');
       setSelectedType(null);
+      setSelectedStarter(null);
   };
 
   const handleOpen = (t: LabelTemplate) => {
@@ -257,23 +273,51 @@ const LabelDesigner: React.FC = () => {
                               />
                               {!hasName && newDesignName === '' && <p className="text-xs text-slate-400 mt-1 ml-1">* Requerido</p>}
                           </div>
-                          <div className="grid grid-cols-2 gap-4 mb-6">
-                              <button 
-                                  onClick={() => setSelectedType('LABEL')} 
-                                  className={`p-4 border-2 rounded-xl transition-all group text-left ${selectedType === 'LABEL' ? 'border-indigo-600 bg-indigo-50 shadow-md ring-2 ring-indigo-500/50' : 'border-slate-100 hover:border-indigo-300'}`}
+                          {/* Type selector */}
+                          <div className="grid grid-cols-2 gap-4 mb-5">
+                              <button
+                                  onClick={() => { setSelectedType('LABEL'); setSelectedStarter(null); }}
+                                  className={`p-4 border-2 rounded-xl transition-all text-left ${selectedType === 'LABEL' && !selectedStarter ? 'border-indigo-600 bg-indigo-50 shadow-md ring-2 ring-indigo-500/50' : 'border-slate-100 hover:border-indigo-300'}`}
                               >
-                                  <Tag className={`${selectedType === 'LABEL' ? 'text-indigo-600' : 'text-slate-400'} mb-2`} size={28}/>
+                                  <Tag className={`${selectedType === 'LABEL' && !selectedStarter ? 'text-indigo-600' : 'text-slate-400'} mb-2`} size={28}/>
                                   <h4 className="font-bold text-slate-800">Etiqueta</h4>
                                   <p className="text-xs text-slate-500 mt-1">Códigos de barra, precios (mm).</p>
                               </button>
-                              <button 
-                                  onClick={() => setSelectedType('DOCUMENT')} 
-                                  className={`p-4 border-2 rounded-xl transition-all group text-left ${selectedType === 'DOCUMENT' ? 'border-purple-600 bg-purple-50 shadow-md ring-2 ring-purple-500/50' : 'border-slate-100 hover:border-purple-300'}`}
+                              <button
+                                  onClick={() => { setSelectedType('DOCUMENT'); setSelectedStarter(null); }}
+                                  className={`p-4 border-2 rounded-xl transition-all text-left ${selectedType === 'DOCUMENT' && !selectedStarter ? 'border-purple-600 bg-purple-50 shadow-md ring-2 ring-purple-500/50' : 'border-slate-100 hover:border-purple-300'}`}
                               >
-                                  <FileText className={`${selectedType === 'DOCUMENT' ? 'text-purple-600' : 'text-slate-400'} mb-2`} size={28}/>
-                                  <h4 className="font-bold text-slate-800">Reporte</h4>
+                                  <FileText className={`${selectedType === 'DOCUMENT' && !selectedStarter ? 'text-purple-600' : 'text-slate-400'} mb-2`} size={28}/>
+                                  <h4 className="font-bold text-slate-800">Documento</h4>
                                   <p className="text-xs text-slate-500 mt-1">Facturas, informes A4 (cm).</p>
                               </button>
+                          </div>
+
+                          {/* Starter templates */}
+                          <div className="mb-5">
+                              <p className="text-xs font-bold text-slate-400 uppercase mb-2">— O elige una plantilla base —</p>
+                              <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                                  {STARTER_TEMPLATES.map(st => (
+                                      <button
+                                          key={st.id}
+                                          onClick={() => { setSelectedStarter(st); setSelectedType(st.type); }}
+                                          className={`w-full flex items-center gap-3 p-3 rounded-xl border-2 text-left transition-all ${
+                                              selectedStarter?.id === st.id
+                                                  ? 'border-indigo-600 bg-indigo-50 ring-2 ring-indigo-500/30'
+                                                  : 'border-slate-100 hover:border-indigo-200 hover:bg-slate-50'
+                                          }`}
+                                      >
+                                          <span className="text-2xl">{st.icon}</span>
+                                          <div className="flex-1 min-w-0">
+                                              <div className="font-bold text-sm text-slate-800 truncate">{st.name}</div>
+                                              <div className="text-[10px] text-slate-500 truncate">{st.description}</div>
+                                          </div>
+                                          <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase shrink-0 ${st.type === 'LABEL' ? 'bg-indigo-50 text-indigo-600' : 'bg-purple-50 text-purple-600'}`}>
+                                              {st.type}
+                                          </span>
+                                      </button>
+                                  ))}
+                              </div>
                           </div>
                           <button 
                               onClick={initCreation} 
@@ -319,6 +363,20 @@ const LabelDesigner: React.FC = () => {
             </div>
 
             <div className="w-1/3 flex justify-end gap-2">
+                <button
+                    onClick={() => setShowPreviewModal(true)}
+                    className="border border-slate-200 hover:bg-slate-50 text-slate-600 px-3 py-2 rounded-lg font-bold flex items-center gap-2 text-sm transition-all active:scale-95"
+                    title="Vista previa con datos reales"
+                >
+                    <Eye size={18}/> <span className="hidden md:inline">Preview</span>
+                </button>
+                <button
+                    onClick={() => printTemplate(template, {})}
+                    className="border border-slate-200 hover:bg-slate-50 text-slate-600 px-3 py-2 rounded-lg font-bold flex items-center gap-2 text-sm transition-all active:scale-95"
+                    title="Imprimir / Exportar"
+                >
+                    <Printer size={18}/> <span className="hidden md:inline">Imprimir</span>
+                </button>
                 <button onClick={handleSave} className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-bold shadow-sm flex items-center gap-2 text-sm transition-all active:scale-95">
                     <Save size={18}/> <span className="hidden md:inline">Guardar</span>
                 </button>
@@ -340,9 +398,10 @@ const LabelDesigner: React.FC = () => {
                 setTool={setTool}
             />
 
-            <DesignerCanvas 
-                template={template} 
+            <DesignerCanvas
+                template={template}
                 selectedId={selectedId}
+                selectedIds={selectedIds}
                 zoom={zoom}
                 setZoom={setZoom}
                 setSelectedId={(id) => { setSelectedId(id); setActivePanel('PROPERTIES'); if(id && window.innerWidth < 768) setIsMobilePropOpen(true); }}
@@ -494,6 +553,11 @@ const LabelDesigner: React.FC = () => {
                     </div>
                 </div>
             </div>
+        )}
+
+        {/* PREVIEW MODAL */}
+        {showPreviewModal && (
+            <PreviewModal template={template} onClose={() => setShowPreviewModal(false)} />
         )}
     </div>
   );
