@@ -1,5 +1,17 @@
 @import "tailwindcss";
 
+/* Restaurar comportamiento de Tailwind v3: borde por defecto gris claro en vez de currentColor */
+@theme {
+  --default-border-color: #e5e7eb;
+}
+
+/* Asegurar que inputs no hereden borde negro del browser/reset */
+@layer base {
+  input, textarea, select {
+    border-color: #e5e7eb;
+  }
+}
+
 /* Scrollbar personalizado */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }

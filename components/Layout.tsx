@@ -1,18 +1,17 @@
 
 import React, { useState } from 'react';
-// Fix: Use namespace import to bypass missing named export errors in certain environments
 import * as ReactRouterDOM from 'react-router-dom';
 const { Link, useLocation, useNavigate } = ReactRouterDOM as any;
 import { useAuth } from '../context/AuthContext';
 import { AuthService } from '../services/api';
 import {
-  LayoutDashboard, ShoppingCart, Users, DollarSign, FileText, LogOut, Menu, X, Bell, CloudLightning, ShieldCheck, Truck, ChevronDown, ChevronRight, Package, Briefcase, Box, UserCog, Calculator, Smartphone, Activity, Tag, Settings, PieChart, Wrench, Hand, ShieldAlert, KeyRound, Eye, EyeOff
+  LayoutDashboard, ShoppingCart, Users, DollarSign, FileText, LogOut, Menu, X, Bell,
+  CloudLightning, ShieldCheck, Truck, ChevronDown, ChevronRight, ChevronLeft, Package,
+  Briefcase, Box, UserCog, Calculator, Smartphone, Activity, Tag, Settings, PieChart,
+  Wrench, Hand, ShieldAlert, KeyRound, Eye, EyeOff, PanelLeftClose, PanelLeftOpen
 } from 'lucide-react';
 
-interface LayoutProps {
-  children?: React.ReactNode;
-}
-
+interface LayoutProps { children?: React.ReactNode; }
 interface NavItem {
   name: string;
   path?: string;
@@ -23,6 +22,7 @@ interface NavItem {
 
 const Layout: React.FC<LayoutProps> = ({ children }) => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(false);
   const [expandedMenus, setExpandedMenus] = useState<string[]>(['Comercial', 'Logística', 'Finanzas', 'Administración']);
   const [showChangePwd, setShowChangePwd] = useState(false);
   const [pwdForm, setPwdForm] = useState({ current: '', next: '', confirm: '' });
@@ -47,32 +47,19 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       setPwdForm({ current: '', next: '', confirm: '' });
     } catch (err: any) {
       setPwdError(err.message || 'Error al cambiar contraseña');
-    } finally {
-      setPwdLoading(false);
-    }
+    } finally { setPwdLoading(false); }
   };
 
-  const handleLogout = () => {
-    logout();
-    navigate('/login');
-  };
+  const handleLogout = () => { logout(); navigate('/login'); };
 
   const toggleMenu = (name: string) => {
-    setExpandedMenus(prev => 
-      prev.includes(name) ? prev.filter(item => item !== name) : [...prev, name]
-    );
+    setExpandedMenus(prev => prev.includes(name) ? prev.filter(i => i !== name) : [...prev, name]);
   };
 
   const navigationStructure: NavItem[] = [
-    { 
-      name: 'Dashboard', 
-      path: '/', 
-      icon: <LayoutDashboard size={20} />
-    },
+    { name: 'Dashboard', path: '/', icon: <LayoutDashboard size={20} /> },
     {
-      name: 'Comercial',
-      icon: <ShoppingCart size={20} />,
-      permission: 'VER_POS',
+      name: 'Comercial', icon: <ShoppingCart size={20} />, permission: 'VER_POS',
       subItems: [
         { name: 'Punto de Venta', path: '/pos', icon: <ShoppingCart size={18} />, permission: 'VER_POS' },
         { name: 'Clientes', path: '/clients', icon: <Users size={18} />, permission: 'VER_CLIENTES' },
@@ -82,9 +69,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       ]
     },
     {
-      name: 'Logística',
-      icon: <Package size={20} />,
-      permission: 'VER_INVENTARIO',
+      name: 'Logística', icon: <Package size={20} />, permission: 'VER_INVENTARIO',
       subItems: [
         { name: 'Inventario General', path: '/inventory', icon: <Package size={18} />, permission: 'VER_INVENTARIO' },
         { name: 'Consignaciones', path: '/consignments', icon: <Hand size={18} />, permission: 'VER_INVENTARIO' },
@@ -93,9 +78,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       ]
     },
     {
-      name: 'Finanzas',
-      icon: <DollarSign size={20} />,
-      permission: 'VER_CAJA',
+      name: 'Finanzas', icon: <DollarSign size={20} />, permission: 'VER_CAJA',
       subItems: [
         { name: 'Caja y Movimientos', path: '/cash', icon: <DollarSign size={18} />, permission: 'VER_CAJA' },
         { name: 'Costos y Gastos', path: '/costs', icon: <Calculator size={18} />, permission: 'VER_COSTOS' },
@@ -103,9 +86,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       ]
     },
     {
-      name: 'Administración',
-      icon: <ShieldCheck size={20} />,
-      permission: 'VER_ADMIN',
+      name: 'Administración', icon: <ShieldCheck size={20} />, permission: 'VER_ADMIN',
       subItems: [
         { name: 'Panel Cajas', path: '/admin/cash-dashboard', icon: <Activity size={18} />, permission: 'GESTIONAR_PANEL_CAJAS' },
         { name: 'Usuarios', path: '/admin/users', icon: <UserCog size={18} />, permission: 'GESTIONAR_USUARIOS' },
@@ -124,6 +105,17 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
     return item ? item.name : 'SmartCloud ERP';
   };
 
+  // Icono del módulo activo para el header cuando el nav está colapsado
+  const getActiveIcon = () => {
+    for (const item of navigationStructure) {
+      if (item.subItems) {
+        const sub = item.subItems.find(s => s.path === location.pathname);
+        if (sub) return sub.icon;
+      } else if (item.path === location.pathname) return item.icon;
+    }
+    return null;
+  };
+
   const renderNavItems = (items: NavItem[], isMobile = false) => {
     return items.map((item) => {
       if (item.subItems) {
@@ -132,7 +124,28 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
 
         const isExpanded = expandedMenus.includes(item.name);
         const hasActiveChild = visibleSubItems.some(sub => sub.path === location.pathname);
-        
+
+        // Modo colapsado: solo icono del grupo, activo si tiene hijo activo
+        if (isCollapsed && !isMobile) {
+          return (
+            <div key={item.name} className="relative group mb-1">
+              <button
+                onClick={() => { setIsCollapsed(false); toggleMenu(item.name); }}
+                title={item.name}
+                className={`w-full flex items-center justify-center p-3 rounded-xl transition-all duration-200 ${
+                  hasActiveChild ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:bg-slate-800/50 hover:text-white'
+                }`}
+              >
+                {item.icon}
+              </button>
+              {/* Tooltip */}
+              <div className="absolute left-full ml-2 top-1/2 -translate-y-1/2 bg-slate-800 text-white text-xs font-medium px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap z-50 transition-opacity">
+                {item.name}
+              </div>
+            </div>
+          );
+        }
+
         return (
           <div key={item.name} className="mb-2">
             <button
@@ -147,27 +160,24 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
               </div>
               {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
             </button>
-            
             <div className={`overflow-hidden transition-all duration-300 ease-in-out ${isExpanded ? 'max-h-96 opacity-100 mt-1' : 'max-h-0 opacity-0'}`}>
               <ul className="pl-4 space-y-1 border-l-2 border-slate-800 ml-6 my-1">
                 {visibleSubItems.map(subItem => {
-                   const isActive = location.pathname === subItem.path;
-                   return (
-                     <li key={subItem.path}>
-                       <Link
-                         to={subItem.path!}
-                         onClick={() => isMobile && setIsMobileMenuOpen(false)}
-                         className={`flex items-center gap-3 px-4 py-2 rounded-lg text-sm transition-all ${
-                           isActive 
-                             ? 'text-white font-medium bg-indigo-600/20 border border-indigo-500/30' 
-                             : 'text-slate-500 hover:text-slate-300'
-                         }`}
-                       >
-                         {subItem.icon}
-                         {subItem.name}
-                       </Link>
-                     </li>
-                   );
+                  const isActive = location.pathname === subItem.path;
+                  return (
+                    <li key={subItem.path}>
+                      <Link
+                        to={subItem.path!}
+                        onClick={() => isMobile && setIsMobileMenuOpen(false)}
+                        className={`flex items-center gap-3 px-4 py-2 rounded-lg text-sm transition-all ${
+                          isActive ? 'text-white font-medium bg-indigo-600/20 border border-indigo-500/30' : 'text-slate-500 hover:text-slate-300'
+                        }`}
+                      >
+                        {subItem.icon}
+                        {subItem.name}
+                      </Link>
+                    </li>
+                  );
                 })}
               </ul>
             </div>
@@ -176,22 +186,37 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       }
 
       if (item.permission && !hasPermission(item.permission)) return null;
-
       const isActive = location.pathname === item.path;
+
+      if (isCollapsed && !isMobile) {
+        return (
+          <div key={item.path} className="relative group mb-1">
+            <Link
+              to={item.path!}
+              title={item.name}
+              className={`flex items-center justify-center p-3 rounded-xl transition-all duration-200 ${
+                isActive ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/40' : 'text-slate-400 hover:bg-slate-800/50 hover:text-white'
+              }`}
+            >
+              {item.icon}
+            </Link>
+            <div className="absolute left-full ml-2 top-1/2 -translate-y-1/2 bg-slate-800 text-white text-xs font-medium px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap z-50 transition-opacity">
+              {item.name}
+            </div>
+          </div>
+        );
+      }
+
       return (
         <li key={item.path} className="mb-2">
           <Link
             to={item.path!}
             onClick={() => isMobile && setIsMobileMenuOpen(false)}
             className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group ${
-              isActive 
-                ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/40' 
-                : 'text-slate-400 hover:bg-slate-800/50 hover:text-white'
+              isActive ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/40' : 'text-slate-400 hover:bg-slate-800/50 hover:text-white'
             }`}
           >
-            <span className={isActive ? 'text-white' : 'text-slate-400 group-hover:text-white'}>
-              {item.icon}
-            </span>
+            <span className={isActive ? 'text-white' : 'text-slate-400 group-hover:text-white'}>{item.icon}</span>
             <span className="font-medium text-sm">{item.name}</span>
           </Link>
         </li>
@@ -201,125 +226,153 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
 
   return (
     <div className="flex h-screen bg-slate-50 overflow-hidden font-sans">
-      <aside className="hidden md:flex flex-col w-64 bg-[#0f172a] text-white shadow-2xl z-30 transition-all duration-300 shrink-0">
-        <div className="h-20 flex items-center gap-3 px-6 border-b border-slate-800/50 bg-gradient-to-r from-slate-900 to-slate-800">
+      {/* ── SIDEBAR DESKTOP ── */}
+      <aside className={`hidden md:flex flex-col ${isCollapsed ? 'w-16' : 'w-64'} bg-[#0f172a] text-white shadow-2xl z-30 transition-all duration-300 shrink-0`}>
+        {/* Logo + toggle */}
+        <div className={`h-20 flex items-center border-b border-slate-800/50 bg-gradient-to-r from-slate-900 to-slate-800 ${isCollapsed ? 'justify-center px-2' : 'gap-3 px-4'}`}>
           <div className="w-9 h-9 bg-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-500/20 shrink-0">
             <CloudLightning className="text-white" size={20} strokeWidth={2.5} />
           </div>
-          <div>
-            <h1 className="font-bold text-base tracking-tight leading-none text-white">SmartCloud</h1>
-            <p className="text-[10px] text-slate-400 font-medium tracking-wider mt-1 uppercase">ERP System</p>
-          </div>
+          {!isCollapsed && (
+            <div className="flex-1 min-w-0">
+              <h1 className="font-bold text-base tracking-tight leading-none text-white">SmartCloud</h1>
+              <p className="text-[10px] text-slate-400 font-medium tracking-wider mt-1 uppercase">ERP System</p>
+            </div>
+          )}
+          {/* Botón colapsar */}
+          <button
+            onClick={() => setIsCollapsed(v => !v)}
+            className={`text-slate-500 hover:text-white hover:bg-slate-700 p-1.5 rounded-lg transition-all ${isCollapsed ? 'mt-0' : ''}`}
+            title={isCollapsed ? 'Expandir menú' : 'Colapsar menú'}
+          >
+            {isCollapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
+          </button>
         </div>
 
-        <nav className="flex-1 overflow-y-auto py-6 px-3 custom-scrollbar">
+        <nav className="flex-1 overflow-y-auto py-4 px-2 custom-scrollbar">
           <ul className="space-y-1">
             {renderNavItems(navigationStructure)}
           </ul>
         </nav>
 
-        <div className="p-4 border-t border-slate-800 bg-slate-900/50">
-          <div className="flex items-center gap-3 mb-4 px-2">
-            <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-center text-white font-bold text-xs shadow-md shrink-0">
-              {user?.usuario.substring(0, 2).toUpperCase() || 'US'}
+        {/* Footer usuario */}
+        <div className={`border-t border-slate-800 bg-slate-900/50 ${isCollapsed ? 'p-2' : 'p-4'}`}>
+          {isCollapsed ? (
+            <div className="flex flex-col items-center gap-2">
+              <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-center text-white font-bold text-xs shadow-md">
+                {user?.usuario.substring(0, 2).toUpperCase() || 'US'}
+              </div>
+              <button onClick={handleLogout} title="Cerrar Sesión" className="p-2 text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors">
+                <LogOut size={16} />
+              </button>
             </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold text-white truncate">{user?.nombreEmpleado || 'Usuario'}</p>
-              <p className="text-xs text-slate-400 truncate">{user?.rol || 'Sin Rol'}</p>
-            </div>
-          </div>
-          <button
-            onClick={() => { setPwdForm({ current: '', next: '', confirm: '' }); setPwdError(''); setShowChangePwd(true); }}
-            className="flex items-center justify-center gap-2 w-full px-4 py-2 mb-2 text-slate-300 hover:text-white hover:bg-indigo-500/10 hover:text-indigo-400 rounded-lg transition-colors text-xs font-medium border border-transparent hover:border-indigo-500/20"
-          >
-            <KeyRound size={16} />
-            <span>Cambiar Contraseña</span>
-          </button>
-          <button
-            onClick={handleLogout}
-            className="flex items-center justify-center gap-2 w-full px-4 py-2 text-slate-300 hover:text-white hover:bg-red-500/10 hover:text-red-400 rounded-lg transition-colors text-xs font-medium border border-transparent hover:border-red-500/20"
-          >
-            <LogOut size={16} />
-            <span>Cerrar Sesión</span>
-          </button>
+          ) : (
+            <>
+              <div className="flex items-center gap-3 mb-4 px-2">
+                <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-center text-white font-bold text-xs shadow-md shrink-0">
+                  {user?.usuario.substring(0, 2).toUpperCase() || 'US'}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-white truncate">{user?.nombreEmpleado || 'Usuario'}</p>
+                  <p className="text-xs text-slate-400 truncate">{user?.rol || 'Sin Rol'}</p>
+                </div>
+              </div>
+              <button
+                onClick={() => { setPwdForm({ current: '', next: '', confirm: '' }); setPwdError(''); setShowChangePwd(true); }}
+                className="flex items-center justify-center gap-2 w-full px-4 py-2 mb-2 text-slate-300 hover:text-indigo-400 hover:bg-indigo-500/10 rounded-lg transition-colors text-xs font-medium border border-transparent hover:border-indigo-500/20"
+              >
+                <KeyRound size={16} /><span>Cambiar Contraseña</span>
+              </button>
+              <button
+                onClick={handleLogout}
+                className="flex items-center justify-center gap-2 w-full px-4 py-2 text-slate-300 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors text-xs font-medium border border-transparent hover:border-red-500/20"
+              >
+                <LogOut size={16} /><span>Cerrar Sesión</span>
+              </button>
+            </>
+          )}
         </div>
       </aside>
 
+      {/* ── CONTENIDO PRINCIPAL ── */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden bg-[#f8fafc]">
         <header className="bg-white/80 backdrop-blur-md border-b border-slate-200/60 h-16 md:h-20 flex items-center justify-between px-4 md:px-8 sticky top-0 z-20">
-          <div className="flex items-center gap-4">
-            <button 
+          <div className="flex items-center gap-3">
+            {/* Hamburger móvil */}
+            <button
               className="md:hidden text-slate-600 hover:text-slate-900 p-2 rounded-lg hover:bg-slate-100"
               onClick={() => setIsMobileMenuOpen(true)}
             >
               <Menu size={24} />
             </button>
+            {/* Icono del módulo activo cuando está colapsado */}
+            {isCollapsed && (
+              <span className="hidden md:flex items-center justify-center w-8 h-8 bg-indigo-50 text-indigo-600 rounded-lg">
+                {getActiveIcon()}
+              </span>
+            )}
             <h1 className="text-lg md:text-2xl font-bold text-slate-800 tracking-tight truncate">{getPageTitle()}</h1>
           </div>
-          
           <div className="flex items-center gap-4 md:gap-6">
-             <div className="text-right hidden sm:block">
-                 <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">Caja Asignada</p>
-                 <p className="text-sm font-bold text-indigo-600">{user?.idCaja}</p>
-             </div>
-             <button className="relative p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-full transition-all">
-               <Bell size={20} />
-               <span className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full border-2 border-white"></span>
-             </button>
+            <div className="text-right hidden sm:block">
+              <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">Caja Asignada</p>
+              <p className="text-sm font-bold text-indigo-600">{user?.idCaja}</p>
+            </div>
+            <button className="relative p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-full transition-all">
+              <Bell size={20} />
+              <span className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full border-2 border-white"></span>
+            </button>
           </div>
         </header>
 
         <main className="flex-1 overflow-y-auto p-4 md:p-8 scroll-smooth">
           <div className="max-w-7xl mx-auto animate-fade-in pb-20 md:pb-0">
-             {children}
+            {children}
           </div>
         </main>
       </div>
 
+      {/* ── MENÚ MÓVIL ── */}
       {isMobileMenuOpen && (
         <div className="fixed inset-0 z-50 flex md:hidden">
-          <div 
-            className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity" 
-            onClick={() => setIsMobileMenuOpen(false)}
-          />
-          <div className="relative w-80 bg-[#0f172a] h-full shadow-2xl flex flex-col transform transition-transform duration-300">
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setIsMobileMenuOpen(false)} />
+          <div className="relative w-80 bg-[#0f172a] h-full shadow-2xl flex flex-col">
             <div className="p-6 flex justify-between items-center border-b border-slate-800">
               <div className="flex items-center gap-3">
-                 <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
-                    <CloudLightning className="text-white" size={18} />
-                 </div>
-                 <span className="font-bold text-lg text-white">SmartCloud</span>
+                <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
+                  <CloudLightning className="text-white" size={18} />
+                </div>
+                <span className="font-bold text-lg text-white">SmartCloud</span>
               </div>
               <button onClick={() => setIsMobileMenuOpen(false)} className="text-slate-400 hover:text-white">
                 <X size={24} />
               </button>
             </div>
             <nav className="flex-1 py-6 px-4 overflow-y-auto">
-              <ul className="space-y-1">
-                {renderNavItems(navigationStructure, true)}
-              </ul>
+              <ul className="space-y-1">{renderNavItems(navigationStructure, true)}</ul>
             </nav>
             <div className="p-4 border-t border-slate-800">
-                <div className="flex items-center gap-3 text-slate-300 mb-4 px-2">
-                    <div className="w-8 h-8 bg-slate-700 rounded-full flex items-center justify-center text-xs">
-                        {user?.usuario.substring(0, 2).toUpperCase()}
-                    </div>
-                    <div>
-                        <p className="text-sm font-bold text-white">{user?.usuario}</p>
-                        <p className="text-xs">{user?.rol}</p>
-                    </div>
+              <div className="flex items-center gap-3 text-slate-300 mb-4 px-2">
+                <div className="w-8 h-8 bg-slate-700 rounded-full flex items-center justify-center text-xs">
+                  {user?.usuario.substring(0, 2).toUpperCase()}
                 </div>
-                <button onClick={() => { setIsMobileMenuOpen(false); setPwdForm({ current: '', next: '', confirm: '' }); setPwdError(''); setShowChangePwd(true); }} className="w-full py-2.5 mb-2 bg-indigo-600/10 text-indigo-400 rounded-lg text-sm font-bold flex items-center justify-center gap-2">
-                    <KeyRound size={16}/> Cambiar Contraseña
-                </button>
-                <button onClick={handleLogout} className="w-full py-3 bg-red-600/10 text-red-400 rounded-lg text-sm font-bold flex items-center justify-center gap-2">
-                    <LogOut size={16}/> Salir
-                </button>
+                <div>
+                  <p className="text-sm font-bold text-white">{user?.usuario}</p>
+                  <p className="text-xs">{user?.rol}</p>
+                </div>
+              </div>
+              <button onClick={() => { setIsMobileMenuOpen(false); setPwdForm({ current: '', next: '', confirm: '' }); setPwdError(''); setShowChangePwd(true); }} className="w-full py-2.5 mb-2 bg-indigo-600/10 text-indigo-400 rounded-lg text-sm font-bold flex items-center justify-center gap-2">
+                <KeyRound size={16} /> Cambiar Contraseña
+              </button>
+              <button onClick={handleLogout} className="w-full py-3 bg-red-600/10 text-red-400 rounded-lg text-sm font-bold flex items-center justify-center gap-2">
+                <LogOut size={16} /> Salir
+              </button>
             </div>
           </div>
         </div>
       )}
 
+      {/* ── MODAL CAMBIAR CONTRASEÑA ── */}
       {showChangePwd && (
         <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl p-6 animate-fade-in">
@@ -328,59 +381,42 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                 <KeyRound className="text-indigo-500" size={22} />
                 <h3 className="text-lg font-bold text-slate-800">Cambiar Contraseña</h3>
               </div>
-              <button onClick={() => setShowChangePwd(false)} className="text-slate-400 hover:text-red-500 transition-colors"><X size={22}/></button>
+              <button onClick={() => setShowChangePwd(false)} className="text-slate-400 hover:text-red-500 transition-colors"><X size={22} /></button>
             </div>
             <form onSubmit={handleChangePwd} className="space-y-4">
               <div>
                 <label className="text-xs font-bold text-slate-500 uppercase">Contraseña Actual</label>
                 <div className="relative mt-1">
-                  <input
-                    type={showCurrent ? 'text' : 'password'}
-                    required
+                  <input type={showCurrent ? 'text' : 'password'} required
                     className="w-full p-3 pr-10 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none"
-                    value={pwdForm.current}
-                    onChange={e => setPwdForm({...pwdForm, current: e.target.value})}
-                    placeholder="Contraseña actual"
-                  />
+                    value={pwdForm.current} onChange={e => setPwdForm({ ...pwdForm, current: e.target.value })} placeholder="Contraseña actual" />
                   <button type="button" onClick={() => setShowCurrent(v => !v)} className="absolute right-3 top-3.5 text-slate-400 hover:text-slate-600">
-                    {showCurrent ? <EyeOff size={16}/> : <Eye size={16}/>}
+                    {showCurrent ? <EyeOff size={16} /> : <Eye size={16} />}
                   </button>
                 </div>
               </div>
               <div>
                 <label className="text-xs font-bold text-slate-500 uppercase">Nueva Contraseña</label>
                 <div className="relative mt-1">
-                  <input
-                    type={showNext ? 'text' : 'password'}
-                    required
+                  <input type={showNext ? 'text' : 'password'} required
                     className="w-full p-3 pr-10 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none"
-                    value={pwdForm.next}
-                    onChange={e => setPwdForm({...pwdForm, next: e.target.value})}
-                    placeholder="Mínimo 6 caracteres"
-                  />
+                    value={pwdForm.next} onChange={e => setPwdForm({ ...pwdForm, next: e.target.value })} placeholder="Mínimo 6 caracteres" />
                   <button type="button" onClick={() => setShowNext(v => !v)} className="absolute right-3 top-3.5 text-slate-400 hover:text-slate-600">
-                    {showNext ? <EyeOff size={16}/> : <Eye size={16}/>}
+                    {showNext ? <EyeOff size={16} /> : <Eye size={16} />}
                   </button>
                 </div>
               </div>
               <div>
                 <label className="text-xs font-bold text-slate-500 uppercase">Confirmar Contraseña</label>
-                <input
-                  type="password"
-                  required
+                <input type="password" required
                   className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl mt-1 focus:ring-2 focus:ring-indigo-500 outline-none"
-                  value={pwdForm.confirm}
-                  onChange={e => setPwdForm({...pwdForm, confirm: e.target.value})}
-                  placeholder="Repetir contraseña"
-                />
+                  value={pwdForm.confirm} onChange={e => setPwdForm({ ...pwdForm, confirm: e.target.value })} placeholder="Repetir contraseña" />
               </div>
               {pwdError && <p className="text-xs text-red-500 bg-red-50 px-3 py-2 rounded-lg">{pwdError}</p>}
               <div className="flex gap-3 pt-2">
-                <button type="button" onClick={() => setShowChangePwd(false)} className="flex-1 py-2.5 text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl text-sm font-bold transition-colors">
-                  Cancelar
-                </button>
+                <button type="button" onClick={() => setShowChangePwd(false)} className="flex-1 py-2.5 text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl text-sm font-bold transition-colors">Cancelar</button>
                 <button type="submit" disabled={pwdLoading} className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-xl text-sm font-bold transition-colors flex items-center justify-center gap-2">
-                  {pwdLoading ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"/> : <KeyRound size={14}/>}
+                  {pwdLoading ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <KeyRound size={14} />}
                   {pwdLoading ? 'Guardando...' : 'Actualizar'}
                 </button>
               </div>
