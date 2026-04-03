@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { ClientService } from '../services/api';
 import { Cliente } from '../types';
+import { useOfflineSync } from '../hooks/useOfflineSync';
 import { Search, PlusCircle, Users, Edit2, Trash2, X, RefreshCw } from 'lucide-react';
 import Swal from 'sweetalert2';
 
@@ -18,6 +19,8 @@ const Clients: React.FC = () => {
   useEffect(() => {
     loadClients();
   }, []);
+
+  useOfflineSync(loadClients);
 
   const loadClients = async () => {
     setLoading(true);

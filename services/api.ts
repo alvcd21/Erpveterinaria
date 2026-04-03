@@ -25,9 +25,50 @@ import { offlineDB } from './offlineDB';
 
 const API_URL = '/api';
 
-// Error especial para operaciones encoladas offline
+// Error especial para operaciones encoladas offline (mantenido por compatibilidad)
 export class OfflineQueuedError extends Error {
   constructor() { super('OFFLINE_QUEUED'); this.name = 'OfflineQueuedError'; }
+}
+
+// Mapa de colecciones: prefijo de endpoint → campo ID + clave de cache
+const ENTITY_MAP: { prefix: string; idField: string; cacheKey?: string }[] = [
+  { prefix: '/inventory/telefonos',          idField: 'idTelefono' },
+  { prefix: '/inventory/stock',              idField: 'idInventario' },
+  { prefix: '/inventory/accesorios-master',  idField: 'id' },
+  { prefix: '/inventory/categorias',         idField: 'id' },
+  { prefix: '/inventory/ubicaciones',        idField: 'id' },
+  { prefix: '/accounting/socios',            idField: 'id' },
+  { prefix: '/ventas',                       idField: 'codVenta', cacheKey: '/ventas/historial' },
+  { prefix: '/clientes',                     idField: 'identidad' },
+  { prefix: '/reparaciones',                 idField: 'id' },
+  { prefix: '/garantias',                    idField: 'id' },
+  { prefix: '/consignaciones',               idField: 'id' },
+  { prefix: '/proveedores',                  idField: 'id' },
+  { prefix: '/paquetes',                     idField: 'id' },
+  { prefix: '/costos',                       idField: 'id' },
+  { prefix: '/ingresos',                     idField: 'id' },
+  { prefix: '/egresos',                      idField: 'id' },
+  { prefix: '/empleados',                    idField: 'id' },
+  { prefix: '/users',                        idField: 'id' },
+  { prefix: '/roles',                        idField: 'id' },
+  { prefix: '/cajas',                        idField: 'id' },
+  { prefix: '/labels',                       idField: 'id' },
+];
+
+interface EndpointInfo { collection: string; urlId: string | null; idField: string; cacheKey: string; }
+
+function parseEndpoint(endpoint: string, method: string): EndpointInfo | null {
+  const sorted = [...ENTITY_MAP].sort((a, b) => b.prefix.length - a.prefix.length);
+  for (const col of sorted) {
+    if (endpoint === col.prefix || endpoint.startsWith(col.prefix + '/') || endpoint.startsWith(col.prefix + '?')) {
+      const rest = endpoint.slice(col.prefix.length);
+      const urlId = method !== 'POST' && rest.startsWith('/')
+        ? (rest.slice(1).split('/')[0].split('?')[0] || null)
+        : null;
+      return { collection: col.prefix, urlId, idField: col.idField, cacheKey: col.cacheKey || col.prefix };
+    }
+  }
+  return null;
 }
 
 // request helper function — offline-aware
@@ -44,10 +85,36 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
   // Sin red: responder INMEDIATAMENTE desde IndexedDB sin tocar la red
   if (!navigator.onLine) {
     if (!isRead) {
-      await offlineDB.addToQueue(method, `${API_URL}${endpoint}`,
-        options.body ? JSON.parse(options.body as string) : null);
-      window.dispatchEvent(new CustomEvent('smartcloud:write-queued'));
-      return {} as T;
+      const parsedBody = options.body ? JSON.parse(options.body as string) : null;
+      await offlineDB.addToQueue(method, `${API_URL}${endpoint}`, parsedBody);
+
+      // Escritura optimista: parchear el cache local para que la UI vea el cambio inmediatamente
+      const epInfo = parseEndpoint(endpoint, method);
+      let tempResult: any = parsedBody || {};
+
+      if (epInfo) {
+        const tempId = `LOCAL_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+
+        if (method === 'POST') {
+          // Para ventas, el caller espera { codVenta }
+          if (epInfo.collection === '/ventas') {
+            tempResult = { codVenta: tempId, _offline: true };
+          } else {
+            tempResult = { ...parsedBody, [epInfo.idField]: tempId, _offline: true };
+          }
+          // Insertar en el array cacheado (fire-and-wait para que esté listo antes del reload)
+          await offlineDB.patchCache(`cache:${epInfo.cacheKey}`, 'POST', null, tempResult, epInfo.idField);
+        } else if (method === 'PUT' || method === 'PATCH') {
+          await offlineDB.patchCache(`cache:${epInfo.cacheKey}`, 'PUT', epInfo.urlId, parsedBody, epInfo.idField);
+          tempResult = parsedBody || {};
+        } else if (method === 'DELETE') {
+          await offlineDB.patchCache(`cache:${epInfo.cacheKey}`, 'DELETE', epInfo.urlId, null, epInfo.idField);
+          tempResult = {};
+        }
+      }
+
+      window.dispatchEvent(new CustomEvent('smartcloud:write-queued', { detail: { endpoint, method } }));
+      return tempResult as T;
     }
     // GET offline → cache directo, sin fetch
     const cachedOffline = await offlineDB.getCachedData<T>(`cache:${endpoint}`);

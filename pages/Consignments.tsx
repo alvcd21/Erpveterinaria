@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { ConsignService, InventoryService } from '../services/api';
+import { useOfflineSync } from '../hooks/useOfflineSync';
 import { Consignacion, ProductoUnified } from '../types';
 import { 
   Hand, PlusCircle, Search, Store, ShoppingCart, RefreshCcw, X, Save, RefreshCw, AlertTriangle, ArrowRightCircle, Trash2, Edit2, Filter, Package, Smartphone, Layers, Check, Minus, Plus, LayoutGrid
@@ -34,8 +35,9 @@ const Consignments: React.FC = () => {
   const [selectedCat, setSelectedCat] = useState('ALL');
   const [selectedType, setSelectedType] = useState<'ALL' | 'TELEFONO' | 'ACCESORIO'>('ALL');
 
-  useEffect(() => { 
-    loadData(); 
+  useOfflineSync(loadData);
+  useEffect(() => {
+    loadData();
     loadProducts();
     // Handle redirect from Inventory
     if (location.state?.consignItem) {

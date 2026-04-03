@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { InventoryService, ClientService, SalesService, ConfigService } from '../services/api';
+import { useOfflineSync } from '../hooks/useOfflineSync';
 import { ProductoUnified, DetalleVenta, Cliente, VentaPayload } from '../types';
 import { Search, ShoppingCart, RefreshCw, User, X, Check, Plus, Minus, UserPlus, Zap, LayoutGrid, Tag, Save, Wallet } from 'lucide-react';
 import Swal from 'sweetalert2';
@@ -85,6 +86,7 @@ const POS: React.FC = (): React.ReactElement => {
   const [editingSaleId, setEditingSaleId] = useState<string | null>(null);
 
   useEffect(() => { loadInitialData(); }, []);
+  useOfflineSync(loadInitialData);
 
   useEffect(() => {
     const state = location.state as any;

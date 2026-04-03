@@ -135,5 +135,43 @@ export const offlineDB = {
     const keys = await promisify<IDBValidKey[]>(tx(db, 'data_cache', 'readonly').getAllKeys());
     db.close();
     return (keys || []) as string[];
+  },
+
+  /**
+   * Aplica una mutación optimista al cache local.
+   * POST → inserta item en el array cacheado.
+   * PUT/PATCH → actualiza el item por idField.
+   * DELETE → elimina el item por idField.
+   * Si no hay cache previo para esa clave, no hace nada (no puede fabricar data de la nada).
+   */
+  async patchCache(cacheKey: string, method: string, urlId: string | null, data: any, idField: string): Promise<void> {
+    const db = await openDB();
+    const record = await promisify<any>(tx(db, 'data_cache', 'readonly').get(cacheKey));
+    if (!record) { db.close(); return; }
+
+    let cached = record.data;
+
+    if (method === 'POST' && Array.isArray(cached)) {
+      cached = [...cached, data];
+    } else if ((method === 'PUT' || method === 'PATCH') && urlId) {
+      if (Array.isArray(cached)) {
+        cached = cached.map((item: any) => {
+          const itemId = String(item[idField] ?? item.id ?? item.identidad ?? '');
+          return itemId === String(urlId) ? { ...item, ...data } : item;
+        });
+      } else if (cached && typeof cached === 'object') {
+        cached = { ...cached, ...data };
+      }
+    } else if (method === 'DELETE' && urlId) {
+      if (Array.isArray(cached)) {
+        cached = cached.filter((item: any) => {
+          const itemId = String(item[idField] ?? item.id ?? item.identidad ?? '');
+          return itemId !== String(urlId);
+        });
+      }
+    }
+
+    await promisify(tx(db, 'data_cache', 'readwrite').put({ key: cacheKey, data: cached, cachedAt: record.cachedAt }));
+    db.close();
   }
 };

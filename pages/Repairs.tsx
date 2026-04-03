@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { RepairService, InventoryService, ClientService, ConfigService } from '../services/api';
+import { useOfflineSync } from '../hooks/useOfflineSync';
 import { getLogoSync } from '../services/logoLoader';
 import { printRepairOrder } from '../services/DocumentService';
 import { Reparacion, Telefono, Cliente } from '../types';
@@ -87,6 +88,7 @@ const Repairs: React.FC = () => {
   const [selectedComplementos, setSelectedComplementos] = useState<string[]>([]);
 
   useEffect(() => { loadData(); loadDependencies(); }, []);
+  useOfflineSync(loadData);
 
   const loadDependencies = async () => {
       try {

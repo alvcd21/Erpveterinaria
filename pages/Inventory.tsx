@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { InventoryService, LabelService } from '../services/api';
+import { useOfflineSync } from '../hooks/useOfflineSync';
 import { 
   Telefono, 
   Inventario, 
@@ -56,6 +57,7 @@ const Inventory: React.FC = () => {
     loadData();
     loadDependencies();
   }, [activeTab]);
+  useOfflineSync(loadData);
 
   const loadDependencies = async () => {
       try {

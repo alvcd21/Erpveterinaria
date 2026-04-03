@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { WarrantyService, SalesService, InventoryService, ClientService, ConfigService } from '../services/api';
+import { useOfflineSync } from '../hooks/useOfflineSync';
 import { getLogoSync } from '../services/logoLoader';
 import { Garantia, Venta, ProductoUnified, DetalleVenta, Cliente } from '../types';
 import { 
@@ -91,6 +92,7 @@ const ReturnsWarranties: React.FC = () => {
   const [returnedDeviceState, setReturnedDeviceState] = useState<'Disponible' | 'Defectuoso'>('Defectuoso');
 
   useEffect(() => { loadData(); loadDependencies(); }, []);
+  useOfflineSync(loadData);
 
   const loadData = async () => {
     setLoading(true);

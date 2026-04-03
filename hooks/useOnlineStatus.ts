@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { offlineDB, SyncItem } from '../services/offlineDB';
-import { refreshStaleCaches } from '../services/offlineSync';
+import { refreshStaleCaches, warmAllCaches } from '../services/offlineSync';
 
 export interface SyncState {
   isOnline: boolean;
@@ -75,6 +75,8 @@ export function useOnlineStatus() {
 
     if (successCount > 0) {
       window.dispatchEvent(new CustomEvent('smartcloud:synced', { detail: { successCount } }));
+      // Refrescar todos los caches para reemplazar items _offline con datos reales del servidor
+      warmAllCaches().catch(() => {});
     }
   }, []);
 
