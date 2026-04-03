@@ -102,13 +102,13 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
           } else {
             tempResult = { ...parsedBody, [epInfo.idField]: tempId, _offline: true };
           }
-          // Insertar en el array cacheado (fire-and-wait para que esté listo antes del reload)
-          await offlineDB.patchCache(`cache:${epInfo.cacheKey}`, 'POST', null, tempResult, epInfo.idField);
+          // patchCacheByPrefix cubre tanto cache:/ingresos como cache:/ingresos?idCaja=x&fecha=y
+          await offlineDB.patchCacheByPrefix(`cache:${epInfo.cacheKey}`, 'POST', null, tempResult, epInfo.idField);
         } else if (method === 'PUT' || method === 'PATCH') {
-          await offlineDB.patchCache(`cache:${epInfo.cacheKey}`, 'PUT', epInfo.urlId, parsedBody, epInfo.idField);
+          await offlineDB.patchCacheByPrefix(`cache:${epInfo.cacheKey}`, 'PUT', epInfo.urlId, parsedBody, epInfo.idField);
           tempResult = parsedBody || {};
         } else if (method === 'DELETE') {
-          await offlineDB.patchCache(`cache:${epInfo.cacheKey}`, 'DELETE', epInfo.urlId, null, epInfo.idField);
+          await offlineDB.patchCacheByPrefix(`cache:${epInfo.cacheKey}`, 'DELETE', epInfo.urlId, null, epInfo.idField);
           tempResult = {};
         }
       }

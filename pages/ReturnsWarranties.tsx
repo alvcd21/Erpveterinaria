@@ -92,7 +92,6 @@ const ReturnsWarranties: React.FC = () => {
   const [returnedDeviceState, setReturnedDeviceState] = useState<'Disponible' | 'Defectuoso'>('Defectuoso');
 
   useEffect(() => { loadData(); loadDependencies(); }, []);
-  useOfflineSync(loadData);
 
   const loadData = async () => {
     setLoading(true);
@@ -101,6 +100,8 @@ const ReturnsWarranties: React.FC = () => {
       setWarranties(data || []);
     } catch (e) { console.error(e); } finally { setLoading(false); }
   };
+
+  useOfflineSync(loadData);
 
   const loadDependencies = async () => {
       try {

@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { CashService, SalesService, PackagesService, ConfigService, AccountingService } from '../services/api';
+import { useOfflineSync } from '../hooks/useOfflineSync';
 import { getLogoSync } from '../services/logoLoader';
 import { Arqueo, Ingreso, Egreso, Venta, Saldo, Paquete, EmpresaConfig, SubtipoIngreso, SubtipoEgreso, Socio } from '../types';
 import { 
@@ -128,6 +129,8 @@ const CashRegister: React.FC = () => {
       } else { setArqueo(null); }
     } catch (error) { console.error(error); } finally { setIsLoading(false); }
   };
+
+  useOfflineSync(loadData);
 
   const handleOpenBox = async () => {
      if(!openForm.monto) return Swal.fire('Error', 'Ingrese monto inicial', 'error');

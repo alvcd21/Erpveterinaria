@@ -86,7 +86,6 @@ const POS: React.FC = (): React.ReactElement => {
   const [editingSaleId, setEditingSaleId] = useState<string | null>(null);
 
   useEffect(() => { loadInitialData(); }, []);
-  useOfflineSync(loadInitialData);
 
   useEffect(() => {
     const state = location.state as any;
@@ -124,6 +123,8 @@ const POS: React.FC = (): React.ReactElement => {
       setCompanyConfig(configData);
     } catch (err) { console.error(err); } finally { setIsLoading(false); }
   };
+
+  useOfflineSync(loadInitialData);
 
   const loadSaleToEdit = async (saleId: string) => {
     try {

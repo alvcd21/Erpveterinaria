@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { PackagesService } from '../services/api';
+import { useOfflineSync } from '../hooks/useOfflineSync';
 import { Paquete } from '../types';
 import { Search, PlusCircle, Smartphone, Edit2, Trash2, X, RefreshCw } from 'lucide-react';
 import Swal from 'sweetalert2';
@@ -30,6 +31,8 @@ const Packages: React.FC = () => {
       setLoading(false);
     }
   };
+
+  useOfflineSync(loadData);
 
   const openNewModal = () => {
     setIsEditing(false);

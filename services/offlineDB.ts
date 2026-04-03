@@ -138,6 +138,19 @@ export const offlineDB = {
   },
 
   /**
+   * Aplica patchCache a TODOS los keys que empiecen con el prefijo dado.
+   * Útil para endpoints con query params: cache:/ingresos?idCaja=x&fecha=y
+   * se empareja con el prefijo cache:/ingresos
+   */
+  async patchCacheByPrefix(prefix: string, method: string, urlId: string | null, data: any, idField: string): Promise<void> {
+    const db = await openDB();
+    const allKeys = await promisify<IDBValidKey[]>(tx(db, 'data_cache', 'readonly').getAllKeys());
+    db.close();
+    const matching = (allKeys || []).filter(k => String(k).startsWith(prefix)) as string[];
+    await Promise.all(matching.map(key => this.patchCache(key, method, urlId, data, idField)));
+  },
+
+  /**
    * Aplica una mutación optimista al cache local.
    * POST → inserta item en el array cacheado.
    * PUT/PATCH → actualiza el item por idField.

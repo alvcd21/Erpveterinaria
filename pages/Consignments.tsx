@@ -35,7 +35,6 @@ const Consignments: React.FC = () => {
   const [selectedCat, setSelectedCat] = useState('ALL');
   const [selectedType, setSelectedType] = useState<'ALL' | 'TELEFONO' | 'ACCESORIO'>('ALL');
 
-  useOfflineSync(loadData);
   useEffect(() => {
     loadData();
     loadProducts();
@@ -55,6 +54,8 @@ const Consignments: React.FC = () => {
       setConsignments(data || []);
     } catch (e) { console.error(e); } finally { setLoading(false); }
   };
+
+  useOfflineSync(loadData);
 
   const loadProducts = async () => {
       try {

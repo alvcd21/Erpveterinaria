@@ -57,7 +57,6 @@ const Inventory: React.FC = () => {
     loadData();
     loadDependencies();
   }, [activeTab]);
-  useOfflineSync(loadData);
 
   const loadDependencies = async () => {
       try {
@@ -101,6 +100,8 @@ const Inventory: React.FC = () => {
       setLoading(false);
     }
   };
+
+  useOfflineSync(loadData);
 
   const handleChangePhoneStatus = async (p: Telefono) => {
       const { value: status } = await Swal.fire({

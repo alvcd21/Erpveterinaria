@@ -88,7 +88,6 @@ const Repairs: React.FC = () => {
   const [selectedComplementos, setSelectedComplementos] = useState<string[]>([]);
 
   useEffect(() => { loadData(); loadDependencies(); }, []);
-  useOfflineSync(loadData);
 
   const loadDependencies = async () => {
       try {
@@ -110,6 +109,8 @@ const Repairs: React.FC = () => {
       setRepairs(data || []);
     } catch (e) { console.error(e); } finally { setLoading(false); }
   };
+
+  useOfflineSync(loadData);
 
   const uniqueBrands = useMemo(() => Array.from(new Set(phones.map(p => p.marca))).sort(), [phones]);
   const availableModels = useMemo(() => {

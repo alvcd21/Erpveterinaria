@@ -20,8 +20,6 @@ const Clients: React.FC = () => {
     loadClients();
   }, []);
 
-  useOfflineSync(loadClients);
-
   const loadClients = async () => {
     setLoading(true);
     try {
@@ -33,6 +31,8 @@ const Clients: React.FC = () => {
       setLoading(false);
     }
   };
+
+  useOfflineSync(loadClients);
 
   const openNewModal = () => {
     setIsEditing(false);

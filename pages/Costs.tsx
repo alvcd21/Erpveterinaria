@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { CostsService } from '../services/api';
+import { useOfflineSync } from '../hooks/useOfflineSync';
 import { Costo, TipoCosto } from '../types';
 import { PlusCircle, Search, Edit2, Trash2, X, RefreshCw, Calculator, TrendingDown, Layers } from 'lucide-react';
 import Swal from 'sweetalert2';
@@ -30,6 +31,8 @@ const Costs: React.FC = () => {
       setLoading(false);
     }
   };
+
+  useOfflineSync(loadCosts);
 
   const openNewModal = () => {
     setIsEditing(false);
