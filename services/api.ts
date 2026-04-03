@@ -41,11 +41,20 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     ...(options.headers || {})
   };
 
-  // Escritura offline → encolar y lanzar error especial
-  if (!navigator.onLine && !isRead) {
-    await offlineDB.addToQueue(method, `${API_URL}${endpoint}`,
-      options.body ? JSON.parse(options.body as string) : null);
-    throw new OfflineQueuedError();
+  // Sin red: responder INMEDIATAMENTE desde IndexedDB sin tocar la red
+  if (!navigator.onLine) {
+    if (!isRead) {
+      await offlineDB.addToQueue(method, `${API_URL}${endpoint}`,
+        options.body ? JSON.parse(options.body as string) : null);
+      throw new OfflineQueuedError();
+    }
+    // GET offline → cache directo, sin fetch
+    const cachedOffline = await offlineDB.getCachedData<T>(`cache:${endpoint}`);
+    if (cachedOffline !== null) {
+      window.dispatchEvent(new CustomEvent('smartcloud:cache-fallback', { detail: { endpoint } }));
+      return cachedOffline;
+    }
+    throw new Error('Sin conexión. No hay datos en cache para este módulo.');
   }
 
   try {
@@ -62,7 +71,7 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     return data;
   } catch (err) {
     if (err instanceof OfflineQueuedError) throw err;
-    // Fallback a cache IndexedDB para GETs
+    // Fallback a cache IndexedDB para GETs (ej: red inestable, timeout)
     if (isRead) {
       const cached = await offlineDB.getCachedData<T>(`cache:${endpoint}`);
       if (cached !== null) {
