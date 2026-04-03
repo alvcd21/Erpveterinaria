@@ -8,6 +8,7 @@ const OfflineBanner: React.FC = () => {
   const { isOnline, isSyncing, pendingCount, syncError, processQueue } = useOnlineStatus();
   const { isAuthenticated } = useAuth();
   const [showSyncedToast, setShowSyncedToast] = useState(false);
+  const [showQueuedToast, setShowQueuedToast] = useState(false);
 
   // Precarga proactiva al autenticarse y estar online
   useEffect(() => {
@@ -29,6 +30,25 @@ const OfflineBanner: React.FC = () => {
     window.addEventListener('smartcloud:synced', handleSynced);
     return () => window.removeEventListener('smartcloud:synced', handleSynced);
   }, []);
+
+  useEffect(() => {
+    const handleQueued = () => {
+      setShowQueuedToast(true);
+      setTimeout(() => setShowQueuedToast(false), 3500);
+    };
+    window.addEventListener('smartcloud:write-queued', handleQueued);
+    return () => window.removeEventListener('smartcloud:write-queued', handleQueued);
+  }, []);
+
+  // Toast de operación encolada offline
+  if (showQueuedToast) {
+    return (
+      <div className="fixed bottom-4 right-4 z-[9999] flex items-center gap-2 bg-indigo-600 text-white px-4 py-3 rounded-xl shadow-2xl animate-fade-in">
+        <CheckCircle size={18} />
+        <span className="text-sm font-semibold">Guardado. Se sincronizará al reconectarse</span>
+      </div>
+    );
+  }
 
   // Toast de sincronización exitosa (esquina superior derecha, no bloquea header)
   if (showSyncedToast) {

@@ -116,6 +116,37 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
     return null;
   };
 
+  // Modo colapsado: todos los ítems individuales en lista plana (sin grupos)
+  const renderCollapsedItems = () => {
+    const flatItems: NavItem[] = [];
+    for (const item of navigationStructure) {
+      if (!item.subItems) {
+        if (!item.permission || hasPermission(item.permission)) flatItems.push(item);
+      } else {
+        item.subItems.filter(s => hasPermission(s.permission)).forEach(s => flatItems.push(s));
+      }
+    }
+    return flatItems.map(item => {
+      const isActive = location.pathname === item.path;
+      return (
+        <div key={item.path} className="relative group mb-1">
+          <Link
+            to={item.path!}
+            title={item.name}
+            className={`flex items-center justify-center p-3 rounded-xl transition-all duration-200 ${
+              isActive ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/40' : 'text-slate-400 hover:bg-slate-800/50 hover:text-white'
+            }`}
+          >
+            {item.icon}
+          </Link>
+          <div className="absolute left-full ml-2 top-1/2 -translate-y-1/2 bg-slate-800 text-white text-xs font-medium px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap z-50 transition-opacity">
+            {item.name}
+          </div>
+        </div>
+      );
+    });
+  };
+
   const renderNavItems = (items: NavItem[], isMobile = false) => {
     return items.map((item) => {
       if (item.subItems) {
@@ -124,27 +155,6 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
 
         const isExpanded = expandedMenus.includes(item.name);
         const hasActiveChild = visibleSubItems.some(sub => sub.path === location.pathname);
-
-        // Modo colapsado: solo icono del grupo, activo si tiene hijo activo
-        if (isCollapsed && !isMobile) {
-          return (
-            <div key={item.name} className="relative group mb-1">
-              <button
-                onClick={() => { setIsCollapsed(false); toggleMenu(item.name); }}
-                title={item.name}
-                className={`w-full flex items-center justify-center p-3 rounded-xl transition-all duration-200 ${
-                  hasActiveChild ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:bg-slate-800/50 hover:text-white'
-                }`}
-              >
-                {item.icon}
-              </button>
-              {/* Tooltip */}
-              <div className="absolute left-full ml-2 top-1/2 -translate-y-1/2 bg-slate-800 text-white text-xs font-medium px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap z-50 transition-opacity">
-                {item.name}
-              </div>
-            </div>
-          );
-        }
 
         return (
           <div key={item.name} className="mb-2">
@@ -188,25 +198,6 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       if (item.permission && !hasPermission(item.permission)) return null;
       const isActive = location.pathname === item.path;
 
-      if (isCollapsed && !isMobile) {
-        return (
-          <div key={item.path} className="relative group mb-1">
-            <Link
-              to={item.path!}
-              title={item.name}
-              className={`flex items-center justify-center p-3 rounded-xl transition-all duration-200 ${
-                isActive ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/40' : 'text-slate-400 hover:bg-slate-800/50 hover:text-white'
-              }`}
-            >
-              {item.icon}
-            </Link>
-            <div className="absolute left-full ml-2 top-1/2 -translate-y-1/2 bg-slate-800 text-white text-xs font-medium px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap z-50 transition-opacity">
-              {item.name}
-            </div>
-          </div>
-        );
-      }
-
       return (
         <li key={item.path} className="mb-2">
           <Link
@@ -227,7 +218,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   return (
     <div className="flex h-screen bg-slate-50 overflow-hidden font-sans">
       {/* ── SIDEBAR DESKTOP ── */}
-      <aside className={`hidden md:flex flex-col ${isCollapsed ? 'w-16' : 'w-64'} bg-[#0f172a] text-white shadow-2xl z-30 transition-all duration-300 shrink-0`}>
+      <aside className={`hidden md:flex flex-col ${isCollapsed ? 'w-16' : 'w-64'} bg-[#0f172a] text-white shadow-2xl z-30 transition-all duration-300 shrink-0 overflow-x-hidden`}>
         {/* Logo + toggle */}
         <div className={`h-20 flex items-center border-b border-slate-800/50 bg-gradient-to-r from-slate-900 to-slate-800 ${isCollapsed ? 'justify-center px-2' : 'gap-3 px-4'}`}>
           <div className="w-9 h-9 bg-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-500/20 shrink-0">
@@ -249,10 +240,11 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
           </button>
         </div>
 
-        <nav className="flex-1 overflow-y-auto py-4 px-2 custom-scrollbar">
-          <ul className="space-y-1">
-            {renderNavItems(navigationStructure)}
-          </ul>
+        <nav className="flex-1 overflow-y-auto overflow-x-hidden py-4 px-2 custom-scrollbar">
+          {isCollapsed
+            ? <div className="space-y-1">{renderCollapsedItems()}</div>
+            : <ul className="space-y-1">{renderNavItems(navigationStructure)}</ul>
+          }
         </nav>
 
         {/* Footer usuario */}

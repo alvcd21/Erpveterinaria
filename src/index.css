@@ -1,12 +1,15 @@
 @import "tailwindcss";
 
 /* Restaurar comportamiento de Tailwind v3: borde por defecto gris claro en vez de currentColor */
-@theme {
+:root {
   --default-border-color: #e5e7eb;
 }
 
-/* Asegurar que inputs no hereden borde negro del browser/reset */
+/* Neutralizar border-color: currentColor que usa Tailwind v4 por defecto */
 @layer base {
+  *, ::before, ::after {
+    border-color: #e5e7eb;
+  }
   input, textarea, select {
     border-color: #e5e7eb;
   }

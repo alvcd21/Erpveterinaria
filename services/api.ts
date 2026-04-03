@@ -46,7 +46,8 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     if (!isRead) {
       await offlineDB.addToQueue(method, `${API_URL}${endpoint}`,
         options.body ? JSON.parse(options.body as string) : null);
-      throw new OfflineQueuedError();
+      window.dispatchEvent(new CustomEvent('smartcloud:write-queued'));
+      return {} as T;
     }
     // GET offline → cache directo, sin fetch
     const cachedOffline = await offlineDB.getCachedData<T>(`cache:${endpoint}`);

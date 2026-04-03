@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { InventoryService, ClientService, SalesService, ConfigService, OfflineQueuedError } from '../services/api';
+import { InventoryService, ClientService, SalesService, ConfigService } from '../services/api';
 import { ProductoUnified, DetalleVenta, Cliente, VentaPayload } from '../types';
 import { Search, ShoppingCart, RefreshCw, User, X, Check, Plus, Minus, UserPlus, Zap, LayoutGrid, Tag, Save, Wallet } from 'lucide-react';
 import Swal from 'sweetalert2';
@@ -448,6 +448,10 @@ const POS: React.FC = (): React.ReactElement => {
         Swal.fire('Actualizado', 'Venta modificada con éxito', 'success');
       } else {
         const response = await SalesService.createVenta(payload);
+        if (!response?.codVenta) {
+          resetPOS();
+          return;
+        }
         saleId = response.codVenta;
         Swal.fire({
             title: '¡Venta Exitosa!',
@@ -468,16 +472,6 @@ const POS: React.FC = (): React.ReactElement => {
 
       resetPOS();
     } catch (e: any) {
-      if (e instanceof OfflineQueuedError) {
-        Swal.fire({
-          icon: 'info',
-          title: 'Venta guardada offline',
-          text: 'Se sincronizará automáticamente al reconectarse a internet.',
-          confirmButtonColor: '#4f46e5'
-        });
-        resetPOS();
-        return;
-      }
       Swal.fire('Error', e.message, 'error');
     } finally { setIsLoading(false); }
   };
