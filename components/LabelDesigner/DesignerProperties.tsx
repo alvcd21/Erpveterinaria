@@ -206,6 +206,17 @@ const DesignerProperties: React.FC<DesignerPropertiesProps> = ({
                 </div>
             </div>
 
+            {/* Element label */}
+            <div>
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Nombre del Elemento</label>
+                <input
+                    className="mt-1 w-full px-2 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg outline-none focus:border-indigo-400 transition-colors"
+                    value={sel.elementLabel || ''}
+                    onChange={e => updateElement(sel.id, { elementLabel: e.target.value })}
+                    placeholder={sel.type}
+                />
+            </div>
+
             {/* Common Geometry */}
             <div className="grid grid-cols-2 gap-3">
                 <PropertyInput label={`X (${unit})`} value={sel.x} onChange={(v:any) => updateElement(sel.id, {x:v})} type="number" step={0.1}/>
@@ -222,6 +233,18 @@ const DesignerProperties: React.FC<DesignerPropertiesProps> = ({
                     onChange={e => updateElement(sel.id, { opacity: parseFloat(e.target.value) })}
                     className="w-full accent-indigo-600"
                 />
+            </div>
+
+            {/* Visibility Condition */}
+            <div className="space-y-1 pt-2 border-t border-slate-100">
+                <label className="text-[10px] font-bold text-slate-400 uppercase">Condición de Visibilidad</label>
+                <input
+                    className="w-full px-2 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg outline-none focus:border-orange-400 font-mono transition-colors"
+                    value={sel.visibilityCondition || ''}
+                    onChange={e => updateElement(sel.id, { visibilityCondition: e.target.value || undefined })}
+                    placeholder='ej. {{venta.tipoCompra}} == "Credito"'
+                />
+                <p className="text-[10px] text-slate-400">Ocultar elemento si la condición no se cumple al imprimir.</p>
             </div>
 
             {/* IMAGE Specific */}
@@ -262,6 +285,50 @@ const DesignerProperties: React.FC<DesignerPropertiesProps> = ({
                         placeholder="Texto estático o {{VARIABLE}}"
                     />
                     <p className="text-[10px] text-slate-400 mt-1">Usa {"{{VARIABLE}}"} para datos dinámicos.</p>
+                </div>
+            )}
+
+            {/* BARCODE Specific */}
+            {sel.type === 'BARCODE' && (
+                <div className="space-y-3 pt-2 border-t border-slate-100">
+                    <h4 className="text-[10px] font-bold text-slate-400 uppercase">Código de Barras</h4>
+                    <div className="grid grid-cols-2 gap-2">
+                        <div>
+                            <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Color Líneas</label>
+                            <input type="color" value={sel.barcodeFgColor || '#000000'} onChange={e => updateElement(sel.id, {barcodeFgColor: e.target.value})} className="h-8 w-full rounded cursor-pointer border border-slate-200"/>
+                        </div>
+                        <div>
+                            <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Fondo</label>
+                            <input type="color" value={sel.barcodeBgColor || '#ffffff'} onChange={e => updateElement(sel.id, {barcodeBgColor: e.target.value})} className="h-8 w-full rounded cursor-pointer border border-slate-200"/>
+                        </div>
+                    </div>
+                    <div>
+                        <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Formato</label>
+                        <select className="w-full p-2 bg-white border border-slate-200 rounded-lg text-sm" value={sel.barcodeFormat || 'CODE128'} onChange={e => updateElement(sel.id, {barcodeFormat: e.target.value})}>
+                            {['CODE128','CODE39','EAN13','EAN8','UPC','ITF14','MSI','pharmacode'].map(f => <option key={f} value={f}>{f}</option>)}
+                        </select>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <input type="checkbox" id="dispval" checked={sel.displayValue ?? true} onChange={e => updateElement(sel.id, {displayValue: e.target.checked})} className="rounded text-indigo-600"/>
+                        <label htmlFor="dispval" className="text-xs font-medium text-slate-600">Mostrar número</label>
+                    </div>
+                </div>
+            )}
+
+            {/* QR Specific */}
+            {sel.type === 'QR' && (
+                <div className="space-y-3 pt-2 border-t border-slate-100">
+                    <h4 className="text-[10px] font-bold text-slate-400 uppercase">Código QR</h4>
+                    <div className="grid grid-cols-2 gap-2">
+                        <div>
+                            <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Color</label>
+                            <input type="color" value={sel.qrFgColor || '#000000'} onChange={e => updateElement(sel.id, {qrFgColor: e.target.value})} className="h-8 w-full rounded cursor-pointer border border-slate-200"/>
+                        </div>
+                        <div>
+                            <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Fondo</label>
+                            <input type="color" value={sel.qrBgColor || '#ffffff'} onChange={e => updateElement(sel.id, {qrBgColor: e.target.value})} className="h-8 w-full rounded cursor-pointer border border-slate-200"/>
+                        </div>
+                    </div>
                 </div>
             )}
 

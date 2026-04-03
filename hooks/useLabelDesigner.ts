@@ -78,13 +78,23 @@ export const useLabelDesigner = () => {
     };
 
     // --- INITIALIZATION ---
+    const computeFitZoom = (tpl: LabelTemplate): number => {
+        const scale = tpl.type === 'DOCUMENT' ? CM_TO_PX : MM_TO_PX;
+        const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
+        const availW = (typeof window !== 'undefined' ? window.innerWidth : 1200) - (isMobile ? 48 : 340);
+        const availH = (typeof window !== 'undefined' ? window.innerHeight : 800) - (isMobile ? 180 : 130);
+        const fw = availW / (tpl.width * scale);
+        const fh = availH / (tpl.height * scale);
+        return Math.max(0.2, Math.min(isMobile ? 2 : 3, Math.min(fw, fh)));
+    };
+
     const loadTemplate = (tpl: LabelTemplate) => {
         setTemplate(tpl);
         setHistory([]);
         setHistoryIndex(-1);
         setSelectedIds([]);
-        // Adjust zoom based on document type for better UX
-        setZoom(tpl.type === 'DOCUMENT' ? 0.8 : 2.5);
+        setSelectedId(null);
+        setZoom(computeFitZoom(tpl));
         setPan({ x: 0, y: 0 });
         setTool('SELECT');
     };
@@ -106,7 +116,12 @@ export const useLabelDesigner = () => {
         setHistory([]);
         setHistoryIndex(-1);
         setSelectedIds([]);
-        setZoom(type === 'DOCUMENT' ? 0.8 : 2.5);
+        setZoom(computeFitZoom({
+            ...INITIAL_TEMPLATE,
+            type,
+            width: type === 'DOCUMENT' ? 21 : 50,
+            height: type === 'DOCUMENT' ? 29.7 : 25,
+        }));
         setPan({ x: 0, y: 0 });
         setTool('SELECT');
     };
@@ -371,6 +386,26 @@ export const useLabelDesigner = () => {
         }
 
         if (e.key === 'Escape') { setSelectedId(null); setSelectedIds([]); }
+
+        if (e.key === 'Tab') {
+            e.preventDefault();
+            const visible = template.elements.filter(el => el.visible !== false);
+            if (!visible.length) return;
+            const idx = visible.findIndex(el => el.id === selectedId);
+            const next = e.shiftKey
+                ? (idx - 1 + visible.length) % visible.length
+                : (idx + 1) % visible.length;
+            setSelectedId(visible[next].id);
+        }
+
+        if ((e.ctrlKey || e.metaKey) && (e.key === ']' || e.key === '[')) {
+            e.preventDefault();
+            if (!selectedId) return;
+            const el = template.elements.find(x => x.id === selectedId);
+            if (!el || el.type !== 'TEXT') return;
+            const current = el.fontSize || 10;
+            updateElement(selectedId, { fontSize: Math.max(4, current + (e.key === ']' ? 1 : -1)) });
+        }
     };
 
     const saveTemplate = async () => {

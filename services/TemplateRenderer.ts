@@ -79,10 +79,9 @@ async function preRenderMedia(template: LabelTemplate, ctx: PrintDataContext): P
         JsBarcode(canvas, safeContent || '123456', {
           format: (el.barcodeFormat as any) || 'CODE128',
           displayValue: el.displayValue ?? true,
-          margin: 2,
-          width: 2,
-          height: 50,
-          fontSize: 12,
+          margin: 0, width: 2, height: 50, fontSize: 20,
+          lineColor: el.barcodeFgColor || '#000000',
+          background: el.barcodeBgColor || '#ffffff',
         });
         cache.set(el.id, canvas.toDataURL('image/png'));
       } catch { /* element will render as placeholder */ }
@@ -92,7 +91,13 @@ async function preRenderMedia(template: LabelTemplate, ctx: PrintDataContext): P
       const resolved = resolveContent(el.content || 'QR', ctx);
       const safeContent = /{{.*?}}/.test(resolved) ? 'DEMO-QR' : resolved;
       try {
-        const url = await QRCode.toDataURL(safeContent || 'QR', { margin: 1, width: 200 });
+        const url = await QRCode.toDataURL(safeContent || 'QR', {
+          margin: 0,
+          color: {
+            dark: el.qrFgColor || '#000000',
+            light: el.qrBgColor || '#ffffff',
+          }
+        });
         cache.set(el.id, url);
       } catch { /* element will render as placeholder */ }
     }
@@ -110,6 +115,16 @@ function elementToHTML(
   media: MediaCache,
   tableItems?: Partial<DetalleVenta>[],
 ): string {
+  // Evaluate visibilityCondition if present
+  if (el.visibilityCondition) {
+    try {
+      const expr = resolveContent(el.visibilityCondition, ctx);
+      // Simple evaluation: replace == with === and eval
+      const result = Function('"use strict"; return (' + expr.replace(/==/g, '===').replace(/!=/g, '!==') + ')')();
+      if (!result) return '';
+    } catch { /* if eval fails, show the element */ }
+  }
+
   const left = el.x * scale;
   const top  = el.y * scale;
   const w    = el.width * scale;
@@ -349,11 +364,12 @@ function buildHTML(
       box-shadow:0 4px 24px rgba(0,0,0,0.18);
       ${padStyle}
     }
+    @page { size: ${(template.width * scale).toFixed(1)}px ${(template.height * scale).toFixed(1)}px; margin: 0; }
     @media print {
       * { -webkit-print-color-adjust:exact !important; print-color-adjust:exact !important; }
-      body { background:white; padding:0; margin:0; display:block; }
-      .page { box-shadow:none; }
-      @page { size:${sizeCSS}; margin:0; }
+      html, body { margin: 0; padding: 0; background: white !important; }
+      body { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; display:block; }
+      .page { box-shadow: none !important; }
     }
   </style>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -395,6 +411,23 @@ export async function printTemplate(template: LabelTemplate, ctx: PrintDataConte
     win.focus();
     win.print();
   };
+}
+
+/**
+ * Print multiple copies of the rendered template.
+ */
+export async function printMultipleCopies(template: LabelTemplate, ctx: PrintDataContext, copies: number): Promise<void> {
+  const html = await renderToHTML(template, ctx);
+  const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+  const bodyContent = bodyMatch ? bodyMatch[1] : '';
+  const head = html.replace(/<body[\s\S]*$/i, '</head>');
+  const repeated = Array(copies).fill(bodyContent).join('<div style="page-break-after:always;"></div>');
+  const multiHtml = `${head}<body style="margin:0;padding:0;">${repeated}</body></html>`;
+  const w = window.open('', '_blank');
+  if (!w) return;
+  w.document.write(multiHtml);
+  w.document.close();
+  setTimeout(() => { w.print(); }, 600);
 }
 
 /**

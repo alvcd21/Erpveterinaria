@@ -391,9 +391,15 @@ export interface LabelElement {
   gradientAngle?: number;
   // Image
   imageObjectFit?: 'contain' | 'cover' | 'fill' | 'none';
+  qrFgColor?: string;
+  qrBgColor?: string;
+  barcodeFgColor?: string;
+  barcodeBgColor?: string;
   // Locking
   locked?: boolean;
   visible?: boolean;
+  elementLabel?: string;
+  visibilityCondition?: string;
   // Shadow (applies to TEXT and SHAPE)
   shadowEnabled?: boolean;
   shadowColor?: string;

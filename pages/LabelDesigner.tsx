@@ -7,9 +7,9 @@ import {
   ArrowLeft, Save, Undo2, Redo2, Plus, Star, FileCog, Type, ScanLine, Shapes, Settings, ChevronDown, MoreVertical, X, Square, Circle, Minus,
   Layers, Search, Database, Table, ChevronRight, Key, GripVertical, FileText, Tag, ChevronUp, Image as ImageIcon, Hand, Trash2, MousePointer2,
   Printer, Eye, EyeOff, Copy, Download, Upload, AlignLeft, AlignCenter, AlignRight, AlignStartVertical, AlignCenterHorizontal, AlignEndVertical,
-  AlignStartHorizontal, AlignVerticalJustifyCenter, AlignEndHorizontal, Clipboard, Keyboard
+  AlignStartHorizontal, AlignVerticalJustifyCenter, AlignEndHorizontal, Clipboard, Keyboard, Maximize
 } from 'lucide-react';
-import { printTemplate, downloadHTML } from '../services/TemplateRenderer';
+import { printTemplate, downloadHTML, printMultipleCopies } from '../services/TemplateRenderer';
 import PreviewModal from '../components/LabelDesigner/PreviewModal';
 import TemplateThumbnail from '../components/LabelDesigner/TemplateThumbnail';
 import { STARTER_TEMPLATES, StarterTemplateEntry } from '../services/StarterTemplates';
@@ -80,6 +80,7 @@ const LabelDesigner: React.FC = () => {
   const [savedTemplates, setSavedTemplates] = useState<LabelTemplate[]>([]);
   const [gallerySearch, setGallerySearch] = useState('');
   const [galleryFilter, setGalleryFilter] = useState<'ALL' | 'LABEL' | 'DOCUMENT'>('ALL');
+  const [gallerySort, setGallerySort] = useState<'name' | 'type'>('name');
   const [lastAutoSave, setLastAutoSave] = useState<Date | null>(null);
 
   // Create Modal State
@@ -116,6 +117,7 @@ const LabelDesigner: React.FC = () => {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; elementId: string } | null>(null);
   const [showShortcutsModal, setShowShortcutsModal] = useState(false);
   const importInputRef = useRef<HTMLInputElement>(null);
+  const styleClipboardRef = useRef<Partial<import('../types').LabelElement> | null>(null);
 
   const handleStartEdit = (id: string) => {
     setEditingId(id);
@@ -293,6 +295,24 @@ const LabelDesigner: React.FC = () => {
       if(success) loadSavedList();
   };
 
+  const handleSaveAs = async () => {
+      const { value: newName } = await Swal.fire({
+          title: 'Guardar como nuevo diseño',
+          input: 'text',
+          inputValue: `Copia de ${template.name}`,
+          inputPlaceholder: 'Nombre del nuevo diseño',
+          showCancelButton: true,
+          confirmButtonText: 'Guardar',
+          confirmButtonColor: '#4f46e5',
+      });
+      if (!newName) return;
+      try {
+          await LabelService.create({ ...template, id: undefined, name: newName, isDefault: false } as any);
+          Swal.fire({ icon: 'success', title: 'Guardado como nuevo', toast: true, position: 'bottom-end', timer: 2000, showConfirmButton: false });
+          loadSavedList();
+      } catch (e: any) { Swal.fire('Error', e.message, 'error'); }
+  };
+
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (file) {
@@ -301,6 +321,49 @@ const LabelDesigner: React.FC = () => {
           reader.readAsDataURL(file);
       }
   };
+
+  const handlePrintCopies = async () => {
+      const { value } = await Swal.fire({
+          title: 'Imprimir Copias',
+          input: 'number',
+          inputValue: '1',
+          inputLabel: 'Número de copias',
+          inputAttributes: { min: '1', max: '50' },
+          showCancelButton: true,
+          confirmButtonText: 'Imprimir',
+          confirmButtonColor: '#4f46e5',
+      });
+      if (!value || isNaN(Number(value))) return;
+      await printMultipleCopies(template, {}, Math.max(1, Math.min(50, Number(value))));
+  };
+
+  // 14B: Zoom fit on window resize
+  useEffect(() => {
+      if (view !== 'DESIGNER') return;
+      const handleResize = () => {
+          const scale = template.type === 'DOCUMENT' ? 37.795 : 3.7795;
+          const isMobile = window.innerWidth < 768;
+          const availW = window.innerWidth - (isMobile ? 48 : 340);
+          const availH = window.innerHeight - (isMobile ? 180 : 130);
+          const fw = availW / (template.width * scale);
+          const fh = availH / (template.height * scale);
+          setZoom(Math.max(0.2, Math.min(isMobile ? 2 : 3, Math.min(fw, fh))));
+          setPan({ x: 0, y: 0 });
+      };
+      window.addEventListener('resize', handleResize);
+      return () => window.removeEventListener('resize', handleResize);
+  }, [view, template.type, template.width, template.height]);
+
+  // 16C: beforeunload warning when in designer
+  useEffect(() => {
+      if (view !== 'DESIGNER') return;
+      const warn = (e: BeforeUnloadEvent) => {
+          e.preventDefault();
+          e.returnValue = '';
+      };
+      window.addEventListener('beforeunload', warn);
+      return () => window.removeEventListener('beforeunload', warn);
+  }, [view]);
 
   const handleDragStart = (e: React.DragEvent<HTMLDivElement>, position: number) => { dragItem.current = position; };
   const handleDragEnter = (e: React.DragEvent<HTMLDivElement>, position: number) => { dragOverItem.current = position; };
@@ -356,6 +419,11 @@ const LabelDesigner: React.FC = () => {
                                   {f === 'ALL' ? `Todos (${savedTemplates.length})` : f === 'LABEL' ? 'Etiquetas' : 'Documentos'}
                               </button>
                           ))}
+                          <select value={gallerySort} onChange={e => setGallerySort(e.target.value as any)}
+                              className="ml-2 px-3 py-2.5 rounded-xl text-sm border border-slate-200 bg-white text-slate-500 font-bold outline-none focus:border-indigo-400">
+                              <option value="name">A → Z</option>
+                              <option value="type">Tipo</option>
+                          </select>
                       </div>
                   </div>
 
@@ -363,6 +431,7 @@ const LabelDesigner: React.FC = () => {
                       {savedTemplates
                           .filter(t => galleryFilter === 'ALL' || t.type === galleryFilter)
                           .filter(t => !gallerySearch || t.name.toLowerCase().includes(gallerySearch.toLowerCase()))
+                          .sort((a, b) => gallerySort === 'name' ? a.name.localeCompare(b.name) : (a.type || '').localeCompare(b.type || ''))
                           .map(t => (
                           <div key={t.id} onClick={() => handleOpen(t)} className="bg-white rounded-2xl border border-slate-200 shadow-sm hover:shadow-xl hover:border-indigo-300 transition-all cursor-pointer group overflow-hidden relative flex flex-col">
 
@@ -549,6 +618,13 @@ const LabelDesigner: React.FC = () => {
                     <Eye size={18}/> <span className="hidden md:inline">Preview</span>
                 </button>
                 <button
+                    onClick={handlePrintCopies}
+                    className="hidden md:flex border border-slate-200 hover:bg-slate-50 text-slate-600 px-3 py-2 rounded-lg font-bold items-center gap-2 text-sm transition-all active:scale-95"
+                    title="Imprimir múltiples copias"
+                >
+                    <Printer size={18}/><span className="hidden lg:inline text-xs">Copias</span>
+                </button>
+                <button
                     onClick={() => printTemplate(template, {})}
                     className="border border-slate-200 hover:bg-slate-50 text-slate-600 px-3 py-2 rounded-lg font-bold flex items-center gap-2 text-sm transition-all active:scale-95"
                     title="Imprimir"
@@ -574,6 +650,13 @@ const LabelDesigner: React.FC = () => {
                     className="hidden md:flex border border-slate-200 hover:bg-slate-50 text-slate-500 p-2 rounded-lg transition-all"
                     title="Atajos de teclado"
                 ><Keyboard size={18}/></button>
+                <button
+                    onClick={handleSaveAs}
+                    className="hidden md:flex border border-slate-200 hover:bg-slate-50 text-slate-600 px-3 py-2 rounded-lg font-bold items-center gap-2 text-sm transition-all active:scale-95"
+                    title="Guardar como nuevo diseño"
+                >
+                    <Copy size={16}/> <span className="hidden lg:inline">Guardar Como</span>
+                </button>
                 <button onClick={handleSave} className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-bold shadow-sm flex items-center gap-2 text-sm transition-all active:scale-95">
                     <Save size={18}/> <span className="hidden md:inline">Guardar</span>
                 </button>
@@ -630,6 +713,30 @@ const LabelDesigner: React.FC = () => {
                     <Copy size={12}/> Duplicar
                 </button>
                 <button
+                    onClick={() => {
+                        const el = template.elements.find(e => e.id === selectedId);
+                        if (!el) return;
+                        const { id, x, y, width, height, rotation, content, type, ...style } = el;
+                        styleClipboardRef.current = style;
+                        Swal.fire({ icon: 'success', title: 'Estilo copiado', toast: true, position: 'bottom-end', timer: 1500, showConfirmButton: false });
+                    }}
+                    className="flex items-center gap-1 px-2 py-1 text-[11px] font-bold rounded hover:bg-slate-200 text-slate-600 transition-colors"
+                    title="Copiar estilo"
+                >
+                    <Clipboard size={12}/> Copiar Estilo
+                </button>
+                <button
+                    onClick={() => {
+                        if (!styleClipboardRef.current || !selectedId) return;
+                        updateElement(selectedId, styleClipboardRef.current);
+                    }}
+                    disabled={!styleClipboardRef.current}
+                    className="flex items-center gap-1 px-2 py-1 text-[11px] font-bold rounded hover:bg-slate-200 text-slate-600 transition-colors disabled:opacity-30"
+                    title="Pegar estilo"
+                >
+                    <Clipboard size={12}/> Pegar Estilo
+                </button>
+                <button
                     onClick={() => moveLayer('UP')}
                     className="flex items-center gap-1 px-2 py-1 text-[11px] font-bold rounded hover:bg-slate-200 text-slate-600 transition-colors"
                     title="Subir capa"
@@ -668,6 +775,7 @@ const LabelDesigner: React.FC = () => {
                 selectedIds={selectedIds}
                 zoom={zoom}
                 setZoom={setZoom}
+                setPan={setPan}
                 setSelectedId={(id) => { setSelectedId(id); setActivePanel('PROPERTIES'); setEditingId(null); if(id && window.innerWidth < 768) setIsMobilePropOpen(true); }}
                 onPointerDown={handlePointerDown}
                 tool={tool}
@@ -709,10 +817,12 @@ const LabelDesigner: React.FC = () => {
                                     TEXT: 'T', SHAPE: '■', IMAGE: '⬜', BARCODE: '|||',
                                     QR: 'QR', INVOICE_TABLE: '▦', SUMMARY_BOX: '∑', COMPANY_HEADER: '🏢',
                                 };
-                                const preview = el.type === 'TEXT'
-                                    ? (el.content?.replace(/{{.*?}}/g, '…').slice(0, 24) || '—')
-                                    : el.type === 'SHAPE' ? (el.shapeType || 'SHAPE')
-                                    : el.type;
+                                const preview = el.elementLabel
+                                    ? el.elementLabel
+                                    : el.type === 'TEXT'
+                                        ? (el.content?.replace(/{{.*?}}/g, '…').slice(0, 24) || '—')
+                                        : el.type === 'SHAPE' ? (el.shapeType || 'SHAPE')
+                                        : el.type;
                                 const isHidden = el.visible === false;
 
                                 return (
@@ -767,12 +877,28 @@ const LabelDesigner: React.FC = () => {
             <button onClick={() => addElement('BARCODE')} className="p-3 bg-slate-50 rounded-lg text-slate-600"><ScanLine size={20}/></button>
             <button onClick={() => setShowShapeModal(true)} className="p-3 bg-slate-50 rounded-lg text-slate-600"><Shapes size={20}/></button>
             <button onClick={() => { setActivePanel('LAYERS'); setIsMobilePropOpen(true); }} className="p-3 bg-slate-50 rounded-lg text-slate-600"><Layers size={20}/></button>
+            <div className="w-px h-8 bg-slate-200 mx-1"/>
+            <button
+                onClick={() => {
+                    const scale = template.type === 'DOCUMENT' ? 37.795 : 3.7795;
+                    const availW = window.innerWidth - 48;
+                    const availH = window.innerHeight - 180;
+                    const fw = availW / (template.width * scale);
+                    const fh = availH / (template.height * scale);
+                    setZoom(Math.max(0.2, Math.min(2, Math.min(fw, fh))));
+                    setPan({ x: 0, y: 0 });
+                }}
+                className="p-3 bg-slate-50 rounded-lg text-slate-600 text-[10px] font-bold"
+                title="Ajustar a pantalla"
+            >
+                <Maximize size={20}/>
+            </button>
             <div className="w-px h-8 bg-slate-200 mx-2"/>
-            <button 
-                onClick={() => { 
+            <button
+                onClick={() => {
                     if(isMobilePropOpen && activePanel === 'PROPERTIES') setIsMobilePropOpen(false);
                     else { setActivePanel('PROPERTIES'); setIsMobilePropOpen(true); }
-                }} 
+                }}
                 className={`p-3 rounded-full ${selectedId || isMobilePropOpen ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-400'}`}
             >
                 {isMobilePropOpen ? <ChevronDown/> : <MoreVertical/>}
@@ -875,6 +1001,11 @@ const LabelDesigner: React.FC = () => {
                                         x: el.x + (template.type === 'DOCUMENT' ? 0.5 : 2),
                                         y: el.y + (template.type === 'DOCUMENT' ? 0.5 : 2),
                                     });
+                                })}
+                                {menuItem('Selec. mismo tipo', '⬡', () => {
+                                    const sameType = template.elements.filter(e => e.type === el.type).map(e => e.id);
+                                    setSelectedIds(sameType);
+                                    if (sameType.length > 0) setSelectedId(sameType[sameType.length - 1]);
                                 })}
                                 {menuItem(el.locked ? 'Desbloquear' : 'Bloquear', el.locked ? '🔓' : '🔒', () => {
                                     updateElement(el.id, { locked: !el.locked });

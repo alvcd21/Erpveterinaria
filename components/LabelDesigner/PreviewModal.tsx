@@ -118,6 +118,10 @@ const PreviewModal: React.FC<PreviewModalProps> = ({ template, onClose }) => {
     (r.sublabel || '').toLowerCase().includes(search.toLowerCase())
   );
 
+  const PAGE_SCALE = template.type === 'DOCUMENT' ? 37.795 : 3.7795;
+  const pageW = Math.round(template.width * PAGE_SCALE);
+  const pageH = Math.round(template.height * PAGE_SCALE);
+
   // ─── Render ──────────────────────────────────────────────────────────────
   return (
     <div className="fixed inset-0 bg-slate-900/70 z-[70] flex items-center justify-center p-4 backdrop-blur-sm animate-fade-in">
@@ -212,7 +216,7 @@ const PreviewModal: React.FC<PreviewModalProps> = ({ template, onClose }) => {
                 ref={iframeRef}
                 srcDoc={previewHtml}
                 className="bg-white shadow-xl rounded"
-                style={{ border: 'none', minWidth: '400px', minHeight: '400px', width: '100%', height: '100%' }}
+                style={{ border: 'none', width: `${pageW}px`, height: `${pageH}px`, display: 'block', flexShrink: 0 }}
                 title="Vista previa de la plantilla"
               />
             ) : (
