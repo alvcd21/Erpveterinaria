@@ -113,7 +113,12 @@ const POS: React.FC = (): React.ReactElement => {
         ConfigService.get()
       ]);
       setProducts(prodData || []);
-      setClients(clientData || []);
+      const clientList = clientData || [];
+      setClients(clientList);
+      const cf = clientList.find((c: any) =>
+        (c.nombre + ' ' + (c.apellido || '')).toLowerCase().includes('consumidor')
+      );
+      if (cf) setSelectedClientId(cf.identidad);
       setCompanyConfig(configData);
     } catch (err) { console.error(err); } finally { setIsLoading(false); }
   };
@@ -169,7 +174,9 @@ const POS: React.FC = (): React.ReactElement => {
         idInventario: product.tipo === 'ACCESORIO' ? product.id : undefined,
         cantidad: 1,
         precioVenta: Number(product.precioVenta),
-        descripcionProducto: product.nombre,
+        descripcionProducto: product.tipo === 'TELEFONO'
+          ? `${product.marca ? product.marca + ' ' : ''}${product.nombre}${product.imei ? ' - IMEI: ' + product.imei : ''}`.trim()
+          : `${product.categoria ? product.categoria + ' ' : ''}${product.nombre} [${product.id}]`,
         tipoProducto: product.tipo
       }];
     });
@@ -481,7 +488,8 @@ const POS: React.FC = (): React.ReactElement => {
   const categories = useMemo(() => ['ALL', ...new Set(products.filter(p => p.tipo === 'ACCESORIO').map(p => p.categoria!))].sort(), [products]);
 
   const filteredProducts = products.filter(p => {
-    const matchSearch = p.nombre.toLowerCase().includes(searchTerm.toLowerCase()) || p.imei?.includes(searchTerm) || p.codigo.toLowerCase().includes(searchTerm.toLowerCase());
+    const term = searchTerm.toLowerCase();
+    const matchSearch = p.nombre.toLowerCase().includes(term) || p.imei?.includes(searchTerm) || p.codigo.toLowerCase().includes(term) || p.id.toLowerCase().includes(term);
     const matchType = selectedType === 'ALL' || p.tipo === selectedType;
     const matchBrand = selectedType !== 'TELEFONO' || selectedBrand === 'ALL' || p.marca === selectedBrand;
     const matchCat = selectedType !== 'ACCESORIO' || selectedCategory === 'ALL' || p.categoria === selectedCategory;
@@ -530,7 +538,11 @@ const POS: React.FC = (): React.ReactElement => {
               {filteredProducts.map(p => (
                 <button key={p.id} onClick={() => addToCart(p)} disabled={p.stock === 0} className={`flex flex-col items-start p-3 bg-white rounded-2xl border transition-all text-left relative group active:scale-95 shadow-sm ${p.stock === 0 ? 'opacity-50 grayscale' : 'border-slate-200/60 hover:border-indigo-500 hover:shadow-md'}`}>
                   <div className="w-full flex justify-between items-start mb-2"><span className={`text-[8px] font-black px-1.5 py-0.5 rounded-md uppercase bg-slate-100 text-slate-500`}>{p.tipo.substring(0,3)}</span><span className={`text-[9px] font-black px-1.5 py-0.5 rounded-md ${p.stock > 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600'}`}>Stock: {p.stock}</span></div>
-                  <h4 className="font-bold text-slate-800 text-[11px] line-clamp-2 leading-tight min-h-[2.2rem]">{p.nombre}</h4>
+                  <h4 className="font-bold text-slate-800 text-[11px] line-clamp-2 leading-tight min-h-[2.2rem]">
+                    {p.tipo === 'TELEFONO' ? `${p.marca ? p.marca + ' ' : ''}${p.nombre}`.trim() : `${p.categoria ? p.categoria + ' - ' : ''}${p.nombre}`}
+                  </h4>
+                  {p.tipo === 'TELEFONO' && p.imei && <p className="text-[9px] text-slate-400 truncate">IMEI: {p.imei}</p>}
+                  {p.tipo === 'ACCESORIO' && <p className="text-[9px] text-slate-400 truncate">Cód: {p.id}</p>}
                   <div className="mt-2 w-full pt-2 border-t border-slate-50 font-black text-indigo-600">L. {Number(p.precioVenta).toLocaleString()}</div>
                 </button>
               ))}
@@ -545,7 +557,7 @@ const POS: React.FC = (): React.ReactElement => {
                    <button key={type} onClick={() => setPaymentType(type as any)} className={`py-2 text-[8px] md:text-[10px] font-black uppercase tracking-widest rounded-xl transition-all border-2 ${paymentType === type ? 'bg-indigo-600 border-indigo-600 text-white shadow-lg' : 'bg-transparent border-slate-700 text-slate-500'}`}>{type}</button>
                ))}
             </div>
-            <div className="relative"><User size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500"/><select value={selectedClientId} onChange={(e) => setSelectedClientId(e.target.value)} className="w-full pl-9 pr-10 py-2.5 bg-slate-800 border-none rounded-xl text-xs font-bold text-white focus:ring-2 focus:ring-indigo-500 transition-all appearance-none"><option value="">CONSUMIDOR FINAL</option>{clients.map(c => <option key={c.identidad} value={c.identidad}>{c.nombre} {c.apellido}</option>)}</select><button onClick={() => navigate('/clients')} className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 bg-indigo-600 text-white rounded-lg"><UserPlus size={14}/></button></div>
+            <div className="relative"><User size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500"/><select value={selectedClientId} onChange={(e) => setSelectedClientId(e.target.value)} className="w-full pl-9 pr-10 py-2.5 bg-slate-800 border-none rounded-xl text-xs font-bold text-white focus:ring-2 focus:ring-indigo-500 transition-all appearance-none">{clients.map(c => <option key={c.identidad} value={c.identidad}>{c.nombre} {c.apellido}</option>)}</select><button onClick={() => navigate('/clients')} className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 bg-indigo-600 text-white rounded-lg"><UserPlus size={14}/></button></div>
           </div>
           <div className="flex-1 overflow-y-auto p-3 space-y-2 custom-scrollbar bg-slate-50/30">
             {cart.length === 0 ? (<div className="h-full flex flex-col items-center justify-center text-slate-300 opacity-30"><ShoppingCart size={64} strokeWidth={1} className="mb-2" /><p className="font-black text-xs uppercase">Carrito Vacío</p></div>) : (cart.map((item) => (
