@@ -2,9 +2,10 @@
 
 export type EstadoGeneral = 'Activo' | 'Inactivo' | 'Disponible' | 'Vendido' | 'Completada' | 'Anulada' | 'Cerrada' | 'Registrado' | 'Garantia' | 'Defectuoso';
 
-// Clasificación unificada para compatibilidad con DB
-export type SubtipoIngreso = 'Venta' | 'Reparacion' | 'Recarga' | 'KrediYa_Prima' | 'Cobros Venta a Negocios Externos' | 'Cobro Consignacion' | 'Ajuste Utilidad Cambio';
-export type SubtipoEgreso = 'Gasto Operativo' | 'Retiro Personal' | 'Pago Servicio de Reparación' | 'Pago Inventario Externo' | 'Nomina' | 'Compra Saldo' | 'Compra Inventario' | 'Pago a Tecnico' | 'Pago a Tienda Externa' | 'Perdida Margen Garantia';
+// Clasificación unificada para compatibilidad con DB (debe coincidir con ENUM tipo_movimiento_contable)
+export type SubtipoIngreso = 'Venta' | 'Reparacion' | 'Recarga' | 'KrediYa_Prima' | 'KrediYa_Deposito' | 'Cobros Venta a Negocios Externos' | 'Cobro Consignacion' | 'Ajuste_Utilidad' | 'Garantia_Cobro' | 'Consignacion_Cobro' | 'Otro';
+// Debe coincidir con CHECK constraint chk_egresos_categoria
+export type SubtipoEgreso = 'Gasto Operativo' | 'Retiro Personal' | 'Retiro Socio' | 'Pago Servicio de Reparación' | 'Pago Servicio de Reparacion' | 'Pago Inventario Externo' | 'Nomina' | 'Compra Saldo' | 'Compra Inventario' | 'Compra de Producto' | 'Perdida Margen Garantia' | 'Otros' | 'Otro';
 
 export interface Usuario {
   codUsuario: string;

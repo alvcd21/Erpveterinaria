@@ -1,7 +1,7 @@
 
 const express = require('express');
 const router = express.Router();
-const { pool, generateNextId, handleDbError, updateArqueoBalance, getLocalTimestamp } = require('../config/db');
+const { pool, generateNextId, handleDbError, updateArqueoBalance, getLocalTimestamp, anularVenta } = require('../config/db');
 const { authenticateToken } = require('../middleware/auth');
 
 // --- CLIENTES ---
@@ -184,10 +184,10 @@ router.post('/ventas', authenticateToken, async (req, res) => {
     for (const item of detalles) {
       const codDetalle = await generateNextId('detalleventa', 'codDetalleVenta', 'PROD', client);
       if (item.idTelefono) {
-        await client.query("UPDATE telefonos SET estado = 'Vendido' WHERE codigo = $1", [item.idTelefono]);
+        // El trigger trg_detalleventa_actualizar_stock actualiza telefonos.estado='Vendido' automáticamente
         await client.query(`INSERT INTO detalleventa (codDetalleVenta, idVenta, idTelefono, idIngreso, cantidad, precioVenta, estado, tipoProducto) VALUES ($1,$2,$3,$4,1,$5,'Activo', 'TELEFONO')`, [codDetalle, codVenta, item.idTelefono, idIngreso, item.precioVenta]);
       } else if (item.idInventario) {
-        await client.query("UPDATE inventario SET cantidad = cantidad - $1 WHERE codInventario = $2", [item.cantidad, item.idInventario]);
+        // El trigger trg_detalleventa_actualizar_stock reduce inventario.cantidad automáticamente
         await client.query(`INSERT INTO detalleventa (codDetalleVenta, idVenta, idAccesorio, idIngreso, cantidad, precioVenta, estado, tipoProducto) VALUES ($1,$2,$3,$4,$5,$6,'Activo', 'ACCESORIO')`, [codDetalle, codVenta, item.idInventario, idIngreso, item.cantidad, item.precioVenta]);
       }
     }
@@ -324,10 +324,10 @@ router.put('/ventas/:id', authenticateToken, async (req, res) => {
             const codDetalle = await generateNextId('detalleventa', 'codDetalleVenta', 'PROD', client);
 
             if (item.idTelefono) {
-                await client.query("UPDATE telefonos SET estado = 'Vendido' WHERE codigo = $1", [item.idTelefono]);
+                // El trigger trg_detalleventa_actualizar_stock actualiza telefonos.estado='Vendido' automáticamente
                 await client.query(`INSERT INTO detalleventa (codDetalleVenta, idVenta, idTelefono, idIngreso, cantidad, precioVenta, estado, tipoProducto) VALUES ($1,$2,$3,$4,1,$5,'Activo','TELEFONO')`, [codDetalle, codVenta, item.idTelefono, idIngresoVinculado, item.precioVenta]);
             } else if (item.idInventario) {
-                await client.query("UPDATE inventario SET cantidad = cantidad - $1 WHERE codInventario = $2", [item.cantidad, item.idInventario]);
+                // El trigger trg_detalleventa_actualizar_stock reduce inventario.cantidad automáticamente
                 await client.query(`INSERT INTO detalleventa (codDetalleVenta, idVenta, idAccesorio, idIngreso, cantidad, precioVenta, estado, tipoProducto) VALUES ($1,$2,$3,$4,$5,$6,'Activo','ACCESORIO')`, [codDetalle, codVenta, item.idInventario, idIngresoVinculado, item.cantidad, item.precioVenta]);
             }
         }
@@ -342,22 +342,48 @@ router.put('/ventas/:id/anular', authenticateToken, async (req, res) => {
     const client = await pool.connect();
     try {
         const { id } = req.params;
+        const { codUsuario } = req.user;
+        const motivo = req.body?.motivo || 'Anulada por usuario';
+
         await client.query('BEGIN');
-        const vRes = await client.query('SELECT codVenta, idCaja FROM ventas WHERE codVenta = $1', [id]);
+
+        const vRes = await client.query('SELECT codVenta, idCaja, estado FROM ventas WHERE codVenta = $1', [id]);
         if (vRes.rows.length === 0) throw new Error('Venta no encontrada');
-        
-        await client.query("UPDATE ventas SET estado = 'Anulada' WHERE codVenta = $1", [id]);
-        await client.query("DELETE FROM ingresos WHERE descripcion LIKE $1", [`%FACTURA #${id}%`]);
-        
-        const details = await client.query('SELECT * FROM detalleventa WHERE idVenta = $1', [id]);
-        for(let d of details.rows) {
-            if(d.idtelefono) await client.query("UPDATE telefonos SET estado = 'Disponible' WHERE codigo = $1", [d.idtelefono]);
-            if(d.idaccesorio) await client.query("UPDATE inventario SET cantidad = cantidad + $1 WHERE codInventario = $2", [d.cantidad, d.idaccesorio]);
+        if (vRes.rows[0].estado === 'Anulada') throw new Error('La venta ya está anulada');
+
+        const idCajaActual = vRes.rows[0].idcaja;
+
+        // Intentar usar SP; si no existe aún, lógica manual
+        const spResult = await anularVenta(id, codUsuario, motivo, client);
+
+        if (!spResult) {
+            // Fallback manual (SP pendiente de migración)
+            await client.query("UPDATE ventas SET estado = 'Anulada', updated_at = NOW(), updated_by = $2 WHERE codVenta = $1", [id, codUsuario]);
+            await client.query("DELETE FROM ingresos WHERE descripcion LIKE $1", [`%FACTURA #${id}%`]);
+
+            const details = await client.query('SELECT * FROM detalleventa WHERE idVenta = $1', [id]);
+            for (const d of details.rows) {
+                if (d.idtelefono) {
+                    await client.query("UPDATE telefonos SET estado = 'Disponible', updated_at = NOW(), updated_by = $2 WHERE codigo = $1", [d.idtelefono, codUsuario]);
+                    // Registrar en kardex si la tabla existe
+                    await client.query(`
+                        INSERT INTO kardex_inventario (tipo_producto, cod_telefono, tipo_movimiento, cantidad, precio_venta, referencia_doc, registrado_por, observaciones)
+                        VALUES ('TELEFONO', $1, 'Devolucion', 1, $2, $3, $4, $5)
+                    `, [d.idtelefono, d.precioventa, id, codUsuario, 'Anulación: ' + motivo]).catch(() => {});
+                }
+                if (d.idaccesorio) {
+                    await client.query("UPDATE inventario SET cantidad = cantidad + $1, updated_at = NOW(), updated_by = $3 WHERE codInventario = $2", [d.cantidad, d.idaccesorio, codUsuario]);
+                    await client.query(`
+                        INSERT INTO kardex_inventario (tipo_producto, cod_inventario, tipo_movimiento, cantidad, precio_venta, referencia_doc, registrado_por, observaciones)
+                        VALUES ('ACCESORIO', $1, 'Devolucion', $2, $3, $4, $5, $6)
+                    `, [d.idaccesorio, d.cantidad, d.precioventa, id, codUsuario, 'Anulación: ' + motivo]).catch(() => {});
+                }
+            }
         }
-        
-        await updateArqueoBalance(vRes.rows[0].idcaja, client);
+
+        await updateArqueoBalance(idCajaActual, client);
         await client.query('COMMIT');
-        res.json({ message: 'Venta anulada' });
+        res.json({ message: 'Venta anulada', codVenta: id });
     } catch(e) { await client.query('ROLLBACK'); handleDbError(res, e); } finally { client.release(); }
 });
 

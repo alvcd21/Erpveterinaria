@@ -58,27 +58,47 @@ router.post('/arqueo/close', authenticateToken, async (req, res) => {
     const client = await pool.connect();
     try {
         const { idArqueo } = req.body;
-        const { idCaja } = req.user;
+        const { idCaja, codUsuario } = req.user;
         const hndTime = getLocalTimestamp();
+        const hndDate = hndTime.substring(0, 10);
 
         await client.query('BEGIN');
-        await updateArqueoBalance(idCaja, client);
 
-        const hndDate = hndTime.substring(0, 10);
-        const sTigo = await client.query("SELECT saldoFinal FROM saldos WHERE red = 'TIGO' AND TO_CHAR(fecha, 'YYYY-MM-DD') = $1", [hndDate]);
+        // Obtener saldos actuales de TIGO/CLARO para pasar al SP
+        const sTigo  = await client.query("SELECT saldoFinal FROM saldos WHERE red = 'TIGO'  AND TO_CHAR(fecha, 'YYYY-MM-DD') = $1", [hndDate]);
         const sClaro = await client.query("SELECT saldoFinal FROM saldos WHERE red = 'CLARO' AND TO_CHAR(fecha, 'YYYY-MM-DD') = $1", [hndDate]);
+        const saldoTigo  = sTigo.rows[0]?.saldofinal  || 0;
+        const saldoClaro = sClaro.rows[0]?.saldofinal || 0;
 
-        await client.query(
-            `UPDATE arqueo SET 
-                estado = 'Cerrada', 
-                fechaCierre = $1, 
-                saldoTigoFinal = $2, 
-                saldoClaroFinal = $3 
-             WHERE idArqueo = $4 AND idCaja = $5`,
-            [hndTime, sTigo.rows[0]?.saldofinal || 0, sClaro.rows[0]?.saldofinal || 0, idArqueo, idCaja]
-        );
+        // Usar SP sp_cerrar_arqueo (idCaja, codUsuario, saldo_tigo, saldo_claro)
+        let spResult = null;
+        try {
+            const spRes = await client.query(
+                `SELECT sp_cerrar_arqueo($1, $2, $3, $4) AS resultado`,
+                [idCaja, codUsuario, saldoTigo, saldoClaro]
+            );
+            const resultado = spRes.rows[0]?.resultado;
+            if (resultado && typeof resultado === 'object') {
+                if (resultado.ok === false) throw new Error(resultado.error || 'Error en sp_cerrar_arqueo');
+                spResult = resultado;
+            }
+        } catch (spErr) {
+            if (!spErr.message?.includes('does not exist')) throw spErr;
+            // SP no existe - usar lógica manual
+        }
 
-        const resArq = await client.query("SELECT * FROM arqueo WHERE idArqueo = $1", [idArqueo]);
+        if (!spResult) {
+            // Fallback: lógica manual
+            await updateArqueoBalance(idCaja, client);
+            await client.query(
+                `UPDATE arqueo SET estado = 'Cerrada', fechaCierre = $1,
+                 saldoTigoFinal = $2, saldoClaroFinal = $3
+                 WHERE idArqueo = $4 AND idCaja = $5`,
+                [hndTime, saldoTigo, saldoClaro, idArqueo, idCaja]
+            );
+        }
+
+        const resArq = await client.query('SELECT * FROM arqueo WHERE idArqueo = $1', [idArqueo]);
         await client.query('COMMIT');
         res.json({ resumen: resArq.rows[0] });
     } catch(e) { await client.query('ROLLBACK'); handleDbError(res, e); } finally { client.release(); }
@@ -345,6 +365,108 @@ router.post('/recargas', authenticateToken, async (req, res) => {
         await client.query('COMMIT');
         res.json({ message: 'Recarga exitosa' });
     } catch(e) { await client.query('ROLLBACK'); handleDbError(res, e); } finally { client.release(); }
+});
+
+// --- NOTIFICACIONES ---
+
+router.get('/notificaciones', authenticateToken, async (req, res) => {
+    try {
+        const { codUsuario } = req.user;
+        const r = await pool.query(`
+            SELECT id, tipo, titulo, cuerpo, leida, fecha_creacion as "fechaCreacion",
+                   referencia_id as "referenciaId", referencia_tabla as "referenciaTabla"
+            FROM notificaciones
+            WHERE (para_usuario = $1 OR para_usuario IS NULL)
+              AND leida = FALSE
+            ORDER BY fecha_creacion DESC
+            LIMIT 50
+        `, [codUsuario]);
+        res.json(r.rows);
+    } catch(e) { handleDbError(res, e); }
+});
+
+router.put('/notificaciones/:id/leer', authenticateToken, async (req, res) => {
+    try {
+        await pool.query(
+            'UPDATE notificaciones SET leida = TRUE, fecha_lectura = NOW() WHERE id = $1',
+            [req.params.id]
+        );
+        res.json({ message: 'OK' });
+    } catch(e) { handleDbError(res, e); }
+});
+
+router.put('/notificaciones/leer-todas', authenticateToken, async (req, res) => {
+    try {
+        const { codUsuario } = req.user;
+        await pool.query(
+            'UPDATE notificaciones SET leida = TRUE, fecha_lectura = NOW() WHERE (para_usuario = $1 OR para_usuario IS NULL) AND leida = FALSE',
+            [codUsuario]
+        );
+        res.json({ message: 'OK' });
+    } catch(e) { handleDbError(res, e); }
+});
+
+// --- KARDEX DE INVENTARIO ---
+
+router.get('/kardex/:tipo/:cod', authenticateToken, async (req, res) => {
+    try {
+        const { tipo, cod } = req.params;
+        const campo = tipo === 'TELEFONO' ? 'cod_telefono' : 'cod_inventario';
+        const r = await pool.query(`
+            SELECT id, tipo_producto as "tipoProducto", tipo_movimiento as "tipoMovimiento",
+                   cantidad, precio_costo as "precioCosto", precio_venta as "precioVenta",
+                   referencia_doc as "referenciaDoc", registrado_por as "registradoPor",
+                   observaciones,
+                   TO_CHAR(fecha, 'YYYY-MM-DD HH24:MI:SS') as fecha
+            FROM kardex_inventario
+            WHERE ${campo} = $1
+            ORDER BY fecha DESC
+            LIMIT 100
+        `, [cod]);
+        res.json(r.rows);
+    } catch(e) { handleDbError(res, e); }
+});
+
+// --- PAGOS DE VENTAS A CRÉDITO ---
+
+router.get('/pagos-venta/:codVenta', authenticateToken, async (req, res) => {
+    try {
+        const r = await pool.query(`
+            SELECT id_pago as "idPago", monto, metodo_pago as "metodoPago", referencia,
+                   notas, TO_CHAR(fecha_pago, 'YYYY-MM-DD HH24:MI:SS') as "fechaPago"
+            FROM pagos_venta
+            WHERE cod_venta = $1
+            ORDER BY fecha_pago ASC
+        `, [req.params.codVenta]);
+
+        const totalPagado = r.rows.reduce((s, p) => s + Number(p.monto), 0);
+        const ventaRes = await pool.query('SELECT total FROM ventas WHERE codVenta = $1', [req.params.codVenta]);
+        const totalVenta = Number(ventaRes.rows[0]?.total || 0);
+
+        res.json({
+            pagos: r.rows,
+            totalPagado,
+            saldoPendiente: Math.max(0, totalVenta - totalPagado)
+        });
+    } catch(e) { handleDbError(res, e); }
+});
+
+router.post('/pagos-venta', authenticateToken, async (req, res) => {
+    try {
+        const { codVenta, monto, metodoPago, referencia, notas } = req.body;
+        const { codUsuario, idCaja } = req.user;
+
+        if (!codVenta || !monto || !metodoPago) {
+            return res.status(400).json({ error: 'codVenta, monto y metodoPago son requeridos' });
+        }
+
+        await pool.query(`
+            INSERT INTO pagos_venta (cod_venta, monto, metodo_pago, referencia, idCaja, registrado_por, notas)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+        `, [codVenta, monto, metodoPago, referencia || null, idCaja, codUsuario, notas || null]);
+
+        res.status(201).json({ message: 'Pago registrado' });
+    } catch(e) { handleDbError(res, e); }
 });
 
 module.exports = router;
