@@ -202,7 +202,7 @@ const PreviewModal: React.FC<PreviewModalProps> = ({ template, onClose }) => {
           </div>
 
           {/* Preview Iframe */}
-          <div className="flex-1 bg-slate-200 overflow-auto relative flex items-start justify-center p-6">
+          <div className="flex-1 bg-slate-200 overflow-auto relative p-6">
             {loadingPreview && (
               <div className="absolute inset-0 bg-white/80 flex items-center justify-center z-10">
                 <div className="flex flex-col items-center gap-3 text-slate-500">
@@ -216,7 +216,7 @@ const PreviewModal: React.FC<PreviewModalProps> = ({ template, onClose }) => {
                 ref={iframeRef}
                 srcDoc={previewHtml}
                 className="bg-white shadow-xl rounded"
-                style={{ border: 'none', width: `${pageW}px`, height: `${pageH}px`, display: 'block', flexShrink: 0 }}
+                style={{ border: 'none', width: `${pageW}px`, height: `${pageH}px`, display: 'block', margin: '0 auto' }}
                 title="Vista previa de la plantilla"
               />
             ) : (

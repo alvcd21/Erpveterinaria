@@ -519,17 +519,36 @@ const DesignerCanvas: React.FC<DesignerCanvasProps> = ({ template, selectedId, s
                 ><Maximize size={20}/></button>
             </div>
 
+            {/* Outer wrapper: occupies visual (zoomed) space so parent overflow/centering works */}
             <div
-                className="bg-white shadow-2xl relative transition-transform duration-75 ease-out ring-1 ring-slate-900/5 origin-center overflow-hidden"
                 style={{
-                    width: `${template.width * currentScale}px`,
-                    height: `${template.height * currentScale}px`,
-                    transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
-                    backgroundColor: template.backgroundColor || '#ffffff',
+                    width: `${template.width * currentScale * zoom}px`,
+                    height: `${template.height * currentScale * zoom}px`,
+                    transform: `translate(${pan.x}px, ${pan.y}px)`,
+                    flexShrink: 0,
+                    position: 'relative',
                 }}
                 onClick={(e) => e.stopPropagation()}
                 onMouseDown={(e) => e.stopPropagation()}
                 onTouchStart={(e) => e.stopPropagation()}
+            >
+            {/* Dimension label — outside the scaled inner div so no counter-scale needed */}
+            <div
+                className="absolute -top-7 left-0 bg-slate-800 text-white text-[10px] px-2 py-1 rounded font-bold shadow-sm opacity-50 hover:opacity-100 transition-opacity"
+                style={{ whiteSpace: 'nowrap' }}
+            >
+                {template.width}{currentUnit} x {template.height}{currentUnit}
+            </div>
+            {/* Inner page: scaled to zoom, origin top-left so it fills the outer wrapper */}
+            <div
+                className="bg-white shadow-2xl relative transition-transform duration-75 ease-out ring-1 ring-slate-900/5 overflow-hidden"
+                style={{
+                    width: `${template.width * currentScale}px`,
+                    height: `${template.height * currentScale}px`,
+                    transform: `scale(${zoom})`,
+                    transformOrigin: 'top left',
+                    backgroundColor: template.backgroundColor || '#ffffff',
+                }}
             >
                 {/* Grid Overlay */}
                 {template.showGrid && (() => {
@@ -552,13 +571,6 @@ const DesignerCanvas: React.FC<DesignerCanvasProps> = ({ template, selectedId, s
                         style={{backgroundImage: `linear-gradient(#000 1px, transparent 1px), linear-gradient(90deg, #000 1px, transparent 1px)`, backgroundSize: `${currentScale}px ${currentScale}px`}}>
                     </div>
                 )}
-
-                <div
-                    className="absolute -top-8 left-0 bg-slate-800 text-white text-[10px] px-2 py-1 rounded font-bold shadow-sm opacity-50 hover:opacity-100 transition-opacity"
-                    style={{ transform: `scale(${1/zoom})`, transformOrigin: 'bottom left' }}
-                >
-                    {template.width}{currentUnit} x {template.height}{currentUnit}
-                </div>
 
                 {template.elements.map(el => el.visible === false ? null : (
                     <CanvasElement
@@ -588,6 +600,9 @@ const DesignerCanvas: React.FC<DesignerCanvasProps> = ({ template, selectedId, s
                     </svg>
                 )}
             </div>
+            {/* /inner-page */}
+            </div>
+            {/* /outer-wrapper */}
         </div>
     );
 };

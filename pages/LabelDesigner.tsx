@@ -587,7 +587,7 @@ const LabelDesigner: React.FC = () => {
     >
         {/* HEADER */}
         <header className="bg-white border-b h-16 flex items-center justify-between px-4 shrink-0 z-30 shadow-sm">
-            <div className="flex items-center gap-2 w-1/3">
+            <div className="flex items-center gap-2 flex-shrink-0">
                 <button onClick={() => setView('GALLERY')} className="hover:bg-slate-100 p-2 rounded-full text-slate-600 transition-colors"><ArrowLeft size={20}/></button>
                 <div className="hidden md:flex gap-1 border-l pl-3 ml-2">
                     <button onClick={undo} disabled={editHistory.length <= 0 || historyIndex <= 0} className="p-1.5 hover:bg-slate-100 rounded disabled:opacity-30"><Undo2 size={18}/></button>
@@ -609,10 +609,10 @@ const LabelDesigner: React.FC = () => {
                 )}
             </div>
 
-            <div className="w-1/3 flex justify-end gap-2">
+            <div className="flex-shrink-0 flex items-center justify-end gap-1 md:gap-2">
                 <button
                     onClick={() => setShowPreviewModal(true)}
-                    className="border border-slate-200 hover:bg-slate-50 text-slate-600 px-3 py-2 rounded-lg font-bold flex items-center gap-2 text-sm transition-all active:scale-95"
+                    className="border border-slate-200 hover:bg-slate-50 text-slate-600 p-2 md:px-3 md:py-2 rounded-lg font-bold flex items-center gap-2 text-sm transition-all active:scale-95"
                     title="Vista previa con datos reales"
                 >
                     <Eye size={18}/> <span className="hidden md:inline">Preview</span>
@@ -626,14 +626,14 @@ const LabelDesigner: React.FC = () => {
                 </button>
                 <button
                     onClick={() => printTemplate(template, {})}
-                    className="border border-slate-200 hover:bg-slate-50 text-slate-600 px-3 py-2 rounded-lg font-bold flex items-center gap-2 text-sm transition-all active:scale-95"
+                    className="border border-slate-200 hover:bg-slate-50 text-slate-600 p-2 rounded-lg flex items-center text-sm transition-all active:scale-95"
                     title="Imprimir"
                 >
                     <Printer size={18}/>
                 </button>
                 <button
                     onClick={() => downloadHTML(template, {})}
-                    className="border border-slate-200 hover:bg-slate-50 text-slate-600 px-3 py-2 rounded-lg font-bold flex items-center gap-2 text-sm transition-all active:scale-95"
+                    className="hidden sm:flex border border-slate-200 hover:bg-slate-50 text-slate-600 p-2 md:px-3 md:py-2 rounded-lg font-bold items-center gap-2 text-sm transition-all active:scale-95"
                     title="Descargar HTML (abre en navegador → Ctrl+P → Guardar como PDF)"
                 >
                     <Download size={18}/> <span className="hidden md:inline">HTML</span>
@@ -646,18 +646,13 @@ const LabelDesigner: React.FC = () => {
                     <Keyboard size={18}/>
                 </button>
                 <button
-                    onClick={() => setShowShortcutsModal(true)}
-                    className="hidden md:flex border border-slate-200 hover:bg-slate-50 text-slate-500 p-2 rounded-lg transition-all"
-                    title="Atajos de teclado"
-                ><Keyboard size={18}/></button>
-                <button
                     onClick={handleSaveAs}
                     className="hidden md:flex border border-slate-200 hover:bg-slate-50 text-slate-600 px-3 py-2 rounded-lg font-bold items-center gap-2 text-sm transition-all active:scale-95"
                     title="Guardar como nuevo diseño"
                 >
                     <Copy size={16}/> <span className="hidden lg:inline">Guardar Como</span>
                 </button>
-                <button onClick={handleSave} className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-bold shadow-sm flex items-center gap-2 text-sm transition-all active:scale-95">
+                <button onClick={handleSave} className="bg-indigo-600 hover:bg-indigo-700 text-white p-2 md:px-4 md:py-2 rounded-lg font-bold shadow-sm flex items-center gap-2 text-sm transition-all active:scale-95">
                     <Save size={18}/> <span className="hidden md:inline">Guardar</span>
                 </button>
             </div>
