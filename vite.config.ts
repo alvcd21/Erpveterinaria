@@ -103,6 +103,8 @@ export default defineConfig({
     })
   ],
   server: {
+    https: false, // Set to true if you have SSL certs for LAN HTTPS (required for permanent camera permissions on non-localhost)
+    host: true,   // Expose on LAN
     proxy: {
       '/api': {
         target: 'http://localhost:3000',

@@ -5,6 +5,7 @@ import * as ReactRouterDOM from 'react-router-dom';
 const { HashRouter, Routes, Route, Navigate } = ReactRouterDOM as any;
 import { AuthProvider } from './context/AuthContext';
 import OfflineBanner from './components/OfflineBanner';
+import CameraPermissionBanner from './components/CameraPermissionBanner';
 import ProtectedRoute from './components/ProtectedRoute';
 import Layout from './components/Layout';
 import Dashboard from './pages/Dashboard';
@@ -31,6 +32,7 @@ const App: React.FC = () => {
   return (
     <AuthProvider>
       <OfflineBanner />
+      <CameraPermissionBanner />
       <HashRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <Routes>
           <Route path="/login" element={<Login />} />

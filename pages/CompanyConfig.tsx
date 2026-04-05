@@ -2,11 +2,22 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ConfigService } from '../services/api';
 import { EmpresaConfig } from '../types';
-import { Settings, Save, Building2, FileText, AlertCircle, ImageIcon, X } from 'lucide-react';
+import { Settings, Save, Building2, FileText, AlertCircle, ImageIcon, X, Camera, CheckCircle2, ShieldAlert } from 'lucide-react';
+import { useCameraPermission } from '../hooks/useCameraPermission';
 import Swal from 'sweetalert2';
 
 const CompanyConfig: React.FC = () => {
   const logoInputRef = useRef<HTMLInputElement>(null);
+  const { state: camState, requestPermission } = useCameraPermission();
+  const [camRequesting, setCamRequesting] = useState(false);
+
+  const handleGrantCamera = async () => {
+    setCamRequesting(true);
+    const ok = await requestPermission();
+    setCamRequesting(false);
+    if (ok) Swal.fire({ title: 'Cámara autorizada', text: 'El escáner ya no volverá a pedir permiso.', icon: 'success', timer: 2000, showConfirmButton: false });
+    else    Swal.fire({ title: 'Permiso denegado', text: 'Ve a configuración del navegador y permite el acceso a la cámara para este sitio.', icon: 'warning' });
+  };
   const [config, setConfig] = useState<EmpresaConfig>({
     nombreEmpresa: '',
     rtn: '',
@@ -192,6 +203,58 @@ const CompanyConfig: React.FC = () => {
                         value={config.mensajeFinal} onChange={e => setConfig({...config, mensajeFinal: e.target.value})} />
                 </div>
             </div>
+        </div>
+
+        {/* PERMISOS DE CÁMARA */}
+        <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200">
+            <h3 className="font-bold text-lg text-slate-800 mb-4 flex items-center gap-2 border-b border-slate-100 pb-2">
+                <Camera className="text-indigo-600"/> Escáner de Cámara
+            </h3>
+            <div className="flex items-center gap-4">
+                {camState === 'granted' ? (
+                    <div className="flex items-center gap-3 bg-emerald-50 border border-emerald-200 rounded-2xl px-5 py-4 flex-1">
+                        <CheckCircle2 size={24} className="text-emerald-600 shrink-0"/>
+                        <div>
+                            <p className="font-bold text-emerald-700 text-sm">Cámara autorizada</p>
+                            <p className="text-xs text-emerald-600 mt-0.5">El escáner funciona sin pedir permiso cada vez.</p>
+                        </div>
+                    </div>
+                ) : camState === 'denied' ? (
+                    <div className="flex items-center gap-3 bg-red-50 border border-red-200 rounded-2xl px-5 py-4 flex-1">
+                        <ShieldAlert size={24} className="text-red-500 shrink-0"/>
+                        <div>
+                            <p className="font-bold text-red-700 text-sm">Acceso bloqueado</p>
+                            <p className="text-xs text-red-600 mt-0.5">Ve a Configuración del navegador → Permisos del sitio → Cámara y permite este sitio manualmente.</p>
+                        </div>
+                    </div>
+                ) : (
+                    <div className="flex items-center gap-4 flex-1 flex-wrap">
+                        <div className="flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3 flex-1 min-w-0">
+                            <Camera size={20} className="text-amber-600 shrink-0"/>
+                            <div className="min-w-0">
+                                <p className="font-bold text-amber-700 text-sm">Permiso no configurado</p>
+                                <p className="text-xs text-amber-600 mt-0.5">Actívalo una vez y el escáner funcionará siempre.</p>
+                            </div>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={handleGrantCamera}
+                            disabled={camRequesting}
+                            className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-3 rounded-xl font-bold text-sm flex items-center gap-2 shadow-lg shadow-indigo-600/20 active:scale-95 transition-all disabled:opacity-60 shrink-0"
+                        >
+                            <Camera size={16}/> {camRequesting ? 'Solicitando...' : 'Activar Cámara'}
+                        </button>
+                    </div>
+                )}
+            </div>
+            {window.location.protocol !== 'https:' && window.location.hostname !== 'localhost' && (
+                <div className="mt-3 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 flex gap-2 items-start">
+                    <AlertCircle size={15} className="text-slate-400 shrink-0 mt-0.5"/>
+                    <p className="text-[11px] text-slate-500">
+                        <strong>Nota:</strong> La app está en <strong>HTTP</strong>. Para que el permiso sea permanente, accede por <strong>HTTPS</strong> o instala la app (PWA). En HTTP, algunos navegadores piden permiso en cada sesión.
+                    </p>
+                </div>
+            )}
         </div>
 
         <div className="flex justify-end pt-4">

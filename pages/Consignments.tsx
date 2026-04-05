@@ -1,11 +1,11 @@
-
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { ConsignService, InventoryService } from '../services/api';
 import { useOfflineSync } from '../hooks/useOfflineSync';
 import { Consignacion, ProductoUnified } from '../types';
 import {
-  Hand, PlusCircle, Search, Store, ShoppingCart, RefreshCcw, X, Save, RefreshCw,
-  ArrowRightCircle, Trash2, Edit2, Package, Smartphone, Check, Minus, Plus, ScanLine, ChevronRight
+  Hand, Search, Store, ShoppingCart, RefreshCcw, X, RefreshCw,
+  Smartphone, Package, Check, ChevronDown, ChevronRight,
+  ScanLine, Layers, DollarSign, RotateCcw, History, AlertCircle
 } from 'lucide-react';
 import BarcodeScanner from '../components/BarcodeScanner';
 import Swal from 'sweetalert2';
@@ -14,59 +14,53 @@ const { useLocation } = ReactRouterDOM as any;
 
 const TODAY = new Date().toISOString().split('T')[0];
 
-interface CartItem { product: ProductoUnified; qty: number; specialPrice: number; }
+interface BusinessGroup {
+  name: string;
+  items: Consignacion[];
+  total: number;
+}
+
+interface PriceEdit { id: number; value: string; }
 
 const Consignments: React.FC = () => {
   const location = useLocation();
+
   const [consignments, setConsignments] = useState<Consignacion[]>([]);
-  const [products, setProducts] = useState<ProductoUnified[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [searchTerm, setSearchTerm] = useState('');
+  const [products,     setProducts]     = useState<ProductoUnified[]>([]);
+  const [loading,      setLoading]      = useState(false);
+  const [searchTerm,   setSearchTerm]   = useState('');
+  const [showHistory,  setShowHistory]  = useState(false);
 
-  // Modal state
-  const [showModal, setShowModal] = useState(false);
-  const [isEditing, setIsEditing] = useState(false);
-  const [editId, setEditId] = useState<number | null>(null);
+  // Which business accordion is expanded
+  const [expandedBusiness, setExpandedBusiness] = useState<string | null>(null);
 
-  // Cart & form
-  const [cart, setCart] = useState<CartItem[]>([]);
-  const [businessName, setBusinessName] = useState('');
-  const [dueDate, setDueDate] = useState('');
+  // Inline price editing
+  const [priceEdit, setPriceEdit] = useState<PriceEdit | null>(null);
+  const priceRef = useRef<HTMLInputElement>(null);
 
-  // Scanner
-  const [showScanner, setShowScanner] = useState(false);
-  const [scannerMode, setScannerMode] = useState<'new' | 'search'>('search');
-
-  // Summary confirm modal
-  const [showSummary, setShowSummary] = useState(false);
-  const [summaryCart, setSummaryCart] = useState<CartItem[]>([]);
+  // --- Scan flow ---
+  // Step 1: choose mode
+  const [showModeSheet, setShowModeSheet] = useState(false);
+  // Step 2: choose business
+  const [showBusinessSheet, setShowBusinessSheet] = useState(false);
+  const [pendingMode, setPendingMode] = useState<'single' | 'batch' | null>(null);
+  const [scanBusiness, setScanBusiness] = useState('');
+  const [scanDueDate,  setScanDueDate]  = useState('');
+  // Step 3: scan
+  const [showScanner, setShowScanner]   = useState(false);
+  const [batchCodes,  setBatchCodes]    = useState<string[]>([]);
 
   const businessInputRef = useRef<HTMLInputElement>(null);
 
-  // Unique businesses from history
-  const uniqueBusinesses = useMemo(() =>
-    [...new Set(consignments.map(c => c.negocio_destino).filter(Boolean))].sort(),
-    [consignments]
-  );
-
-  useEffect(() => {
-    loadData();
-    loadProducts();
-    if (location.state?.consignItem) {
-      addToCart(location.state.consignItem);
-      setShowModal(true);
-    }
-  }, [location.state]);
-
+  // ── Data loading ───────────────────────────────────────────────────────────
   const loadData = async () => {
     setLoading(true);
     try {
       const data = await ConsignService.getAll();
       setConsignments(data || []);
-    } catch (e) { console.error(e); } finally { setLoading(false); }
+    } catch (e) { console.error(e); }
+    finally { setLoading(false); }
   };
-
-  useOfflineSync(loadData);
 
   const loadProducts = async () => {
     try {
@@ -75,465 +69,465 @@ const Consignments: React.FC = () => {
     } catch (e) { console.error(e); }
   };
 
-  const addToCart = (p: ProductoUnified) => {
-    setCart(prev => {
-      const exists = prev.find(c => c.product.id === p.id);
-      if (exists) {
-        if (p.tipo === 'TELEFONO') return prev; // phones can't have qty > 1
-        return prev.map(c => c.product.id === p.id ? { ...c, qty: c.qty + 1 } : c);
-      }
-      return [...prev, { product: p, qty: 1, specialPrice: p.precioVenta }];
-    });
-  };
+  useOfflineSync(loadData);
 
-  const removeFromCart = (id: string) => setCart(prev => prev.filter(c => c.product.id !== id));
-
-  const updateCartItem = (id: string, updates: Partial<CartItem>) =>
-    setCart(prev => prev.map(c => c.product.id === id ? { ...c, ...updates } : c));
-
-  // Barcode scan → find product → add to cart
-  const handleBarcodeScan = (code: string) => {
-    if (scannerMode === 'search') {
-      setSearchTerm(code);
-      setShowScanner(false);
-      return;
+  useEffect(() => {
+    loadData();
+    loadProducts();
+    if (location.state?.consignItem) {
+      setScanBusiness('');
+      setShowBusinessSheet(true);
+      setPendingMode('single');
     }
-    const found = products.find(p =>
-      p.imei === code || p.codigo === code || String(p.id) === code
-    );
-    if (!found) {
-      Swal.fire({ title: 'Producto no encontrado', text: `Código: ${code}`, icon: 'warning', timer: 2000, showConfirmButton: false });
-      return;
-    }
-    if (found.stock <= 0) {
-      Swal.fire({ title: 'Sin stock', text: found.nombre, icon: 'warning', timer: 1500, showConfirmButton: false });
-      return;
-    }
-    addToCart(found);
-    // haptic / toast feedback
-    Swal.fire({ title: found.nombre, text: 'Agregado al lote', icon: 'success', timer: 1000, showConfirmButton: false, position: 'top-end', toast: true });
-  };
+  }, [location.state]);
 
-  const openNewModal = () => {
-    setIsEditing(false);
-    setEditId(null);
-    setCart([]);
-    setBusinessName('');
-    setDueDate('');
-    setShowModal(true);
-    setTimeout(() => businessInputRef.current?.focus(), 100);
-  };
-
-  const handleCreate = async () => {
-    if (cart.length === 0) return Swal.fire('Error', 'Agregue productos al lote', 'warning');
-    if (!businessName.trim()) return Swal.fire('Error', 'Seleccione o escriba un negocio destino', 'warning');
-    // Open summary
-    setSummaryCart(cart.map(c => ({ ...c })));
-    setShowSummary(true);
-  };
-
-  const confirmCreate = async () => {
-    try {
-      const payload = summaryCart.map(item => ({
-        id_producto: item.product.id,
-        tipo_producto: item.product.tipo as 'TELEFONO' | 'ACCESORIO',
-        negocio_destino: businessName.trim(),
-        cantidad_prestada: item.qty,
-        precio_especial_pago: item.specialPrice,
-        fecha_limite: dueDate || null
-      }));
-      await ConsignService.create(payload);
-      setShowSummary(false);
-      setShowModal(false);
-      setCart([]);
-      setBusinessName('');
-      setDueDate('');
-      loadData();
-      loadProducts();
-      Swal.fire({ title: 'Préstamo registrado', icon: 'success', timer: 1500, showConfirmButton: false });
-    } catch (e: any) { Swal.fire('Error', e.message, 'error'); }
-  };
-
-  const handleUpdate = async () => {
-    if (!editId || !businessName) return;
-    try {
-      const item = cart[0];
-      await ConsignService.update(editId, {
-        negocio_destino: businessName,
-        precio_especial_pago: item.specialPrice,
-        fecha_limite: dueDate
-      });
-      setShowModal(false);
-      loadData();
-      Swal.fire({ title: 'Actualizado', icon: 'success', timer: 1200, showConfirmButton: false });
-    } catch (e: any) { Swal.fire('Error', e.message, 'error'); }
-  };
-
-  const handleEdit = (c: Consignacion) => {
-    setIsEditing(true);
-    setEditId(c.id_consignacion);
-    setBusinessName(c.negocio_destino);
-    setDueDate(c.fecha_limite ? c.fecha_limite.split('T')[0] : '');
-    const prod = products.find(p => p.id === c.id_producto) || {
-      id: c.id_producto, nombre: c.nombre_producto, tipo: c.tipo_producto,
-      stock: 0, precioVenta: c.precio_especial_pago, codigo: ''
-    } as ProductoUnified;
-    setCart([{ product: prod, qty: c.cantidad_prestada, specialPrice: Number(c.precio_especial_pago) }]);
-    setShowModal(true);
-  };
-
-  const handleDelete = async (id: number) => {
-    const result = await Swal.fire({ title: '¿Eliminar registro?', text: 'El stock será devuelto.', icon: 'warning', showCancelButton: true });
-    if (result.isConfirmed) {
-      try { await ConsignService.delete(id); loadData(); loadProducts(); }
-      catch (e: any) { Swal.fire('Error', e.message, 'error'); }
-    }
-  };
-
-  const handleLiquidate = async (id: number) => {
-    const result = await Swal.fire({
-      title: '¿Confirmar Pago?', text: 'Se registrará el ingreso.',
-      icon: 'question', showCancelButton: true, confirmButtonText: 'Sí, Liquidar'
-    });
-    if (result.isConfirmed) {
-      try { await ConsignService.liquidate(id); loadData(); Swal.fire({ title: 'Liquidado', icon: 'success', timer: 1200, showConfirmButton: false }); }
-      catch (e: any) { Swal.fire('Error', e.message, 'error'); }
-    }
-  };
-
-  const handleReturn = async (id: number) => {
-    const result = await Swal.fire({ title: '¿Retornar a Stock?', icon: 'warning', showCancelButton: true });
-    if (result.isConfirmed) {
-      try { await ConsignService.returnToStock(id); loadData(); loadProducts(); Swal.fire({ title: 'Retornado', icon: 'success', timer: 1200, showConfirmButton: false }); }
-      catch (e: any) { Swal.fire('Error', e.message, 'error'); }
-    }
-  };
-
-  const filteredConsignments = consignments.filter(c =>
-    c.negocio_destino.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    c.nombre_producto?.toLowerCase().includes(searchTerm.toLowerCase())
+  // ── Computed groups ─────────────────────────────────────────────────────────
+  const uniqueBusinesses = useMemo(() =>
+    [...new Set(consignments.map(c => c.negocio_destino))].sort(),
+    [consignments]
   );
 
-  const cartTotal = cart.reduce((sum, i) => sum + i.specialPrice * i.qty, 0);
+  const activeGroups = useMemo<BusinessGroup[]>(() => {
+    const term = searchTerm.toLowerCase();
+    const active = consignments.filter(c =>
+      c.estado_consignacion === 'Prestado' &&
+      (!term || c.negocio_destino.toLowerCase().includes(term) || c.nombre_producto?.toLowerCase().includes(term))
+    );
+    const map = new Map<string, Consignacion[]>();
+    active.forEach(c => {
+      const g = map.get(c.negocio_destino) ?? [];
+      g.push(c);
+      map.set(c.negocio_destino, g);
+    });
+    return Array.from(map.entries())
+      .map(([name, items]) => ({ name, items, total: items.reduce((s, i) => s + Number(i.precio_especial_pago) * i.cantidad_prestada, 0) }))
+      .sort((a, b) => b.total - a.total);
+  }, [consignments, searchTerm]);
 
+  const historyItems = useMemo(() =>
+    consignments
+      .filter(c => c.estado_consignacion !== 'Prestado' &&
+        (!searchTerm || c.negocio_destino.toLowerCase().includes(searchTerm.toLowerCase())))
+      .slice(0, 40),
+    [consignments, searchTerm]
+  );
+
+  // ── Register a consignment ─────────────────────────────────────────────────
+  const registerOne = async (product: ProductoUnified, business: string, dueDate?: string) => {
+    await ConsignService.create([{
+      id_producto:         product.id,
+      tipo_producto:       product.tipo as 'TELEFONO' | 'ACCESORIO',
+      negocio_destino:     business,
+      cantidad_prestada:   1,
+      precio_especial_pago: product.precioVenta,
+      fecha_limite:        dueDate || null,
+    }]);
+  };
+
+  // ── Scan handlers ──────────────────────────────────────────────────────────
+  const findProduct = (code: string) =>
+    products.find(p => p.imei === code || p.codigo === code || String(p.id) === code);
+
+  const handleScan = useCallback(async (code: string) => {
+    if (pendingMode === 'single') {
+      // Single: register immediately, close scanner
+      const product = findProduct(code);
+      if (!product) {
+        Swal.fire({ title: 'Producto no encontrado', text: code, icon: 'warning', timer: 2000, showConfirmButton: false, toast: true, position: 'top' });
+        return;
+      }
+      if (product.stock <= 0) {
+        Swal.fire({ title: 'Sin stock', text: product.nombre, icon: 'warning', timer: 1500, showConfirmButton: false, toast: true, position: 'top' });
+        return;
+      }
+      try {
+        await registerOne(product, scanBusiness, scanDueDate);
+        setShowScanner(false);
+        loadData(); loadProducts();
+        setExpandedBusiness(scanBusiness);
+        Swal.fire({ title: '¡Registrado!', text: product.nombre, icon: 'success', timer: 1500, showConfirmButton: false, toast: true, position: 'top' });
+      } catch (e: any) {
+        Swal.fire('Error', e.message, 'error');
+      }
+    } else {
+      // Batch: accumulate codes
+      if (batchCodes.includes(code)) {
+        Swal.fire({ title: 'Ya escaneado', text: code, icon: 'info', timer: 1000, showConfirmButton: false, toast: true, position: 'top' });
+        return;
+      }
+      const product = findProduct(code);
+      if (!product) {
+        Swal.fire({ title: 'No encontrado', text: code, icon: 'warning', timer: 1200, showConfirmButton: false, toast: true, position: 'top' });
+        return;
+      }
+      if (product.stock <= 0) {
+        Swal.fire({ title: 'Sin stock', text: product.nombre, icon: 'warning', timer: 1200, showConfirmButton: false, toast: true, position: 'top' });
+        return;
+      }
+      setBatchCodes(prev => [...prev, code]);
+    }
+  }, [pendingMode, scanBusiness, scanDueDate, batchCodes, products]);
+
+  const handleConfirmBatch = useCallback(async () => {
+    if (batchCodes.length === 0) {
+      Swal.fire({ title: 'No hay productos escaneados', icon: 'warning', timer: 1500, showConfirmButton: false });
+      return;
+    }
+    if (!scanBusiness.trim()) {
+      Swal.fire('Falta el negocio', 'Selecciona un negocio destino.', 'warning');
+      return;
+    }
+    setShowScanner(false);
+    const resolved = batchCodes.map(c => findProduct(c)).filter(Boolean) as ProductoUnified[];
+    try {
+      for (const p of resolved) await registerOne(p, scanBusiness, scanDueDate);
+      setBatchCodes([]);
+      loadData(); loadProducts();
+      setExpandedBusiness(scanBusiness);
+      Swal.fire({ title: `${resolved.length} producto(s) registrado(s)`, icon: 'success', timer: 1800, showConfirmButton: false });
+    } catch (e: any) { Swal.fire('Error', e.message, 'error'); }
+  }, [batchCodes, scanBusiness, scanDueDate, products]);
+
+  // ── Business sheet confirm ─────────────────────────────────────────────────
+  const startScan = () => {
+    if (!scanBusiness.trim()) {
+      businessInputRef.current?.focus();
+      return;
+    }
+    setShowBusinessSheet(false);
+    setBatchCodes([]);
+    setShowScanner(true);
+  };
+
+  // ── Liquidate / Return ─────────────────────────────────────────────────────
+  const handleLiquidate = async (id: number, name?: string) => {
+    const r = await Swal.fire({
+      title: '¿Confirmar Cobro?', text: name, icon: 'question',
+      showCancelButton: true, confirmButtonText: 'Cobrar', cancelButtonText: 'No',
+      confirmButtonColor: '#16a34a',
+    });
+    if (r.isConfirmed) {
+      try { await ConsignService.liquidate(id); loadData(); }
+      catch (e: any) { Swal.fire('Error', e.message, 'error'); }
+    }
+  };
+
+  const handleLiquidateAll = async (group: BusinessGroup) => {
+    const r = await Swal.fire({
+      title: `Cobrar todo a ${group.name}`,
+      text: `Total: L. ${group.total.toFixed(2)}`,
+      icon: 'question', showCancelButton: true,
+      confirmButtonText: 'Cobrar Todo', cancelButtonText: 'Cancelar',
+      confirmButtonColor: '#16a34a',
+    });
+    if (r.isConfirmed) {
+      try {
+        for (const item of group.items) await ConsignService.liquidate(item.id_consignacion);
+        loadData();
+        Swal.fire({ title: 'Cobrado', icon: 'success', timer: 1400, showConfirmButton: false });
+      } catch (e: any) { Swal.fire('Error', e.message, 'error'); }
+    }
+  };
+
+  const handleReturn = async (id: number, name?: string) => {
+    const r = await Swal.fire({
+      title: '¿Retornar a Stock?', text: name, icon: 'warning',
+      showCancelButton: true, confirmButtonText: 'Retornar',
+    });
+    if (r.isConfirmed) {
+      try { await ConsignService.returnToStock(id); loadData(); loadProducts(); }
+      catch (e: any) { Swal.fire('Error', e.message, 'error'); }
+    }
+  };
+
+  // ── Price editing ──────────────────────────────────────────────────────────
+  const startPriceEdit = (id: number, current: number) => {
+    setPriceEdit({ id, value: String(current) });
+    setTimeout(() => priceRef.current?.select(), 50);
+  };
+
+  const commitPriceEdit = async () => {
+    if (!priceEdit) return;
+    const price = parseFloat(priceEdit.value);
+    if (isNaN(price) || price < 0) { setPriceEdit(null); return; }
+    try {
+      await ConsignService.update(priceEdit.id, { precio_especial_pago: price });
+      setConsignments(prev => prev.map(c => c.id_consignacion === priceEdit.id ? { ...c, precio_especial_pago: price } : c));
+    } catch (e: any) { Swal.fire('Error', e.message, 'error'); }
+    setPriceEdit(null);
+  };
+
+  const toggleBusiness = (name: string) =>
+    setExpandedBusiness(prev => prev === name ? null : name);
+
+  // ─────────────────────────────────────────────────────────────────────────────
   return (
-    <div className="space-y-6 animate-fade-in h-full flex flex-col overflow-hidden">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4 px-1 shrink-0">
+    <div className="flex flex-col h-full overflow-hidden animate-fade-in">
+
+      {/* ── Header ── */}
+      <div className="px-4 pt-4 pb-3 shrink-0 flex items-center justify-between gap-3">
         <div>
-          <h2 className="text-xl md:text-2xl font-bold text-slate-800 flex items-center gap-2">
-            <Hand className="text-orange-600" size={24}/> Consignaciones
+          <h2 className="text-lg font-black text-slate-800 flex items-center gap-2">
+            <Hand className="text-orange-500" size={20}/> Consignaciones
           </h2>
-          <p className="text-slate-500 text-xs md:text-sm">Préstamos a negocios externos y liquidaciones.</p>
+          <p className="text-[11px] text-slate-400">{activeGroups.length} negocios activos</p>
         </div>
-        <button
-          onClick={openNewModal}
-          className="w-full md:w-auto bg-orange-600 hover:bg-orange-700 text-white px-5 py-3 md:py-2.5 rounded-xl flex items-center justify-center gap-2 font-bold shadow-lg shadow-orange-600/20 transition-all active:scale-95"
-        >
-          <PlusCircle size={20}/> Nuevo Préstamo
-        </button>
-      </div>
-
-      {/* History Table */}
-      <div className="bg-white rounded-2xl md:rounded-3xl shadow-sm border border-slate-200 flex-1 overflow-hidden flex flex-col">
-        <div className="p-3 md:p-4 border-b bg-slate-50 flex gap-2">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18}/>
-            <input
-              type="text"
-              placeholder="Buscar negocio o producto..."
-              className="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-orange-500/20 outline-none"
-              value={searchTerm}
-              onChange={e => setSearchTerm(e.target.value)}
-            />
-          </div>
+        <div className="flex gap-2">
+          {/* Single product button */}
           <button
-            onClick={() => { setScannerMode('search'); setShowScanner(true); }}
-            className="bg-orange-100 hover:bg-orange-200 text-orange-600 p-2.5 rounded-xl transition-all active:scale-95"
-            title="Buscar por código de barras"
+            onClick={() => { setPendingMode('single'); setScanBusiness(''); setScanDueDate(''); setShowBusinessSheet(true); }}
+            className="flex items-center gap-1.5 bg-orange-600 hover:bg-orange-700 text-white px-3 py-2.5 rounded-xl font-black text-xs shadow-lg shadow-orange-600/25 active:scale-95 transition-all"
           >
-            <ScanLine size={20}/>
+            <ScanLine size={16}/> <span className="hidden sm:inline">Producto</span>
           </button>
-          <button onClick={loadData} className="p-2.5 text-slate-500 hover:bg-slate-200 rounded-xl border border-slate-200 bg-white">
-            <RefreshCw size={20} className={loading ? 'animate-spin' : ''}/>
+          {/* Batch button */}
+          <button
+            onClick={() => { setPendingMode('batch'); setScanBusiness(''); setScanDueDate(''); setShowBusinessSheet(true); }}
+            className="flex items-center gap-1.5 bg-slate-700 hover:bg-slate-800 text-white px-3 py-2.5 rounded-xl font-black text-xs shadow-lg active:scale-95 transition-all"
+          >
+            <Layers size={16}/> <span className="hidden sm:inline">Lote</span>
           </button>
-        </div>
-
-        <div className="flex-1 overflow-auto custom-scrollbar">
-          <table className="w-full text-left min-w-[600px] md:min-w-0">
-            <thead className="bg-slate-100 text-[10px] font-black text-slate-500 uppercase sticky top-0 z-10 tracking-widest border-b">
-              <tr>
-                <th className="p-4">Negocio</th>
-                <th className="p-4">Producto</th>
-                <th className="p-4">Precio</th>
-                <th className="p-4">Estado</th>
-                <th className="p-4 text-right">Acciones</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {filteredConsignments.length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="p-10 text-center text-slate-400 italic text-sm">
-                    {loading ? 'Cargando...' : 'No hay registros de consignación.'}
-                  </td>
-                </tr>
-              ) : filteredConsignments.map(c => (
-                <tr key={c.id_consignacion} className="hover:bg-slate-50/80 transition-colors group">
-                  <td className="p-4">
-                    <div className="flex items-center gap-2">
-                      <div className="bg-orange-100 p-1.5 rounded-lg text-orange-600"><Store size={16}/></div>
-                      <span className="font-bold text-slate-800 text-sm">{c.negocio_destino}</span>
-                    </div>
-                  </td>
-                  <td className="p-4">
-                    <p className="text-xs font-bold text-slate-700">{c.nombre_producto}</p>
-                    <p className="text-[10px] text-slate-400 font-mono uppercase">{c.tipo_producto} {c.cantidad_prestada > 1 && `×${c.cantidad_prestada}`}</p>
-                  </td>
-                  <td className="p-4 font-black text-emerald-600 text-sm">L. {Number(c.precio_especial_pago).toFixed(2)}</td>
-                  <td className="p-4">
-                    <span className={`px-2 py-1 rounded-full text-[10px] font-black uppercase ${
-                      c.estado_consignacion === 'Vendido_Pagado' ? 'bg-emerald-100 text-emerald-700' :
-                      c.estado_consignacion === 'Devuelto' ? 'bg-slate-100 text-slate-500' :
-                      'bg-orange-100 text-orange-700'
-                    }`}>
-                      {c.estado_consignacion.replace('_', ' ')}
-                    </span>
-                  </td>
-                  <td className="p-4 text-right">
-                    {c.estado_consignacion === 'Prestado' ? (
-                      <div className="flex justify-end gap-1.5">
-                        <button onClick={() => handleLiquidate(c.id_consignacion)} className="bg-emerald-600 text-white p-2 rounded-xl hover:bg-emerald-700 active:scale-90 transition-all" title="Cobrar"><ShoppingCart size={14}/></button>
-                        <button onClick={() => handleEdit(c)} className="bg-blue-100 text-blue-600 p-2 rounded-xl hover:bg-blue-200 active:scale-90 transition-all" title="Editar"><Edit2 size={14}/></button>
-                        <button onClick={() => handleReturn(c.id_consignacion)} className="bg-slate-100 text-slate-600 p-2 rounded-xl hover:bg-slate-200 active:scale-90 transition-all" title="Retornar"><RefreshCcw size={14}/></button>
-                        <button onClick={() => handleDelete(c.id_consignacion)} className="bg-red-50 text-red-400 p-2 rounded-xl hover:bg-red-100 active:scale-90 transition-all" title="Eliminar"><Trash2 size={14}/></button>
-                      </div>
-                    ) : (
-                      <span className="text-[10px] font-black text-slate-300 uppercase bg-slate-50 px-2 py-1 rounded">CERRADO</span>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <button onClick={loadData} className="p-2.5 bg-white border border-slate-200 text-slate-500 rounded-xl hover:bg-slate-50">
+            <RefreshCw size={16} className={loading ? 'animate-spin' : ''}/>
+          </button>
         </div>
       </div>
 
-      {/* ── NEW / EDIT MODAL ── */}
-      {showModal && (
-        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-md z-50 flex items-end md:items-center justify-center md:p-4">
-          <div className="bg-white rounded-t-3xl md:rounded-3xl w-full md:max-w-lg shadow-2xl flex flex-col max-h-[95vh] animate-slide-up">
+      {/* Search */}
+      <div className="px-4 pb-3 shrink-0">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16}/>
+          <input
+            type="text" placeholder="Buscar negocio o producto..."
+            className="w-full pl-9 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-orange-500/20"
+            value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
+          />
+        </div>
+      </div>
 
-            {/* Modal header */}
-            <div className="p-5 border-b flex justify-between items-center shrink-0">
-              <div className="flex items-center gap-3">
-                <div className="bg-orange-100 p-2 rounded-xl text-orange-600"><Hand size={22}/></div>
-                <div>
-                  <h3 className="font-bold text-slate-800">{isEditing ? 'Editar Registro' : 'Nuevo Préstamo'}</h3>
-                  <p className="text-[10px] text-slate-400 uppercase tracking-widest">Módulo de Consignación</p>
+      {/* ── Business Groups ── */}
+      <div className="flex-1 overflow-y-auto px-4 pb-4 space-y-3 custom-scrollbar">
+
+        {activeGroups.length === 0 && !loading && (
+          <div className="flex flex-col items-center justify-center py-16 text-slate-300">
+            <Hand size={48} strokeWidth={1} className="mb-3 opacity-30"/>
+            <p className="font-black text-xs uppercase tracking-widest">Sin consignaciones activas</p>
+            <p className="text-xs mt-1 text-slate-400">Usa los botones de arriba para registrar</p>
+          </div>
+        )}
+
+        {activeGroups.map(group => {
+          const isOpen = expandedBusiness === group.name;
+          return (
+            <div key={group.name} className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+
+              {/* Business header row */}
+              <button
+                onClick={() => toggleBusiness(group.name)}
+                className="w-full flex items-center gap-3 p-4 text-left hover:bg-slate-50/80 transition-colors active:bg-slate-100"
+              >
+                <div className="w-9 h-9 rounded-xl bg-orange-100 flex items-center justify-center shrink-0 text-orange-600">
+                  <Store size={18}/>
                 </div>
-              </div>
-              <button onClick={() => setShowModal(false)} className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-full transition-all"><X size={22}/></button>
-            </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-black text-slate-800 text-sm truncate">{group.name}</p>
+                  <p className="text-[11px] text-slate-400">
+                    {group.items.length} artículo{group.items.length !== 1 ? 's' : ''}
+                  </p>
+                </div>
+                <div className="text-right shrink-0">
+                  <p className="font-black text-emerald-600 text-sm">L. {group.total.toLocaleString('es-HN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                  {isOpen ? <ChevronDown size={16} className="text-slate-400 ml-auto mt-0.5"/> : <ChevronRight size={16} className="text-slate-400 ml-auto mt-0.5"/>}
+                </div>
+              </button>
 
-            <div className="flex-1 overflow-y-auto p-5 space-y-5 custom-scrollbar">
+              {/* Expanded item list */}
+              {isOpen && (
+                <div className="border-t border-slate-100">
+                  <div className="divide-y divide-slate-50">
+                    {group.items.map(item => (
+                      <div key={item.id_consignacion} className="p-3 flex items-center gap-3">
+                        {/* Icon */}
+                        <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${item.tipo_producto === 'TELEFONO' ? 'bg-blue-50 text-blue-600' : 'bg-orange-50 text-orange-500'}`}>
+                          {item.tipo_producto === 'TELEFONO' ? <Smartphone size={14}/> : <Package size={14}/>}
+                        </div>
 
-              {/* Business + Date row */}
-              <div className="grid grid-cols-2 gap-3">
-                <div className="col-span-2 space-y-1">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Negocio Destino</label>
-                  <div className="relative">
-                    <Store className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16}/>
-                    <input
-                      ref={businessInputRef}
-                      list="businesses-list"
-                      className="w-full pl-9 pr-4 py-3 border border-slate-200 rounded-2xl font-bold text-sm outline-none focus:ring-2 focus:ring-orange-500/30"
-                      placeholder="Seleccionar o escribir negocio..."
-                      value={businessName}
-                      onChange={e => setBusinessName(e.target.value)}
-                    />
-                    <datalist id="businesses-list">
-                      {uniqueBusinesses.map(b => <option key={b} value={b}/>)}
-                    </datalist>
+                        {/* Name + price */}
+                        <div className="flex-1 min-w-0">
+                          <p className="font-bold text-slate-800 text-xs truncate">{item.nombre_producto}</p>
+                          {item.cantidad_prestada > 1 && (
+                            <p className="text-[10px] text-slate-400">Cant: {item.cantidad_prestada}</p>
+                          )}
+                          {/* Inline price edit */}
+                          {priceEdit?.id === item.id_consignacion ? (
+                            <div className="flex items-center gap-1 mt-1">
+                              <span className="text-[10px] text-slate-400 font-bold">L.</span>
+                              <input
+                                ref={priceRef}
+                                type="number"
+                                value={priceEdit.value}
+                                onChange={e => setPriceEdit({ ...priceEdit, value: e.target.value })}
+                                onBlur={commitPriceEdit}
+                                onKeyDown={e => { if (e.key === 'Enter') commitPriceEdit(); if (e.key === 'Escape') setPriceEdit(null); }}
+                                className="w-24 text-sm font-black text-emerald-600 border-b-2 border-emerald-500 bg-transparent outline-none"
+                                autoFocus
+                              />
+                              <button onClick={commitPriceEdit} className="text-emerald-500 hover:text-emerald-700"><Check size={14}/></button>
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => startPriceEdit(item.id_consignacion, Number(item.precio_especial_pago))}
+                              className="text-xs font-black text-emerald-600 hover:text-emerald-800 hover:underline mt-0.5 flex items-center gap-1"
+                            >
+                              L. {Number(item.precio_especial_pago).toLocaleString('es-HN', { minimumFractionDigits: 2 })}
+                              <span className="text-[9px] text-slate-300 font-normal">(editar)</span>
+                            </button>
+                          )}
+                        </div>
+
+                        {/* Action buttons */}
+                        <div className="flex gap-1.5 shrink-0">
+                          <button
+                            onClick={() => handleLiquidate(item.id_consignacion, item.nombre_producto)}
+                            className="w-9 h-9 bg-emerald-100 text-emerald-700 rounded-xl flex items-center justify-center hover:bg-emerald-200 active:scale-90 transition-all"
+                            title="Cobrar"
+                          >
+                            <DollarSign size={14}/>
+                          </button>
+                          <button
+                            onClick={() => handleReturn(item.id_consignacion, item.nombre_producto)}
+                            className="w-9 h-9 bg-slate-100 text-slate-500 rounded-xl flex items-center justify-center hover:bg-slate-200 active:scale-90 transition-all"
+                            title="Retornar"
+                          >
+                            <RotateCcw size={14}/>
+                          </button>
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Fecha Límite</label>
-                  <input
-                    type="date"
-                    className="w-full p-2.5 border border-slate-200 rounded-2xl text-sm outline-none focus:ring-2 focus:ring-orange-500/30"
-                    value={dueDate}
-                    min={TODAY}
-                    onChange={e => setDueDate(e.target.value)}
-                  />
-                </div>
-                <div className="space-y-1 flex flex-col justify-end">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Fecha Préstamo</label>
-                  <div className="p-2.5 border border-slate-100 rounded-2xl bg-slate-50 text-sm font-bold text-slate-500">{TODAY}</div>
-                </div>
-              </div>
 
-              {/* Scan + Products section (only for new) */}
-              {!isEditing && (
-                <div className="space-y-3">
-                  <div className="flex justify-between items-center">
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Productos en el Lote</p>
+                  {/* Liquidate all */}
+                  <div className="p-3 border-t border-slate-100 bg-slate-50/50">
                     <button
-                      onClick={() => { setScannerMode('new'); setShowScanner(true); }}
-                      className="flex items-center gap-2 bg-orange-600 hover:bg-orange-700 text-white px-3 py-2 rounded-xl text-xs font-black transition-all active:scale-95 shadow-md shadow-orange-600/20"
+                      onClick={() => handleLiquidateAll(group)}
+                      className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-black text-xs uppercase tracking-widest flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/20 active:scale-[0.98] transition-all"
                     >
-                      <ScanLine size={16}/> Escanear
+                      <ShoppingCart size={16}/>
+                      Cobrar Todo — L. {group.total.toLocaleString('es-HN', { minimumFractionDigits: 2 })}
                     </button>
                   </div>
-
-                  {cart.length === 0 ? (
-                    <div
-                      className="p-10 border-2 border-dashed border-orange-200 rounded-2xl flex flex-col items-center justify-center text-slate-300 bg-orange-50/30 cursor-pointer"
-                      onClick={() => { setScannerMode('new'); setShowScanner(true); }}
-                    >
-                      <ScanLine size={40} className="mb-3 text-orange-200"/>
-                      <p className="text-xs font-black uppercase tracking-widest text-orange-400">Escanea o toca aquí</p>
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      {cart.map(item => (
-                        <div key={item.product.id} className="bg-white border border-slate-100 rounded-2xl p-3 shadow-sm flex items-center gap-3">
-                          <div className={`p-2 rounded-xl shrink-0 ${item.product.tipo === 'TELEFONO' ? 'bg-blue-50 text-blue-600' : 'bg-orange-50 text-orange-600'}`}>
-                            {item.product.tipo === 'TELEFONO' ? <Smartphone size={16}/> : <Package size={16}/>}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="font-bold text-slate-800 text-xs truncate">{item.product.nombre}</p>
-                            <p className="text-[10px] text-slate-400 font-mono">{item.product.codigo || item.product.id}</p>
-                          </div>
-                          {item.product.tipo === 'ACCESORIO' && (
-                            <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-lg">
-                              <button onClick={() => item.qty > 1 ? updateCartItem(item.product.id, {qty: item.qty - 1}) : removeFromCart(item.product.id)} className="w-6 h-6 bg-white rounded text-slate-600 hover:text-red-500 flex items-center justify-center shadow-sm"><Minus size={10}/></button>
-                              <span className="text-xs font-black w-5 text-center">{item.qty}</span>
-                              <button onClick={() => updateCartItem(item.product.id, {qty: item.qty + 1})} className="w-6 h-6 bg-white rounded text-slate-600 hover:text-orange-600 flex items-center justify-center shadow-sm"><Plus size={10}/></button>
-                            </div>
-                          )}
-                          <button onClick={() => removeFromCart(item.product.id)} className="text-slate-300 hover:text-red-500 p-1 transition-colors"><X size={16}/></button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Edit mode: single item price */}
-              {isEditing && cart.length > 0 && (
-                <div className="space-y-2">
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Producto</p>
-                  <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-3">
-                    <p className="font-bold text-slate-800 text-sm">{cart[0].product.nombre}</p>
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Precio Especial (L.)</label>
-                      <input
-                        type="number"
-                        className="w-full p-2.5 border border-slate-200 rounded-xl text-sm font-black text-emerald-600 outline-none focus:ring-2 focus:ring-emerald-500/20"
-                        value={cart[0].specialPrice}
-                        onChange={e => updateCartItem(cart[0].product.id, { specialPrice: Number(e.target.value) })}
-                      />
-                    </div>
-                  </div>
                 </div>
               )}
             </div>
+          );
+        })}
 
-            {/* Footer */}
-            <div className="p-4 border-t bg-slate-50 shrink-0">
-              {isEditing ? (
-                <button onClick={handleUpdate} className="w-full py-4 bg-blue-600 text-white rounded-2xl font-black shadow-lg hover:bg-blue-700 transition-all flex items-center justify-center gap-2 text-xs uppercase tracking-widest active:scale-95">
-                  <Save size={18}/> Actualizar Registro
-                </button>
-              ) : (
-                <button
-                  onClick={handleCreate}
-                  disabled={cart.length === 0 || !businessName.trim()}
-                  className="w-full py-4 bg-orange-600 text-white rounded-2xl font-black shadow-lg shadow-orange-600/20 hover:bg-orange-700 transition-all flex items-center justify-center gap-2 text-xs uppercase tracking-widest disabled:opacity-40 disabled:grayscale active:scale-95"
-                >
-                  <ChevronRight size={18}/> Revisar y Confirmar ({cart.length} item{cart.length !== 1 ? 's' : ''})
-                </button>
-              )}
+        {/* History toggle */}
+        <button
+          onClick={() => setShowHistory(h => !h)}
+          className="w-full py-3 flex items-center justify-center gap-2 text-slate-400 hover:text-slate-600 text-xs font-bold uppercase tracking-widest transition-colors"
+        >
+          <History size={14}/>
+          {showHistory ? 'Ocultar Historial' : `Ver Historial (${historyItems.length})`}
+          <ChevronDown size={12} className={`transition-transform ${showHistory ? 'rotate-180' : ''}`}/>
+        </button>
+
+        {showHistory && historyItems.length > 0 && (
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+            <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-100">
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Historial — Cerrados</p>
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── SUMMARY CONFIRM MODAL ── */}
-      {showSummary && (
-        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-md z-[60] flex items-end md:items-center justify-center md:p-4">
-          <div className="bg-white rounded-t-3xl md:rounded-3xl w-full md:max-w-md shadow-2xl flex flex-col max-h-[90vh] animate-slide-up">
-            <div className="p-5 border-b flex justify-between items-center shrink-0">
-              <div>
-                <h3 className="font-bold text-slate-800 text-lg">Confirmar Préstamo</h3>
-                <p className="text-[11px] text-slate-400">Verifica y ajusta los precios si es necesario</p>
-              </div>
-              <button onClick={() => setShowSummary(false)} className="p-2 text-slate-400 hover:text-red-500 rounded-full"><X size={20}/></button>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-5 space-y-3 custom-scrollbar">
-              <div className="bg-orange-50 border border-orange-100 rounded-2xl p-3 flex items-center gap-3">
-                <Store size={18} className="text-orange-600 shrink-0"/>
-                <div>
-                  <p className="text-[10px] text-orange-500 font-black uppercase tracking-widest">Negocio</p>
-                  <p className="font-bold text-slate-800 text-sm">{businessName}</p>
-                </div>
-              </div>
-
-              {summaryCart.map((item, idx) => (
-                <div key={item.product.id} className="bg-white border border-slate-100 rounded-2xl p-4 space-y-2 shadow-sm">
-                  <div className="flex items-center gap-2">
-                    <div className={`p-1.5 rounded-lg ${item.product.tipo === 'TELEFONO' ? 'bg-blue-50 text-blue-600' : 'bg-orange-50 text-orange-600'}`}>
-                      {item.product.tipo === 'TELEFONO' ? <Smartphone size={14}/> : <Package size={14}/>}
-                    </div>
-                    <p className="font-bold text-slate-800 text-xs flex-1 truncate">{item.product.nombre}</p>
-                    {item.qty > 1 && <span className="text-[10px] bg-slate-100 px-2 py-0.5 rounded-full font-black text-slate-500">×{item.qty}</span>}
+            <div className="divide-y divide-slate-50">
+              {historyItems.map(c => (
+                <div key={c.id_consignacion} className="flex items-center gap-3 px-4 py-3">
+                  <div className="flex-1 min-w-0">
+                    <p className="font-bold text-slate-600 text-xs truncate">{c.nombre_producto}</p>
+                    <p className="text-[10px] text-slate-400">{c.negocio_destino}</p>
                   </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest mb-1">Precio Pactado (L.)</p>
-                      <input
-                        type="number"
-                        className="w-full p-2 border border-slate-200 rounded-xl text-sm font-black text-emerald-600 outline-none focus:ring-2 focus:ring-emerald-500/20"
-                        value={summaryCart[idx].specialPrice}
-                        onChange={e => setSummaryCart(prev => prev.map((c, i) => i === idx ? { ...c, specialPrice: Number(e.target.value) } : c))}
-                        onFocus={ev => ev.target.select()}
-                      />
-                    </div>
-                    <div className="flex flex-col justify-end">
-                      <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest mb-1">Subtotal</p>
-                      <p className="font-black text-slate-700 text-sm">L. {(summaryCart[idx].specialPrice * item.qty).toFixed(2)}</p>
-                    </div>
-                  </div>
+                  <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${c.estado_consignacion === 'Vendido_Pagado' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+                    {c.estado_consignacion === 'Vendido_Pagado' ? 'Cobrado' : 'Devuelto'}
+                  </span>
                 </div>
               ))}
-
-              <div className="flex justify-between items-center pt-2 border-t border-slate-100">
-                <span className="font-black text-xs text-slate-400 uppercase tracking-widest">Total Estimado</span>
-                <span className="font-black text-xl text-orange-600">L. {summaryCart.reduce((s, i) => s + i.specialPrice * i.qty, 0).toFixed(2)}</span>
-              </div>
             </div>
+          </div>
+        )}
+      </div>
 
-            <div className="p-4 border-t bg-slate-50 shrink-0 flex gap-3">
-              <button onClick={() => setShowSummary(false)} className="flex-1 py-3 border border-slate-200 text-slate-600 rounded-2xl font-bold text-xs uppercase transition-all hover:bg-slate-100 active:scale-95">
-                Modificar
-              </button>
-              <button onClick={confirmCreate} className="flex-1 py-3 bg-orange-600 text-white rounded-2xl font-black text-xs uppercase shadow-lg shadow-orange-600/20 hover:bg-orange-700 transition-all flex items-center justify-center gap-2 active:scale-95">
-                <Check size={16}/> Confirmar
+      {/* ── Business selection sheet ── */}
+      {showBusinessSheet && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center">
+          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setShowBusinessSheet(false)}/>
+          <div className="relative bg-white rounded-t-3xl w-full max-w-lg shadow-2xl animate-slide-up"
+               style={{ paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 16px)' }}>
+
+            <div className="w-10 h-1 bg-slate-200 rounded-full mx-auto mt-3 mb-4"/>
+
+            <div className="px-5 pb-5 space-y-4">
+              <div className="flex items-center gap-3">
+                <div className={`p-2.5 rounded-xl ${pendingMode === 'single' ? 'bg-orange-100 text-orange-600' : 'bg-slate-700 text-white'}`}>
+                  {pendingMode === 'single' ? <ScanLine size={20}/> : <Layers size={20}/>}
+                </div>
+                <div>
+                  <h3 className="font-black text-slate-800">
+                    {pendingMode === 'single' ? 'Escanear Producto' : 'Escanear Lote'}
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    {pendingMode === 'single' ? 'Escanea 1 producto y se registra al instante' : 'Escanea varios y confirma al terminar'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Negocio Destino *</label>
+                <div className="relative">
+                  <Store className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16}/>
+                  <input
+                    ref={businessInputRef}
+                    list="businesses-list-sheet"
+                    className="w-full pl-9 pr-4 py-3 border-2 border-slate-200 focus:border-orange-400 rounded-2xl font-bold text-sm outline-none transition-colors"
+                    placeholder="Ej: Celulares Express..."
+                    value={scanBusiness}
+                    onChange={e => setScanBusiness(e.target.value)}
+                    autoFocus
+                  />
+                  <datalist id="businesses-list-sheet">
+                    {uniqueBusinesses.map(b => <option key={b} value={b}/>)}
+                  </datalist>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Fecha Límite (opcional)</label>
+                <input
+                  type="date" min={TODAY}
+                  className="w-full py-3 px-4 border-2 border-slate-200 focus:border-orange-400 rounded-2xl text-sm outline-none transition-colors"
+                  value={scanDueDate} onChange={e => setScanDueDate(e.target.value)}
+                />
+              </div>
+
+              <button
+                onClick={startScan}
+                className={`w-full py-4 rounded-2xl font-black text-sm uppercase tracking-widest flex items-center justify-center gap-2 shadow-xl active:scale-[0.98] transition-all ${pendingMode === 'single' ? 'bg-orange-600 shadow-orange-600/25 text-white' : 'bg-slate-800 shadow-slate-800/25 text-white'}`}
+              >
+                <ScanLine size={18}/>
+                {pendingMode === 'single' ? 'Abrir Escáner' : 'Abrir Escáner de Lote'}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Barcode Scanner overlay */}
+      {/* ── Barcode Scanner ── */}
       {showScanner && (
         <BarcodeScanner
-          onScan={handleBarcodeScan}
-          onClose={() => setShowScanner(false)}
-          title={scannerMode === 'new' ? 'Escanear Producto' : 'Buscar por Código'}
-          hint={scannerMode === 'new' ? 'Apunta al código para agregar al lote' : 'Apunta al código para buscar'}
-          continuous={scannerMode === 'new'}
+          onScan={handleScan}
+          onClose={() => { setShowScanner(false); setBatchCodes([]); }}
+          title={pendingMode === 'single' ? `Escanear → ${scanBusiness}` : `Lote → ${scanBusiness}`}
+          hint={pendingMode === 'single' ? 'Apunta al código, se registra al instante' : 'Escanea varios, presiona ✓ al terminar'}
+          continuous={pendingMode === 'batch'}
+          batchCount={batchCodes.length}
+          onConfirmBatch={pendingMode === 'batch' ? handleConfirmBatch : undefined}
         />
       )}
     </div>
