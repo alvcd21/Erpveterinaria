@@ -15,6 +15,7 @@ type RecordItem = { id: string | number; label: string; sublabel?: string; raw: 
 const PreviewModal: React.FC<PreviewModalProps> = ({ template, onClose }) => {
   const [records, setRecords] = useState<RecordItem[]>([]);
   const [empresa, setEmpresa] = useState<any>(null);
+  const empresaRef = useRef<any>(null);
   const [selectedRecord, setSelectedRecord] = useState<RecordItem | null>(null);
   const [previewHtml, setPreviewHtml] = useState('');
   const [ctx, setCtx] = useState<PrintDataContext>({});
@@ -30,6 +31,7 @@ const PreviewModal: React.FC<PreviewModalProps> = ({ template, onClose }) => {
       try {
         const [empData] = await Promise.all([ConfigService.get()]);
         setEmpresa(empData);
+        empresaRef.current = empData;
         await loadRecords(empData);
       } finally {
         setLoadingRecords(false);
@@ -79,7 +81,7 @@ const PreviewModal: React.FC<PreviewModalProps> = ({ template, onClose }) => {
     setSelectedRecord(item);
     setLoadingPreview(true);
     try {
-      const newCtx: PrintDataContext = { empresa };
+      const newCtx: PrintDataContext = { empresa: empresaRef.current || empresa };
       const ds = template.dataSource;
       const raw = item.raw;
 

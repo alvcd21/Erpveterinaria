@@ -1,11 +1,12 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { ConfigService } from '../services/api';
 import { EmpresaConfig } from '../types';
-import { Settings, Save, Building2, FileText, AlertCircle } from 'lucide-react';
+import { Settings, Save, Building2, FileText, AlertCircle, ImageIcon, X } from 'lucide-react';
 import Swal from 'sweetalert2';
 
 const CompanyConfig: React.FC = () => {
+  const logoInputRef = useRef<HTMLInputElement>(null);
   const [config, setConfig] = useState<EmpresaConfig>({
     nombreEmpresa: '',
     rtn: '',
@@ -35,6 +36,18 @@ const CompanyConfig: React.FC = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 500 * 1024) {
+      Swal.fire('Archivo muy grande', 'El logo debe pesar menos de 500 KB.', 'warning');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onloadend = () => setConfig(c => ({ ...c, logoBase64: reader.result as string }));
+    reader.readAsDataURL(file);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -98,6 +111,40 @@ const CompanyConfig: React.FC = () => {
                     <label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Correo Electrónico</label>
                     <input type="email" className="w-full p-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none" 
                         value={config.correo} onChange={e => setConfig({...config, correo: e.target.value})} />
+                </div>
+            </div>
+        </div>
+
+        {/* SECCION LOGO */}
+        <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200">
+            <h3 className="font-bold text-lg text-slate-800 mb-4 flex items-center gap-2 border-b border-slate-100 pb-2">
+                <ImageIcon className="text-indigo-600"/> Logo de la Empresa
+            </h3>
+            <p className="text-xs text-slate-500 mb-4">El logo se usará automáticamente en las facturas y documentos del diseñador. Tamaño máximo: 500 KB. Formatos: PNG, JPG, WebP.</p>
+            <div className="flex items-start gap-6">
+                {/* Preview */}
+                <div className="w-40 h-24 border-2 border-dashed border-slate-200 rounded-xl flex items-center justify-center bg-slate-50 shrink-0 overflow-hidden">
+                    {config.logoBase64 ? (
+                        <img src={config.logoBase64} alt="Logo" className="w-full h-full object-contain p-2"/>
+                    ) : (
+                        <div className="flex flex-col items-center gap-1 text-slate-300">
+                            <ImageIcon size={28}/>
+                            <span className="text-xs">Sin logo</span>
+                        </div>
+                    )}
+                </div>
+                <div className="flex flex-col gap-3">
+                    <button type="button" onClick={() => logoInputRef.current?.click()}
+                        className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 transition-all">
+                        <ImageIcon size={16}/> Subir Logo
+                    </button>
+                    {config.logoBase64 && (
+                        <button type="button" onClick={() => setConfig(c => ({ ...c, logoBase64: '' }))}
+                            className="text-red-500 hover:text-red-700 text-sm flex items-center gap-1 font-medium">
+                            <X size={14}/> Eliminar Logo
+                        </button>
+                    )}
+                    <input ref={logoInputRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={handleLogoUpload}/>
                 </div>
             </div>
         </div>

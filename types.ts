@@ -324,6 +324,7 @@ export interface EmpresaConfig {
   fechaLimite: string;
   isv: number;
   mensajeFinal: string;
+  logoBase64?: string;
 }
 
 export type TipoCosto = 'Costo Directo' | 'Costo Indirecto';

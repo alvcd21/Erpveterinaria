@@ -183,7 +183,10 @@ function elementToHTML(
 
   // ── IMAGE ────────────────────────────────────────────────────────────────
   if (el.type === 'IMAGE') {
-    return `<div style="${base}"><img src="${el.content}" style="width:100%;height:100%;object-fit:${el.imageObjectFit || 'contain'};" /></div>`;
+    // Resolve variable references (e.g. {{empresa.logoBase64}})
+    const imgSrc = /\{\{/.test(el.content || '') ? resolveContent(el.content || '', ctx) : (el.content || '');
+    if (!imgSrc || /\{\{/.test(imgSrc)) return ''; // unresolved variable → skip
+    return `<div style="${base}"><img src="${imgSrc}" style="width:100%;height:100%;object-fit:${el.imageObjectFit || 'contain'};" /></div>`;
   }
 
   // ── COMPANY_HEADER ────────────────────────────────────────────────────────
@@ -192,7 +195,7 @@ function elementToHTML(
     const fs  = el.fontSize || 9;
 
     if (el.companyStyle === 'GEOMETRIC') {
-      const logoSrc   = getLogoSync();
+      const logoSrc   = emp.logoBase64 || getLogoSync();
       const logoHtml  = logoSrc
         ? `<img src="${logoSrc}" style="height:72%;max-height:56px;max-width:56px;object-fit:contain;margin-right:12px;flex-shrink:0;" />`
         : '';

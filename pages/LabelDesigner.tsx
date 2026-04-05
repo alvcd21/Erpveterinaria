@@ -100,6 +100,7 @@ const LabelDesigner: React.FC = () => {
       loadTemplate, createNew,
       undo, redo,
       addElement, updateElement, deleteSelected, updateTemplate,
+      insertCompanyAsElements,
       saveTemplate, moveLayer, reorderElements,
       alignElements, distributeH,
       interaction, unitLabel,
@@ -752,9 +753,10 @@ const LabelDesigner: React.FC = () => {
         <div className="flex flex-1 overflow-hidden relative">
 
             {/* Desktop Toolbar */}
-            <DesignerToolbar 
+            <DesignerToolbar
                 template={template}
                 addElement={(t, e) => { addElement(t, e); if(window.innerWidth < 768) setIsMobilePropOpen(true); }}
+                insertCompanyAsElements={() => { insertCompanyAsElements(); if(window.innerWidth < 768) setIsMobilePropOpen(true); }}
                 onImageUpload={handleImageUpload}
                 setShowShapeModal={setShowShapeModal}
                 onConfigClick={() => { setSelectedId(null); setActivePanel('PROPERTIES'); }}

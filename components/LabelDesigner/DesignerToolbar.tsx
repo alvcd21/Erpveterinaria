@@ -23,6 +23,7 @@ const ToolButton = ({ icon, label, onClick, active, color }: ToolButtonProps) =>
 interface DesignerToolbarProps {
     template: LabelTemplate;
     addElement: (type: any, extra?: any) => void;
+    insertCompanyAsElements: () => void;
     onImageUpload: (e: any) => void;
     setShowShapeModal: (show: boolean) => void;
     onConfigClick: () => void;
@@ -32,8 +33,8 @@ interface DesignerToolbarProps {
     setTool: (t: 'SELECT' | 'HAND') => void;
 }
 
-const DesignerToolbar: React.FC<DesignerToolbarProps> = ({ 
-    template, addElement, onImageUpload, setShowShapeModal, onConfigClick, onLayersClick, activePanel, tool, setTool
+const DesignerToolbar: React.FC<DesignerToolbarProps> = ({
+    template, addElement, insertCompanyAsElements, onImageUpload, setShowShapeModal, onConfigClick, onLayersClick, activePanel, tool, setTool
 }) => {
     const fileInputRef = React.useRef<HTMLInputElement>(null);
 
@@ -53,7 +54,7 @@ const DesignerToolbar: React.FC<DesignerToolbarProps> = ({
                 
                 {template.type === 'DOCUMENT' && <ToolButton icon={<TableIcon size={20}/>} label="Tabla" onClick={() => addElement('INVOICE_TABLE')} color="text-purple-600 bg-purple-50" />}
                 {template.type === 'DOCUMENT' && <ToolButton icon={<ReceiptText size={20}/>} label="Totales" onClick={() => addElement('SUMMARY_BOX')} color="text-emerald-600 bg-emerald-50" />}
-                {template.type === 'DOCUMENT' && <ToolButton icon={<Building2 size={20}/>} label="Empresa" onClick={() => addElement('COMPANY_HEADER')} color="text-amber-600 bg-amber-50" />}
+                {template.type === 'DOCUMENT' && <ToolButton icon={<Building2 size={20}/>} label="Empresa" onClick={insertCompanyAsElements} color="text-amber-600 bg-amber-50" />}
             </div>
             
             <div className="mt-auto flex flex-col gap-4 w-full px-2 pt-4 border-t border-slate-100">

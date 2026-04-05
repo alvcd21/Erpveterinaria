@@ -185,7 +185,16 @@ const CanvasElement = memo(({ el, isSelected, isMultiSelected, scale, onPointerD
                 ) : null}
                 {el.type === 'BARCODE' && <img src={renderBarcode(el)} className="w-full h-full object-fill pointer-events-none"/>}
                 {el.type === 'QR' && qrSrc && <img src={qrSrc} className="w-full h-full object-contain pointer-events-none"/>}
-                {el.type === 'IMAGE' && <img src={el.content} className="w-full h-full pointer-events-none" style={{ objectFit: (el.imageObjectFit || 'contain') as any }}/>}
+                {el.type === 'IMAGE' && (
+                    /^\{\{/.test(el.content || '') ? (
+                        <div className="w-full h-full flex flex-col items-center justify-center bg-slate-100 border border-dashed border-slate-300 pointer-events-none gap-1">
+                            <span className="text-[9px] font-mono text-slate-400 text-center px-1 leading-tight">{el.elementLabel || el.content}</span>
+                            <span className="text-[8px] text-slate-300">Logo cargado al imprimir</span>
+                        </div>
+                    ) : (
+                        <img src={el.content} className="w-full h-full pointer-events-none" style={{ objectFit: (el.imageObjectFit || 'contain') as any }}/>
+                    )
+                )}
                 {el.type === 'SHAPE' && el.shapeType === 'LINE' && <div className={tool === 'SELECT' && isHollow ? 'pointer-events-auto' : ''} style={{width:'100%', height:`${(el.strokeWidth||1)}px`, backgroundColor: el.stroke}}/>}
 
                 {el.type === 'COMPANY_HEADER' && el.companyStyle === 'GEOMETRIC' && (

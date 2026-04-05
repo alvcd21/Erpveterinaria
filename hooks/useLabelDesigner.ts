@@ -235,10 +235,78 @@ export const useLabelDesigner = () => {
         }
 
         const newElements = [...template.elements, newEl];
+        // Note: insertCompanyAsElements handles COMPANY_HEADER as separate elements
         updateTemplate({ elements: newElements });
         setSelectedId(newEl.id);
         setSelectedIds([newEl.id]);
         setTool('SELECT'); // Switch to select mode after adding
+    };
+
+    /**
+     * Inserts the company header as individual, independently-editable elements:
+     * one IMAGE for the logo + one TEXT per info field.
+     */
+    const insertCompanyAsElements = () => {
+        const isDoc = template.type === 'DOCUMENT';
+        const startX = isDoc ? 1 : 5;
+        const startY = isDoc ? 0.5 : 5;
+        const pageW  = template.width - (isDoc ? 2 : 10);
+        const lineH  = isDoc ? 0.65 : 5;
+        const logoW  = isDoc ? 3.2 : 20;
+        const logoH  = isDoc ? 2.5 : 18;
+        const textX  = startX + logoW + (isDoc ? 0.3 : 2);
+        const textW  = pageW - logoW - (isDoc ? 0.3 : 2);
+
+        const base: Partial<LabelElement> = {
+            rotation: 0, opacity: 1,
+            barcodeFormat: 'CODE128' as any, displayValue: true,
+            shapeType: 'RECTANGLE' as any, isStretchWithOverflow: false,
+        };
+
+        const logoEl: LabelElement = {
+            ...base as any,
+            id: generateId(), type: 'IMAGE',
+            x: startX, y: startY,
+            width: logoW, height: logoH,
+            content: '{{empresa.logoBase64}}',
+            imageObjectFit: 'contain',
+            fontSize: 10, color: '#000000', textAlign: 'left',
+            fontWeight: 'normal', fontFamily: 'helvetica',
+            elementLabel: 'Logo Empresa',
+        };
+
+        const textFields = [
+            { content: '{{empresa.nombreEmpresa}}', fontSize: isDoc ? 11 : 9, fontWeight: 'bold',   label: 'Nombre Empresa' },
+            { content: 'RTN: {{empresa.rtn}}',       fontSize: isDoc ? 9 : 8,  fontWeight: 'normal', label: 'RTN' },
+            { content: '{{empresa.direccion}}',       fontSize: isDoc ? 9 : 8,  fontWeight: 'normal', label: 'Dirección' },
+            { content: 'Tel: {{empresa.telefono}}',   fontSize: isDoc ? 9 : 8,  fontWeight: 'normal', label: 'Teléfono' },
+            { content: '{{empresa.correo}}',          fontSize: isDoc ? 9 : 8,  fontWeight: 'normal', label: 'Correo' },
+        ];
+
+        let textY = startY;
+        const textEls: LabelElement[] = textFields.map(f => {
+            const el: LabelElement = {
+                ...base as any,
+                id: generateId(), type: 'TEXT',
+                x: textX, y: textY,
+                width: textW, height: lineH,
+                content: f.content,
+                fontSize: f.fontSize,
+                fontWeight: f.fontWeight as any,
+                color: '#000000', textAlign: 'left',
+                fontFamily: 'helvetica',
+                isMultiline: false,
+                elementLabel: f.label,
+            };
+            textY += lineH;
+            return el;
+        });
+
+        const newEls = [logoEl, ...textEls];
+        updateTemplate({ elements: [...template.elements, ...newEls] });
+        setSelectedId(newEls[0].id);
+        setSelectedIds(newEls.map(e => e.id));
+        setTool('SELECT');
     };
 
     const deleteSelected = () => {
@@ -594,6 +662,7 @@ export const useLabelDesigner = () => {
         loadTemplate, createNew,
         undo, redo,
         addElement, updateElement, deleteSelected, updateTemplate,
+        insertCompanyAsElements,
         saveTemplate,
         moveLayer, reorderElements,
         alignElements, distributeH,
