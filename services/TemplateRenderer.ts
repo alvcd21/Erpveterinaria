@@ -106,6 +106,45 @@ async function preRenderMedia(template: LabelTemplate, ctx: PrintDataContext): P
   return cache;
 }
 
+// ─── Growing Container (Can Grow) ─────────────────────────────────────────────
+
+interface GrowthInfo {
+  overflowUnits: number;      // extra units beyond designed height
+  actualHeightUnits: number;  // total actual height in document units
+}
+
+/**
+ * Estimates the actual rendered height for a canGrow INVOICE_TABLE element.
+ * Uses font size + padding to approximate each row's pixel height, then converts
+ * back to document units (cm for DOCUMENT, mm for LABEL).
+ */
+function computeInvoiceTableGrowth(el: LabelElement, numRows: number, scale: number): GrowthInfo | null {
+  const fSize     = el.tableFontSize || 8;   // px
+  const rowHPx    = Math.ceil(fSize * 1.35) + 8; // line-height + top/bottom padding
+  const actualPx  = rowHPx * (numRows + 1);  // +1 for header row
+  const designedPx = el.height * scale;
+  const overflowPx = Math.max(0, actualPx - designedPx);
+  if (overflowPx === 0) return null;
+  return {
+    overflowUnits:      overflowPx / scale,
+    actualHeightUnits:  el.height + overflowPx / scale,
+  };
+}
+
+function computeSummaryBoxGrowth(el: LabelElement, scale: number): GrowthInfo | null {
+  const numRows  = (el.summaryRows || []).length;
+  const fSize    = el.summaryFontSize || 9;
+  const rowHPx   = Math.ceil(fSize * 1.35) + 6;
+  const actualPx  = rowHPx * numRows;
+  const designedPx = el.height * scale;
+  const overflowPx = Math.max(0, actualPx - designedPx);
+  if (overflowPx === 0) return null;
+  return {
+    overflowUnits:      overflowPx / scale,
+    actualHeightUnits:  el.height + overflowPx / scale,
+  };
+}
+
 // ─── Element HTML Rendering ───────────────────────────────────────────────────
 
 function elementToHTML(
@@ -114,6 +153,8 @@ function elementToHTML(
   ctx: PrintDataContext,
   media: MediaCache,
   tableItems?: Partial<DetalleVenta>[],
+  yOffsetUnits: number = 0,
+  heightOverrideUnits?: number,
 ): string {
   // Evaluate visibilityCondition if present
   if (el.visibilityCondition) {
@@ -126,9 +167,9 @@ function elementToHTML(
   }
 
   const left = el.x * scale;
-  const top  = el.y * scale;
+  const top  = (el.y + yOffsetUnits) * scale;
   const w    = el.width * scale;
-  const h    = el.height * scale;
+  const h    = (heightOverrideUnits ?? el.height) * scale;
   const rot  = el.rotation ? `rotate(${el.rotation}deg)` : '';
   const opa  = el.opacity ?? 1;
 
@@ -344,9 +385,51 @@ function buildHTML(
     total:          (item.cantidad || 0) * (item.precioVenta || 0),
   }));
 
-  const elementsHTML = template.elements
-    .filter(el => el.visible !== false)
-    .map(el => elementToHTML(el, scale, ctx, media, items))
+  // ── PASS 1: Compute growth for canGrow elements ────────────────────────────
+  const growthMap = new Map<string, GrowthInfo>();
+  const visibleEls = template.elements.filter(e => e.visible !== false);
+
+  for (const el of visibleEls) {
+    if (!el.canGrow) continue;
+    let info: GrowthInfo | null = null;
+    if (el.type === 'INVOICE_TABLE') {
+      info = computeInvoiceTableGrowth(el, items?.length || 0, scale);
+    } else if (el.type === 'SUMMARY_BOX') {
+      info = computeSummaryBoxGrowth(el, scale);
+    }
+    if (info) growthMap.set(el.id, info);
+  }
+
+  // ── PASS 2: Compute Y-offsets for elements below growers ──────────────────
+  // Sort growers top-to-bottom so offsets accumulate correctly for stacked growers
+  const growersSorted = [...growthMap.entries()]
+    .map(([id, info]) => ({ id, info, el: visibleEls.find(e => e.id === id)! }))
+    .filter(g => g.el)
+    .sort((a, b) => a.el.y - b.el.y);
+
+  const yOffsets = new Map<string, number>(); // elementId → extra Y in document units
+  for (const { id: growerId, info, el: growerEl } of growersSorted) {
+    const growerBottom = growerEl.y + growerEl.height;
+    for (const el of visibleEls) {
+      if (el.id === growerId) continue;
+      // Push down any element whose top edge is at or below the grower's bottom edge
+      if (el.y >= growerBottom) {
+        yOffsets.set(el.id, (yOffsets.get(el.id) || 0) + info.overflowUnits);
+      }
+    }
+  }
+
+  // ── PASS 3: Total page height expansion ───────────────────────────────────
+  const totalGrowthUnits = [...growthMap.values()].reduce((sum, g) => sum + g.overflowUnits, 0);
+  const actualPageH = pageH + totalGrowthUnits * scale;
+
+  // ── PASS 4: Render elements with growth-adjusted positions ────────────────
+  const elementsHTML = visibleEls
+    .map(el => elementToHTML(
+      el, scale, ctx, media, items,
+      yOffsets.get(el.id) || 0,
+      growthMap.get(el.id)?.actualHeightUnits,
+    ))
     .join('\n');
 
   return `<!DOCTYPE html>
@@ -360,14 +443,14 @@ function buildHTML(
     body { background:#e5e7eb; display:flex; justify-content:center; align-items:flex-start; min-height:100vh; padding:24px; font-family:Arial,sans-serif; }
     .page {
       width:${pageW}px;
-      height:${pageH}px;
+      height:${actualPageH}px;
       background:${bgColor};
       position:relative;
       overflow:hidden;
       box-shadow:0 4px 24px rgba(0,0,0,0.18);
       ${padStyle}
     }
-    @page { size: ${(template.width * scale).toFixed(1)}px ${(template.height * scale).toFixed(1)}px; margin: 0; }
+    @page { size: ${(template.width * scale).toFixed(1)}px ${actualPageH.toFixed(1)}px; margin: 0; }
     @media print {
       * { -webkit-print-color-adjust:exact !important; print-color-adjust:exact !important; }
       html, body { margin: 0; padding: 0; background: white !important; }

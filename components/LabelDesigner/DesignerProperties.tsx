@@ -649,6 +649,14 @@ const DesignerProperties: React.FC<DesignerPropertiesProps> = ({
                             </div>
                         ))}
                     </div>
+
+                    <div className="flex items-center gap-2 py-1.5 px-3 bg-blue-50 border border-blue-100 rounded-lg">
+                        <input type="checkbox" id="canGrowSummary" checked={sel.canGrow ?? false} onChange={e => updateElement(sel.id, {canGrow: e.target.checked})} className="rounded accent-blue-600"/>
+                        <div>
+                            <label htmlFor="canGrowSummary" className="text-xs font-bold text-blue-700 block cursor-pointer">Puede Crecer (Can Grow)</label>
+                            <span className="text-[10px] text-blue-500">Expande y desplaza elementos debajo al imprimir</span>
+                        </div>
+                    </div>
                 </div>
             )}
 
@@ -674,6 +682,14 @@ const DesignerProperties: React.FC<DesignerPropertiesProps> = ({
                     <div className="flex items-center gap-2 py-1">
                         <input type="checkbox" id="altrows" checked={sel.tableAlternateRows ?? true} onChange={e => updateElement(sel.id, {tableAlternateRows: e.target.checked})} className="rounded text-indigo-600"/>
                         <label htmlFor="altrows" className="text-xs font-medium text-slate-600">Filas alternadas</label>
+                    </div>
+
+                    <div className="flex items-center gap-2 py-1.5 px-3 bg-blue-50 border border-blue-100 rounded-lg">
+                        <input type="checkbox" id="canGrow" checked={sel.canGrow ?? false} onChange={e => updateElement(sel.id, {canGrow: e.target.checked})} className="rounded accent-blue-600"/>
+                        <div>
+                            <label htmlFor="canGrow" className="text-xs font-bold text-blue-700 block cursor-pointer">Puede Crecer (Can Grow)</label>
+                            <span className="text-[10px] text-blue-500">Expande y desplaza elementos debajo al imprimir</span>
+                        </div>
                     </div>
                     {(sel.tableAlternateRows ?? true) && (
                         <div>

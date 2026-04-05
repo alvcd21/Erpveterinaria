@@ -295,6 +295,16 @@ const CanvasElement = memo(({ el, isSelected, isMultiSelected, scale, onPointerD
                 )}
             </div>
 
+            {/* Can-Grow indicator — visible dashed bottom border with arrow */}
+            {el.canGrow && (
+                <div className="absolute bottom-0 left-0 right-0 pointer-events-none z-40"
+                    style={{ borderBottom: '2px dashed #3b82f6' }}>
+                    <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 bg-blue-500 text-white rounded px-1 py-0 text-[8px] font-bold leading-4 whitespace-nowrap">
+                        ↕ Crece
+                    </div>
+                </div>
+            )}
+
             {/* Lock indicator */}
             {isLocked && isSelected && (
                 <div className="absolute -top-5 -right-1 bg-amber-500 text-white rounded-full w-4 h-4 flex items-center justify-center shadow-sm z-50 pointer-events-none">

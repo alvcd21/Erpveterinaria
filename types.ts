@@ -410,6 +410,8 @@ export interface LabelElement {
   shadowOffsetY?: number;
   // All elements
   opacity?: number;
+  // Growing container (Crystal Reports / SSRS "Can Grow")
+  canGrow?: boolean;
   // INVOICE_TABLE specific
   tableColumns?: InvoiceColumn[];
   tableHeaderBg?: string;
