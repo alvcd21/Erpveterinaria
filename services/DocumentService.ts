@@ -15,7 +15,7 @@
 
 import { LabelTemplate, Reparacion } from '../types';
 import { LabelService, SalesService, ConfigService, InventoryService } from './api';
-import { printTemplate, PrintDataContext } from './TemplateRenderer';
+import { printTemplate, downloadAsPDF, PrintDataContext } from './TemplateRenderer';
 
 // ─── Empresa config cache (one fetch per session) ─────────────────────────────
 
@@ -161,6 +161,69 @@ export async function printRepairOrder(reparacion: Reparacion): Promise<DocResul
 
     await printTemplate(template, ctx);
     return { success: true, message: 'Imprimiendo orden de reparación...' };
+  } catch (err: any) {
+    return { success: false, message: err.message || 'Error al generar la orden de reparación.' };
+  }
+}
+
+/**
+ * Download a sale invoice as PDF using the designer template.
+ * Falls back with an error message if no INVOICE template is configured.
+ *
+ * @param ventaId - codVenta from the Venta object
+ */
+export async function downloadSaleInvoicePDF(ventaId: string): Promise<DocResult> {
+  const { template, message } = await resolveTemplate(['INVOICE'], 'DOCUMENT', 'SALES');
+  if (!template) return { success: false, message };
+
+  try {
+    const [empresa, venta, detalles] = await Promise.all([
+      getEmpresa(),
+      SalesService.getVenta(ventaId),
+      SalesService.getDetallesVenta(ventaId),
+    ]);
+
+    const ctx: PrintDataContext = {
+      empresa,
+      venta: { ...venta, detalles },
+      cliente: {
+        nombre:    (venta as any).nombreCliente    || '',
+        identidad: (venta as any).identidadCliente || '',
+        direccion: (venta as any).direccionCliente || '',
+      },
+    };
+
+    await downloadAsPDF(template, ctx, `Factura_${ventaId}`);
+    return { success: true, message: '' };
+  } catch (err: any) {
+    return { success: false, message: err.message || 'Error al generar la factura.' };
+  }
+}
+
+/**
+ * Download a repair order as PDF using the designer template.
+ * Falls back with an error message if no template is configured.
+ *
+ * @param reparacion - full Reparacion object from the Repairs page
+ */
+export async function downloadRepairOrderPDF(reparacion: Reparacion): Promise<DocResult> {
+  const { template, message } = await resolveTemplate(['REPORT', 'INVOICE'], 'DOCUMENT');
+  if (!template) return { success: false, message };
+
+  try {
+    const empresa = await getEmpresa();
+
+    const ctx: PrintDataContext = {
+      empresa,
+      reparacion,
+      cliente: {
+        nombre:    reparacion.nombre_cliente    || '',
+        identidad: reparacion.identidad_cliente || '',
+      },
+    };
+
+    await downloadAsPDF(template, ctx, `Orden_Reparacion_${reparacion.id_reparacion}`);
+    return { success: true, message: '' };
   } catch (err: any) {
     return { success: false, message: err.message || 'Error al generar la orden de reparación.' };
   }

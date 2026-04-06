@@ -537,6 +537,92 @@ export async function printMultipleCopies(template: LabelTemplate, ctx: PrintDat
 }
 
 /**
+ * Render the template to a PDF and trigger a browser download.
+ * Uses html2canvas to capture the rendered page, then embeds it in jsPDF.
+ *
+ * @param template - LabelTemplate to render
+ * @param ctx      - data context (empresa, venta, reparacion, etc.)
+ * @param filename - base filename without extension (default: template name)
+ */
+export async function downloadAsPDF(
+  template: LabelTemplate,
+  ctx: PrintDataContext = {},
+  filename?: string,
+): Promise<void> {
+  const media  = await preRenderMedia(template, ctx);
+  const html   = buildHTML(template, ctx, media);
+  const scale  = template.type === 'DOCUMENT' ? CM_TO_PX : MM_TO_PX;
+  const pageW  = template.width  * scale;
+  const pageH  = template.height * scale;
+
+  return new Promise<void>((resolve, reject) => {
+    // Create a hidden iframe to render the full HTML without affecting the current page
+    const iframe = document.createElement('iframe');
+    iframe.style.cssText = `position:fixed;left:-9999px;top:0;width:${pageW + 60}px;height:${pageH + 200}px;border:none;visibility:hidden;`;
+    document.body.appendChild(iframe);
+
+    iframe.onload = async () => {
+      try {
+        const iframeDoc = iframe.contentDocument;
+        if (!iframeDoc) throw new Error('No se pudo acceder al iframe');
+
+        const pageEl = iframeDoc.querySelector('.page') as HTMLElement;
+        if (!pageEl) throw new Error('Elemento .page no encontrado en la plantilla');
+
+        // Dynamically import html2canvas (already a transitive dep)
+        const html2canvas = (await import('html2canvas')).default;
+        const canvas = await html2canvas(pageEl, {
+          scale: 2,
+          useCORS: true,
+          allowTaint: true,
+          logging: false,
+          backgroundColor: template.backgroundColor || '#ffffff',
+          width: pageEl.offsetWidth,
+          height: pageEl.offsetHeight,
+        });
+
+        const imgData = canvas.toDataURL('image/jpeg', 0.95);
+
+        // Convert template dimensions to PDF points (1pt = 1/72 inch)
+        // cm → pt: 1cm = 28.3465pt   |   mm → pt: 1mm = 2.8346pt
+        const unitToPt = template.type === 'DOCUMENT' ? 28.3465 : 2.8346;
+        const widthPt  = template.width  * unitToPt;
+        // Use actual rendered height (canvas) to handle canGrow overflow
+        const heightPt = (canvas.height / 2) / scale * unitToPt;
+
+        const { jsPDF } = await import('jspdf');
+        const pdf = new jsPDF({
+          orientation: widthPt >= heightPt ? 'landscape' : 'portrait',
+          unit: 'pt',
+          format: [widthPt, heightPt],
+        });
+
+        pdf.addImage(imgData, 'JPEG', 0, 0, widthPt, heightPt, undefined, 'FAST');
+        const safeName = (filename || template.name || 'documento').replace(/[^a-zA-Z0-9-_]/g, '_');
+        pdf.save(`${safeName}.pdf`);
+        resolve();
+      } catch (err) {
+        reject(err);
+      } finally {
+        document.body.removeChild(iframe);
+      }
+    };
+
+    iframe.onerror = (err) => {
+      document.body.removeChild(iframe);
+      reject(new Error('Error al cargar la plantilla en el iframe'));
+    };
+
+    // Load the HTML into the iframe via a Blob URL
+    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+    const blobUrl = URL.createObjectURL(blob);
+    iframe.src = blobUrl;
+    // Revoke after a short delay to allow iframe load
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
+  });
+}
+
+/**
  * Download the rendered template as an HTML file.
  * The user can open it in a browser and use Ctrl+P → "Save as PDF".
  */

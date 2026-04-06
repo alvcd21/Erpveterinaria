@@ -7,60 +7,10 @@ import { ProductoUnified, DetalleVenta, Cliente, VentaPayload } from '../types';
 import { Search, ShoppingCart, RefreshCw, User, X, Check, Plus, Minus, UserPlus, Zap, LayoutGrid, Tag, Save, Wallet, ScanLine } from 'lucide-react';
 import BarcodeScanner from '../components/BarcodeScanner';
 import Swal from 'sweetalert2';
-import { jsPDF } from 'jspdf';
-import 'jspdf-autotable';
 import { useAuth } from '../context/AuthContext';
-import { getLogoSync } from '../services/logoLoader';
-import { printSaleInvoice } from '../services/DocumentService';
+import { downloadSaleInvoicePDF } from '../services/DocumentService';
 import { useNavigate, useLocation } from 'react-router-dom';
 
-const numeroALetras = (num: number): string => {
-    const unidades = ['', 'UN', 'DOS', 'TRES', 'CUATRO', 'CINCO', 'SEIS', 'SIETE', 'OCHO', 'NUEVE'];
-    const decenas = ['', 'DIEZ', 'VEINTE', 'TREINTA', 'CUARENTA', 'CINCUENTA', 'SESENTA', 'SETENTA', 'OCHENTA', 'NOVENTA'];
-    const diez_veinte = ['DIEZ', 'ONCE', 'DOCE', 'TRECE', 'CATORCE', 'QUINCE', 'DIECISEIS', 'DIECISIETE', 'DIECIOCHO', 'DIECINUEVE'];
-    const centenas = ['', 'CIENTO', 'DOSCIENTOS', 'TRESCIENTOS', 'CUATROCIENTOS', 'QUINIENTOS', 'SEISCIENTOS', 'SETECIENTOS', 'OCHOCIENTOS', 'NOVECIENTOS'];
-
-    const convertGroup = (n: number): string => {
-        if (n === 0) return '';
-        if (n === 100) return 'CIEN';
-        let output = '';
-        if (n >= 100) { output += centenas[Math.floor(n / 100)] + ' '; n %= 100; }
-        if (n >= 10 && n <= 19) { output += diez_veinte[n - 10]; } 
-        else if (n >= 20) { 
-            output += decenas[Math.floor(n / 10)]; 
-            if (n % 10 > 0) output += ' Y ' + unidades[n % 10]; 
-        } 
-        else if (n > 0) { output += unidades[n]; }
-        return output.trim();
-    };
-
-    const integerPart = Math.floor(num);
-    const decimalPart = Math.round((num - integerPart) * 100);
-    let text = '';
-
-    if (integerPart === 0) text = 'CERO';
-    else if (integerPart >= 1000000) {
-        const millions = Math.floor(integerPart / 1000000);
-        const remainder = integerPart % 1000000;
-        text += (millions === 1 ? 'UN MILLON' : convertGroup(millions) + ' MILLONES');
-        if (remainder > 0) {
-            if (remainder >= 1000) {
-                text += ' ' + convertGroup(Math.floor(remainder / 1000)) + ' MIL ' + convertGroup(remainder % 1000);
-            } else {
-                text += ' ' + convertGroup(remainder);
-            }
-        }
-    } 
-    else if (integerPart >= 1000) {
-        const thousands = Math.floor(integerPart / 1000);
-        const remainder = integerPart % 1000;
-        text += (thousands === 1 ? 'MIL' : convertGroup(thousands) + ' MIL');
-        if (remainder > 0) text += ' ' + convertGroup(remainder);
-    } 
-    else { text = convertGroup(integerPart); }
-
-    return `${text} CON ${decimalPart.toString().padStart(2, '0')}/100 LEMPIRAS`.toUpperCase();
-};
 
 const POS: React.FC = (): React.ReactElement => {
   const navigate = useNavigate();
@@ -244,208 +194,6 @@ const POS: React.FC = (): React.ReactElement => {
     return { bruto, subtotal, isv, total: conDescuento, financiado };
   }, [cart, discount, companyConfig, paymentType, primaAmount]);
 
-  // --- GENERACIÓN DE FACTURA (RESTAURADA CON TABLA CONFIGURACION) ---
-  const generateInvoicePDF = (saleId: string) => {
-      try {
-          /**
-           * COPIA Y PEGA TU IMAGEN BASE64 AQUÍ DENTRO DE LAS COMILLAS
-           * Ejemplo: "data:image/png;base64,iVBORw0KGgoAAAANS..."
-           */
-          const LOGO_BASE64 = getLogoSync(); 
-
-          const client = clients.find(c => c.identidad === selectedClientId);
-          const doc = new jsPDF();
-          
-          // Mapeo exacto con los nombres de columna en minúsculas de la tabla 'configuracion'
-          const cfg = companyConfig || {};
-          const nombreEmpresa = (cfg.nombreempresa || 'SMARTCLOUD ERP').toUpperCase();
-          const rtnEmpresa = cfg.rtn || 'N/A';
-          const direccionEmpresa = cfg.direccion || 'N/A';
-          const telefonoEmpresa = cfg.telefono || 'N/A';
-          const correoEmpresa = cfg.correo || 'N/A';
-          const caiEmpresa = cfg.cai || 'N/A';
-          const rangoInic = cfg.rangoinicial || 'N/A';
-          const rangoFin = cfg.rangofinal || 'N/A';
-          const fechaLim = cfg.fechalimite ? new Date(cfg.fechalimite).toLocaleDateString('es-HN') : 'N/A';
-          const isvConfig = cfg.isv || 15;
-          const mensajeFinal = cfg.mensajefinal || "LA FACTURA ES BENEFICIO DE TODOS, EXIJALA";
-
-          const pageWidth = doc.internal.pageSize.width;
-          const pageHeight = doc.internal.pageSize.height;
-          
-          const primaryColor = "#1e3a8a";   
-          const accentColor = "#3b82f6";    
-          const grayColor = "#64748b";      
-          const lightGray = "#f1f5f9";      
-
-          // 1. Header Geométrico (Triángulos Azul y Celeste)
-          doc.setFillColor(primaryColor);
-          doc.triangle(0, 0, pageWidth, 0, pageWidth, 35, 'F');
-          doc.triangle(0, 0, pageWidth, 35, 0, 50, 'F');
-          doc.setFillColor(accentColor);
-          doc.triangle(0, 0, 100, 0, 0, 50, 'F');
-
-          // 2. Logo (Imagen Base64 proporcionada por el usuario)
-          if (LOGO_BASE64) {
-              doc.addImage(LOGO_BASE64, 'PNG', 15, 12, 18, 18);
-          }
-
-          // 3. Info Empresa vinculado a la tabla configuracion (BD)
-          doc.setTextColor(255, 255, 255);
-          doc.setFont("helvetica", "bold");
-          doc.setFontSize(16);
-          doc.text(nombreEmpresa, 38, 18);
-          doc.setFont("helvetica", "normal");
-          doc.setFontSize(9);
-          doc.text(direccionEmpresa, 38, 25);
-          doc.text(`Tel: ${telefonoEmpresa} | ${correoEmpresa}`, 38, 30);
-
-          // 4. Título Factura
-          doc.setFontSize(26);
-          doc.setFont("helvetica", "bold");
-          doc.text("FACTURA", pageWidth - 15, 20, { align: "right" });
-          doc.setFontSize(10);
-          doc.text(`NO. ${saleId}`, pageWidth - 15, 29, { align: "right" });
-
-          // 5. Bloque de Cliente (Caja Gris Estilizada)
-          const topInfoY = 60;
-          doc.setFillColor(lightGray);
-          doc.roundedRect(14, topInfoY, 95, 38, 3, 3, 'F');
-          
-          doc.setTextColor(primaryColor);
-          doc.setFontSize(10);
-          doc.setFont("helvetica", "bold");
-          doc.text("FACTURAR A:", 18, topInfoY + 8);
-          
-          doc.setTextColor(0, 0, 0);
-          doc.setFontSize(13);
-          doc.text(client ? `${client.nombre} ${client.apellido}`.toUpperCase() : "CONSUMIDOR FINAL", 18, topInfoY + 18);
-          
-          doc.setFontSize(9);
-          doc.setFont("helvetica", "normal");
-          doc.setTextColor(grayColor);
-          doc.text(`RTN/DNI: ${selectedClientId || "99999999999999"}`, 18, topInfoY + 26);
-          doc.text(`${client?.direccion || "CHOLUTECA, HONDURAS"}`, 18, topInfoY + 32);
-
-          // 6. Datos Fiscales vinculado a la tabla configuracion
-          const rightColX = 120;
-          const metaY = topInfoY + 5;
-          const spacing = 6;
-          doc.setFontSize(9);
-          doc.setFont("helvetica", "bold");
-          doc.setTextColor(grayColor);
-          
-          const labels = ["FECHA EMISIÓN:", "FECHA VENCIMIENTO:", "R.T.N. EMISOR:", "CAI:", "VENDEDOR:"];
-          const values = [
-              new Date().toLocaleDateString('es-HN'),
-              fechaLim,
-              rtnEmpresa,
-              caiEmpresa,
-              user?.nombreEmpleado?.toUpperCase() || "ADMINISTRADOR"
-          ];
-
-          labels.forEach((label, i) => {
-              doc.text(label, rightColX, metaY + (i * spacing));
-              doc.setTextColor(0, 0, 0);
-              doc.text(String(values[i]), rightColX + 45, metaY + (i * spacing));
-              doc.setTextColor(grayColor);
-          });
-
-          // 7. Tabla de Productos
-          // @ts-ignore
-          doc.autoTable({
-              startY: topInfoY + 45,
-              head: [['COD.', 'CANT.', 'DESCRIPCIÓN', 'PRECIO UNIT.', 'TOTAL']],
-              body: cart.map(item => {
-                  const prod = products.find(p => p.id === (item.idTelefono || item.idInventario));
-                  const cod = item.idTelefono || prod?.codigo || 'N/A';
-                  let desc = '';
-                  if (item.tipoProducto === 'TELEFONO') {
-                      desc = prod ? `${prod.marca} ${prod.nombre}`.toUpperCase() : item.descripcionProducto?.toUpperCase();
-                  } else {
-                      desc = `${prod?.categoria || ''} ${item.descripcionProducto}`.trim().toUpperCase();
-                  }
-                  return [
-                      cod,
-                      item.cantidad,
-                      desc,
-                      `L. ${Number(item.precioVenta).toFixed(2)}`,
-                      `L. ${(Number(item.cantidad) * Number(item.precioVenta)).toFixed(2)}`
-                  ];
-              }),
-              theme: 'striped',
-              styles: { fontSize: 9, cellPadding: 3, textColor: [0, 0, 0], halign: 'center' },
-              headStyles: { fillColor: [30, 58, 138], fontStyle: 'bold', halign: 'center', textColor: [255, 255, 255] },
-              columnStyles: { 
-                  0: { cellWidth: 35 },
-                  1: { cellWidth: 15 },
-                  2: { halign: 'left' },
-                  3: { cellWidth: 30 },
-                  4: { cellWidth: 30, fontStyle: 'bold' }
-              },
-              margin: { left: 14, right: 14 }
-          });
-
-          // 8. Totales
-          // @ts-ignore
-          let finalY = doc.lastAutoTable.finalY + 10;
-          const totalsX = 135;
-          doc.setFontSize(10);
-          doc.setTextColor(grayColor);
-          doc.setFont("helvetica", "normal");
-          
-          doc.text("Subtotal:", totalsX, finalY); 
-          doc.text(`L. ${totals.subtotal.toFixed(2)}`, pageWidth - 14, finalY, {align: "right"});
-          
-          finalY += 7;
-          doc.text("Descuentos:", totalsX, finalY); 
-          doc.text(`L. ${discount.toFixed(2)}`, pageWidth - 14, finalY, {align: "right"});
-          
-          finalY += 7;
-          doc.text(`ISV (${isvConfig}%):`, totalsX, finalY); 
-          doc.text(`L. ${totals.isv.toFixed(2)}`, pageWidth - 14, finalY, {align: "right"});
-          
-          finalY += 3;
-          doc.setDrawColor(primaryColor);
-          doc.setLineWidth(0.5);
-          doc.line(totalsX, finalY, pageWidth - 14, finalY);
-          
-          finalY += 6;
-          doc.setFont("helvetica", "bold"); 
-          doc.setTextColor(primaryColor);
-          doc.setFontSize(13);
-          doc.text("TOTAL A PAGAR:", totalsX, finalY);
-          doc.text(`L. ${totals.total.toFixed(2)}`, pageWidth - 14, finalY, {align: "right"});
-
-          // 9. Cantidad en letras
-          doc.setTextColor(grayColor);
-          doc.setFontSize(9);
-          doc.text("SON: " + numeroALetras(totals.total), 14, finalY + 12);
-
-          // 10. Pie Legal vinculado a tabla configuracion
-          let footerY = pageHeight - 40;
-          doc.setFontSize(8); 
-          doc.setTextColor(grayColor);
-          doc.setFont("helvetica", "normal");
-          doc.text(`Rango Autorizado: ${rangoInic} al ${rangoFin}`, 14, footerY);
-          doc.text(`Fecha Límite de Emisión: ${fechaLim}`, 14, footerY + 5);
-          doc.text(`Original: Cliente | Copia: Emisor`, 14, footerY + 10);
-          
-          // Banda Inferior
-          doc.setFillColor(lightGray);
-          doc.rect(0, pageHeight - 15, pageWidth, 15, 'F');
-          doc.setTextColor(primaryColor);
-          doc.setFont("helvetica", "bold");
-          doc.setFontSize(10);
-          doc.text(mensajeFinal, pageWidth / 2, pageHeight - 6, { align: "center" });
-
-          doc.save(`Factura_${saleId}.pdf`);
-      } catch (err) {
-          console.error(err);
-          Swal.fire('Error PDF', 'No se pudo generar la factura legal', 'error');
-      }
-  };
-
   const handleCheckout = async () => {
     if (cart.length === 0) return;
     if (!selectedClientId) return Swal.fire('Cliente Requerido', 'Seleccione un cliente.', 'warning');
@@ -496,39 +244,23 @@ const POS: React.FC = (): React.ReactElement => {
           }, 'idIngreso').catch(() => {});
         }
 
-        if (isOfflineSale) {
-          // Offline: solo PDF estático (el diseñador requiere servidor)
-          Swal.fire({
-            title: 'Venta guardada offline',
-            text: `Se sincronizará automáticamente al reconectarse.`,
-            icon: 'success',
-            showCancelButton: true,
-            confirmButtonText: 'PDF Estático',
-            cancelButtonText: 'Cerrar',
-            confirmButtonColor: '#1e3a8a',
-          }).then(res => {
-            if (res.isConfirmed) generateInvoicePDF(saleId);
-            resetPOS();
-          });
-        } else {
-          // Online: opciones completas
-          Swal.fire({
-              title: '¡Venta Exitosa!',
-              text: `Factura #${saleId} generada.`,
-              icon: 'success',
-              showCancelButton: true,
-              showDenyButton: true,
-              confirmButtonText: 'PDF Estático',
-              denyButtonText: '🎨 Diseñador',
-              cancelButtonText: 'Cerrar',
-              confirmButtonColor: '#1e3a8a',
-              denyButtonColor: '#6366f1',
-          }).then(res => {
-              if (res.isConfirmed) generateInvoicePDF(saleId);
-              if (res.isDenied) printSaleInvoice(saleId).then(r => { if (!r.success) Swal.fire('Sin plantilla', r.message, 'warning'); });
-              resetPOS();
-          });
-        }
+        const title = isOfflineSale ? 'Venta guardada offline' : '¡Venta Exitosa!';
+        const text  = isOfflineSale
+          ? `Factura #${saleId} guardada. Se sincronizará al reconectarse.`
+          : `Factura #${saleId} generada.`;
+
+        // Descargar PDF del diseñador automáticamente y luego notificar
+        downloadSaleInvoicePDF(saleId).then(result => {
+          if (!result.success) {
+            Swal.fire('Sin plantilla', result.message, 'warning');
+          } else {
+            Swal.fire({ title, text, icon: 'success', confirmButtonColor: '#1e3a8a' });
+          }
+          resetPOS();
+        }).catch(() => {
+          Swal.fire({ title, text, icon: 'success', confirmButtonColor: '#1e3a8a' });
+          resetPOS();
+        });
         return; // resetPOS se llama dentro del .then()
       }
 

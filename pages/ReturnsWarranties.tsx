@@ -13,6 +13,8 @@ import Swal from 'sweetalert2';
 import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
 import { useAuth } from '../context/AuthContext';
+import BarcodeScanner from '../components/BarcodeScanner';
+import { ScanLine } from 'lucide-react';
 
 const numeroALetras = (num: number): string => {
     const unidades = ['', 'UN', 'DOS', 'TRES', 'CUATRO', 'CINCO', 'SEIS', 'SIETE', 'OCHO', 'NUEVE'];
@@ -80,6 +82,7 @@ const ReturnsWarranties: React.FC = () => {
   
   // Creation Flow
   const [invoiceSearch, setInvoiceSearch] = useState('');
+  const [showInvoiceScanner, setShowInvoiceScanner] = useState(false);
   const [foundInvoice, setFoundInvoice] = useState<Venta | null>(null);
   const [selectedDetail, setSelectedDetail] = useState<DetalleVenta | null>(null);
   const [falla, setFalla] = useState('');
@@ -116,13 +119,14 @@ const ReturnsWarranties: React.FC = () => {
       } catch (e) { console.error(e); }
   };
 
-  const handleSearchInvoice = async () => {
-      if (!invoiceSearch) return;
+  const handleSearchInvoice = async (codeOverride?: string) => {
+      const code = codeOverride ?? invoiceSearch;
+      if (!code) return;
       setFoundInvoice(null);
       setSelectedDetail(null);
       try {
-          const v = await SalesService.getVenta(invoiceSearch);
-          const d = await SalesService.getDetallesVenta(invoiceSearch);
+          const v = await SalesService.getVenta(code);
+          const d = await SalesService.getDetallesVenta(code);
           if (v) {
               setFoundInvoice({ ...v, detalles: d });
           } else {
@@ -446,9 +450,26 @@ const ReturnsWarranties: React.FC = () => {
                         <div className="space-y-4">
                             <label className="text-[10px] font-black text-indigo-600 uppercase tracking-widest">1. Localizar Factura</label>
                             <div className="flex flex-col md:flex-row gap-2">
-                                <input className="flex-1 p-3 border border-slate-200 rounded-2xl font-bold text-sm uppercase outline-none focus:ring-2 focus:ring-indigo-500/20" placeholder="Número de Factura" value={invoiceSearch} onChange={e => setInvoiceSearch(e.target.value)} />
-                                <button onClick={handleSearchInvoice} className="bg-indigo-600 text-white px-6 py-3 rounded-2xl font-bold hover:bg-indigo-700 transition-all flex items-center justify-center gap-2"><Search size={18}/> Buscar</button>
+                                <input
+                                    className="flex-1 p-3 border border-slate-200 rounded-2xl font-bold text-sm uppercase outline-none focus:ring-2 focus:ring-indigo-500/20"
+                                    placeholder="Número de Factura"
+                                    value={invoiceSearch}
+                                    onChange={e => setInvoiceSearch(e.target.value)}
+                                    onKeyDown={e => { if (e.key === 'Enter') handleSearchInvoice(); }}
+                                />
+                                <button onClick={() => setShowInvoiceScanner(true)} className="bg-slate-700 text-white px-4 py-3 rounded-2xl font-bold hover:bg-slate-800 transition-all flex items-center justify-center gap-2" title="Escanear código de barras"><ScanLine size={18}/></button>
+                                <button onClick={() => handleSearchInvoice()} className="bg-indigo-600 text-white px-6 py-3 rounded-2xl font-bold hover:bg-indigo-700 transition-all flex items-center justify-center gap-2"><Search size={18}/> Buscar</button>
                             </div>
+                            {showInvoiceScanner && (
+                                <BarcodeScanner
+                                    onScan={code => {
+                                        setInvoiceSearch(code);
+                                        setShowInvoiceScanner(false);
+                                        handleSearchInvoice(code);
+                                    }}
+                                    onClose={() => setShowInvoiceScanner(false)}
+                                />
+                            )}
                         </div>
 
                         {foundInvoice && (

@@ -2,66 +2,18 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { RepairService, InventoryService, ClientService, ConfigService } from '../services/api';
 import { useOfflineSync } from '../hooks/useOfflineSync';
-import { getLogoSync } from '../services/logoLoader';
-import { printRepairOrder } from '../services/DocumentService';
+import { downloadRepairOrderPDF } from '../services/DocumentService';
 import { Reparacion, Telefono, Cliente } from '../types';
 import { 
-  Wrench, PlusCircle, Search, Clock, CheckCircle, Package, DollarSign, User, Smartphone, X, Save, RefreshCw, AlertCircle, FileText, Trash2, Edit2, Printer, Check, Info, ShoppingCart
+  Wrench, PlusCircle, Search, Clock, CheckCircle, Package, DollarSign, User, Smartphone, X, Save, RefreshCw, AlertCircle, FileText, Trash2, Edit2, Check, Info, ShoppingCart
 } from 'lucide-react';
 import Swal from 'sweetalert2';
-import { jsPDF } from 'jspdf';
-import 'jspdf-autotable';
 import { useAuth } from '../context/AuthContext';
 
 const COMPLEMENTOS_OPCIONES = [
     "Cargador", "Cobertor/Case", "Cable USB", "Memoria MicroSD", "Chip/SIM", "Batería", "Lápiz/Stylus"
 ];
 
-const numeroALetras = (num: number): string => {
-    const unidades = ['', 'UN', 'DOS', 'TRES', 'CUATRO', 'CINCO', 'SEIS', 'SIETE', 'OCHO', 'NUEVE'];
-    const decenas = ['', 'DIEZ', 'VEINTE', 'TREINTA', 'CUARENTA', 'CINCUENTA', 'SESENTA', 'SETENTA', 'OCHENTA', 'NOVENTA'];
-    const diez_veinte = ['DIEZ', 'ONCE', 'DOCE', 'TRECE', 'CATORCE', 'QUINCE', 'DIECISEIS', 'DIECISIETE', 'DIECIOCHO', 'DIECINUEVE'];
-    const centenas = ['', 'CIENTO', 'DOSCIENTOS', 'TRESCIENTOS', 'CUATROCIENTOS', 'QUINIENTOS', 'SEISCIENTOS', 'SETECIENTOS', 'OCHOCIENTOS', 'NOVECIENTOS'];
-
-    const convertGroup = (n: number): string => {
-        if (n === 0) return '';
-        if (n === 100) return 'CIEN';
-        let output = '';
-        if (n >= 100) { output += centenas[Math.floor(n / 100)] + ' '; n %= 100; }
-        if (n >= 10 && n <= 19) { output += diez_veinte[n - 10]; } 
-        else if (n >= 20) { 
-            output += decenas[Math.floor(n / 10)]; 
-            if (n % 10 > 0) output += ' Y ' + unidades[n % 10]; 
-        } 
-        else if (n > 0) { output += unidades[n]; }
-        return output.trim();
-    };
-
-    const integerPart = Math.floor(num);
-    const decimalPart = Math.round((num - integerPart) * 100);
-    let text = '';
-    if (integerPart === 0) text = 'CERO';
-    else if (integerPart >= 1000000) {
-        const millions = Math.floor(integerPart / 1000000);
-        const remainder = integerPart % 1000000;
-        text += (millions === 1 ? 'UN MILLON' : convertGroup(millions) + ' MILLONES');
-        if (remainder > 0) {
-            if (remainder >= 1000) {
-                text += ' ' + convertGroup(Math.floor(remainder / 1000)) + ' MIL ' + convertGroup(remainder % 1000);
-            } else {
-                text += ' ' + convertGroup(remainder);
-            }
-        }
-    } 
-    else if (integerPart >= 1000) {
-        const thousands = Math.floor(integerPart / 1000);
-        const remainder = integerPart % 1000;
-        text += (thousands === 1 ? 'MIL' : convertGroup(thousands) + ' MIL');
-        if (remainder > 0) text += ' ' + convertGroup(remainder);
-    } 
-    else { text = convertGroup(integerPart); }
-    return `${text} CON ${decimalPart.toString().padStart(2, '0')}/100 LEMPIRAS`.toUpperCase();
-};
 
 const Repairs: React.FC = () => {
   const { user } = useAuth();
@@ -191,169 +143,6 @@ const Repairs: React.FC = () => {
       }
   };
 
-  const generatePDF = (r: Reparacion) => {
-      try {
-          const doc = new jsPDF();
-          const LOGO_BASE64 = getLogoSync();
-          
-          const cfg = companyConfig || {};
-          const nombreEmpresa = (cfg.nombreempresa || cfg.nombreEmpresa || 'SMARTCLOUD ERP').toUpperCase();
-          const rtnEmpresa = cfg.rtn || 'N/A';
-          const direccionEmpresa = cfg.direccion || 'N/A';
-          const telefonoEmpresa = cfg.telefono || 'N/A';
-          const correoEmpresa = cfg.correo || 'N/A';
-
-          const pageWidth = doc.internal.pageSize.width;
-          const pageHeight = doc.internal.pageSize.height;
-          
-          const primaryColor = "#1e3a8a";   
-          const accentColor = "#3b82f6";    
-          const grayColor = "#64748b";      
-          const lightGray = "#f1f5f9";      
-
-          doc.setFillColor(primaryColor);
-          doc.triangle(0, 0, pageWidth, 0, pageWidth, 35, 'F');
-          doc.triangle(0, 0, pageWidth, 35, 0, 50, 'F');
-          doc.setFillColor(accentColor);
-          doc.triangle(0, 0, 100, 0, 0, 50, 'F');
-
-          if (LOGO_BASE64) {
-              doc.addImage(LOGO_BASE64, 'PNG', 15, 12, 18, 18);
-          }
-
-          doc.setTextColor(255, 255, 255);
-          doc.setFont("helvetica", "bold");
-          doc.setFontSize(16);
-          doc.text(nombreEmpresa, 38, 18);
-          doc.setFont("helvetica", "normal");
-          doc.setFontSize(9);
-          doc.text(direccionEmpresa, 38, 25);
-          doc.text(`Tel: ${telefonoEmpresa} | ${correoEmpresa}`, 38, 30);
-
-          doc.setFontSize(22);
-          doc.setFont("helvetica", "bold");
-          doc.text("ORDEN SERVICIO", pageWidth - 15, 20, { align: "right" });
-          doc.setFontSize(10);
-          doc.text(`NO. RPR-${String(r.id_reparacion).padStart(5, '0')}`, pageWidth - 15, 29, { align: "right" });
-
-          const topInfoY = 60;
-          doc.setFillColor(lightGray);
-          doc.roundedRect(14, topInfoY, 95, 38, 3, 3, 'F');
-          
-          doc.setTextColor(primaryColor);
-          doc.setFontSize(10);
-          doc.setFont("helvetica", "bold");
-          doc.text("DATOS DEL CLIENTE:", 18, topInfoY + 8);
-          
-          doc.setTextColor(0, 0, 0);
-          const cliente = clients.find(c => c.identidad === r.identidad_cliente);
-          doc.setFontSize(13);
-          doc.text(cliente ? `${cliente.nombre} ${cliente.apellido}`.toUpperCase() : (r.nombre_cliente || "CONSUMIDOR FINAL").toUpperCase(), 18, topInfoY + 18);
-          
-          doc.setFontSize(9);
-          doc.setFont("helvetica", "normal");
-          doc.setTextColor(grayColor);
-          doc.text(`RTN/DNI: ${r.identidad_cliente || "N/A"}`, 18, topInfoY + 26);
-          doc.text(`${cliente?.direccion || "CHOLUTECA, HONDURAS"}`, 18, topInfoY + 32);
-
-          const rightColX = 120;
-          const metaY = topInfoY + 5;
-          const spacing = 6;
-          doc.setFontSize(9);
-          doc.setFont("helvetica", "bold");
-          doc.setTextColor(grayColor);
-          
-          const labels = ["FECHA INGRESO:", "ENTREGA ESTIMADA:", "ESTADO INICIAL:", "TÉCNICO:", "RTN EMISOR:"];
-          const values = [
-              new Date(r.fecha_ingreso).toLocaleString('es-HN'),
-              r.fecha_entrega_estimada ? new Date(r.fecha_entrega_estimada).toLocaleDateString('es-HN') : 'N/A',
-              r.estado_reparacion.toUpperCase(),
-              r.nombre_tecnico.toUpperCase(),
-              rtnEmpresa
-          ];
-
-          labels.forEach((label, i) => {
-              doc.text(label, rightColX, metaY + (i * spacing));
-              doc.setTextColor(0, 0, 0);
-              doc.text(String(values[i]), rightColX + 40, metaY + (i * spacing));
-              doc.setTextColor(grayColor);
-          });
-
-          doc.setTextColor(primaryColor);
-          doc.setFontSize(11);
-          doc.setFont("helvetica", "bold");
-          doc.text("ESPECIFICACIONES DEL DISPOSITIVO:", 14, topInfoY + 50);
-
-          // @ts-ignore
-          doc.autoTable({
-              startY: topInfoY + 55,
-              head: [['MARCA', 'MODELO', 'IMEI / NÚMERO DE SERIE']],
-              body: [[(r.marca || '').toUpperCase(), (r.modelo || '').toUpperCase(), r.imei_equipo || 'N/A']],
-              theme: 'grid',
-              headStyles: { fillColor: [30, 58, 138], halign: 'center' },
-              styles: { fontSize: 10, halign: 'center' }
-          });
-
-          // @ts-ignore
-          let tableY = doc.lastAutoTable.finalY + 10;
-          doc.setTextColor(primaryColor);
-          doc.setFontSize(11);
-          doc.setFont("helvetica", "bold");
-          doc.text("DIAGNÓSTICO Y COMPLEMENTOS:", 14, tableY);
-
-          // @ts-ignore
-          doc.autoTable({
-              startY: tableY + 5,
-              head: [['FALLA REPORTADA POR CLIENTE', 'ACCESORIOS / ARTÍCULOS RECIBIDOS']],
-              body: [[(r.descripcion_falla || '').toUpperCase(), r.complementos?.toUpperCase() || 'NINGUNO']],
-              theme: 'striped',
-              headStyles: { fillColor: [30, 58, 138] },
-              styles: { fontSize: 9 },
-              columnStyles: { 0: { cellWidth: 100 }, 1: { cellWidth: 82 } }
-          });
-
-          // @ts-ignore
-          let finalY = doc.lastAutoTable.finalY + 15;
-          const totalsX = 135;
-          doc.setFillColor(lightGray);
-          doc.roundedRect(totalsX - 5, finalY - 5, 65, 25, 3, 3, 'F');
-          doc.setFontSize(10);
-          doc.setTextColor(grayColor);
-          doc.setFont("helvetica", "normal");
-          doc.text("TOTAL ESTIMADO:", totalsX, finalY + 5);
-          doc.setFont("helvetica", "bold"); 
-          doc.setTextColor(primaryColor);
-          doc.setFontSize(16);
-          doc.text(`L. ${Number(r.precio_cliente).toFixed(2)}`, totalsX, finalY + 15);
-
-          doc.setTextColor(grayColor);
-          doc.setFontSize(9);
-          doc.text("SON: " + numeroALetras(r.precio_cliente), 14, finalY + 25);
-
-          let footerY = pageHeight - 55;
-          doc.setFontSize(8);
-          doc.setTextColor(grayColor);
-          doc.setFont("helvetica", "bold");
-          doc.text("TÉRMINOS Y CONDICIONES DEL SERVICIO:", 14, footerY);
-          doc.setFont("helvetica", "normal");
-          doc.text("1. El taller NO se hace responsable por pérdida de información. Realice su respaldo.", 14, footerY + 5);
-          doc.text("2. Todo equipo abandonado por más de 30 días calendario pasará a ser propiedad de la empresa.", 14, footerY + 10);
-          doc.text("3. La garantía es válida únicamente por la falla descrita en este documento.", 14, footerY + 15);
-
-          footerY += 30;
-          doc.setDrawColor(grayColor);
-          doc.line(20, footerY, 85, footerY);
-          doc.text("Firma de Aceptación Cliente", 30, footerY + 5);
-          doc.line(pageWidth - 85, footerY, pageWidth - 20, footerY);
-          doc.text("Recibido por (Firma y Sello)", pageWidth - 75, footerY + 5);
-
-          doc.save(`Orden_Reparacion_${r.id_reparacion}.pdf`);
-      } catch (err) {
-          console.error(err);
-          Swal.fire('Error PDF', 'No se pudo generar la orden de servicio.', 'error');
-      }
-  };
-
   const updateStatus = async (id: number, currentStatus: string) => {
     const { value: newStatus } = await Swal.fire({
       title: 'Cambiar Estado',
@@ -468,8 +257,7 @@ const Repairs: React.FC = () => {
                                         {r.estado_reparacion !== 'Entregado' && (
                                             <button onClick={() => handleBillRepair(r)} className="p-2 bg-emerald-600 text-white hover:bg-emerald-700 rounded-xl shadow-md shadow-emerald-600/20 active:scale-90 transition-all" title="Cobrar / Facturar"><ShoppingCart size={16}/></button>
                                         )}
-                                        <button onClick={() => generatePDF(r)} className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg" title="Imprimir PDF Estático"><Printer size={16}/></button>
-                                        <button onClick={() => printRepairOrder(r).then(res => { if (!res.success) Swal.fire('Sin plantilla', res.message, 'warning'); })} className="p-2 text-purple-600 hover:bg-purple-50 rounded-lg" title="Imprimir con Diseñador"><FileText size={16}/></button>
+                                        <button onClick={() => downloadRepairOrderPDF(r).then(res => { if (!res.success) Swal.fire('Sin plantilla', res.message, 'warning'); })} className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg" title="Descargar PDF"><FileText size={16}/></button>
                                         <button onClick={() => openEdit(r)} className="p-2 text-blue-500 hover:bg-blue-50 rounded-lg" title="Editar"><Edit2 size={16}/></button>
                                         <button onClick={() => handleDelete(r.id_reparacion)} className="p-2 text-red-400 hover:bg-red-50 rounded-lg" title="Eliminar"><Trash2 size={16}/></button>
                                     </div>
