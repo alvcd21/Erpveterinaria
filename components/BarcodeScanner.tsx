@@ -1,12 +1,28 @@
 /**
- * BarcodeScanner.tsx
- * Cross-browser camera barcode/QR scanner using @zxing/browser.
- * Works on: Chrome, Firefox, Safari, iPhone (iOS Safari), Android, Edge.
+ * BarcodeScanner.tsx — High-performance barcode/QR scanner.
+ *
+ * Improvements over the previous version:
+ *  - Custom rAF decode loop with canvas preprocessing (contrast + brightness boost)
+ *  - Scan zone crop: only the center rectangle is sent to the decoder (smaller = faster)
+ *  - TRY_HARDER + limited POSSIBLE_FORMATS hints for ZXing
+ *  - Single-confirmation (no double-scan delay)
+ *  - inputMode="text" for the manual input field (allows letters, numbers, symbols)
+ *  - Better camera constraints with graceful fallback for low-end devices
  */
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { BrowserMultiFormatReader } from '@zxing/browser';
+import {
+  BinaryBitmap,
+  DecodeHintType,
+  BarcodeFormat,
+  HybridBinarizer,
+  MultiFormatReader,
+  NotFoundException,
+} from '@zxing/library';
+import { HTMLCanvasElementLuminanceSource } from '@zxing/browser';
 import { X, ScanLine, Keyboard, ZapOff, CheckCircle2, Package } from 'lucide-react';
+
+// ─── Props ────────────────────────────────────────────────────────────────────
 
 interface BarcodeScannerProps {
   onScan: (code: string) => void;
@@ -21,34 +37,71 @@ interface BarcodeScannerProps {
   onConfirmBatch?: () => void;
 }
 
+// ─── ZXing reader with optimized hints ────────────────────────────────────────
+
+function buildReader(): MultiFormatReader {
+  const hints = new Map<DecodeHintType, any>();
+  hints.set(DecodeHintType.TRY_HARDER, true);
+  hints.set(DecodeHintType.POSSIBLE_FORMATS, [
+    BarcodeFormat.CODE_128,
+    BarcodeFormat.CODE_39,
+    BarcodeFormat.CODE_93,
+    BarcodeFormat.EAN_13,
+    BarcodeFormat.EAN_8,
+    BarcodeFormat.UPC_A,
+    BarcodeFormat.UPC_E,
+    BarcodeFormat.QR_CODE,
+    BarcodeFormat.DATA_MATRIX,
+    BarcodeFormat.ITF,
+    BarcodeFormat.PDF_417,
+  ]);
+  const reader = new MultiFormatReader();
+  reader.setHints(hints);
+  return reader;
+}
+
+// ─── Component ────────────────────────────────────────────────────────────────
+
 const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
   onScan, onClose,
-  title = 'Escanear Código',
-  hint  = 'Apunta al código de barras',
+  title      = 'Escanear Código',
+  hint       = 'Apunta al código de barras o QR',
   continuous    = false,
   batchCount    = 0,
   onConfirmBatch,
 }) => {
-  const videoRef    = useRef<HTMLVideoElement>(null);
-  const overlayRef  = useRef<HTMLCanvasElement>(null);
-  const rafRef      = useRef<number>(0);
-  const readerRef   = useRef<BrowserMultiFormatReader | null>(null);
-  const streamRef   = useRef<MediaStream | null>(null);
-  const lastCodeRef = useRef<string>('');
-  const confirmRef  = useRef<number>(0);
-  const laserYRef   = useRef<number>(0);
-  const laserDirRef = useRef<number>(1);
-  const stoppedRef  = useRef<boolean>(false);
+  const videoRef       = useRef<HTMLVideoElement>(null);
+  const overlayRef     = useRef<HTMLCanvasElement>(null);   // visible UI overlay
+  const captureRef     = useRef<HTMLCanvasElement>(null);   // hidden processing canvas
+  const streamRef      = useRef<MediaStream | null>(null);
+  const readerRef      = useRef<MultiFormatReader>(buildReader());
+  const rafRef         = useRef<number>(0);
+  const rafOverlayRef  = useRef<number>(0);
+  const stoppedRef     = useRef<boolean>(false);
+  const lastCodeRef    = useRef<string>('');
+  const cooldownRef    = useRef<boolean>(false);
+  const laserYRef      = useRef<number>(0);
+  const laserDirRef    = useRef<number>(1);
 
-  const [error,     setError]     = useState<string>('');
-  const [fallback,  setFallback]  = useState(false);
-  const [manualCode,setManualCode]= useState('');
-  const [lastResult,setLastResult]= useState<string>('');
-  const [scanning,  setScanning]  = useState(false);
-  const [torchOn,   setTorchOn]   = useState(false);
-  const [torchAvail,setTorchAvail]= useState(false);
+  const [error,      setError]      = useState('');
+  const [fallback,   setFallback]   = useState(false);
+  const [manualCode, setManualCode] = useState('');
+  const [lastResult, setLastResult] = useState('');
+  const [scanning,   setScanning]   = useState(false);
+  const [torchOn,    setTorchOn]    = useState(false);
+  const [torchAvail, setTorchAvail] = useState(false);
+  const [flashBg,    setFlashBg]    = useState(false);   // green flash on success
 
-  // ── Overlay animation ───────────────────────────────────────────────────────
+  // ── Stop everything ──────────────────────────────────────────────────────────
+  const stopAll = useCallback(() => {
+    stoppedRef.current = true;
+    cancelAnimationFrame(rafRef.current);
+    cancelAnimationFrame(rafOverlayRef.current);
+    streamRef.current?.getTracks().forEach(t => t.stop());
+    streamRef.current = null;
+  }, []);
+
+  // ── Overlay animation (laser line + corners) ─────────────────────────────────
   const animateOverlay = useCallback(() => {
     const overlay = overlayRef.current;
     if (!overlay) return;
@@ -60,69 +113,153 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
     const W = overlay.width;
     const H = overlay.height;
 
-    const zx = W * 0.10;
-    const zy = H * 0.28;
-    const zw = W * 0.80;
-    const zh = H * 0.44;
+    // Tighter scan zone for faster decode (70% wide, 38% tall centered)
+    const zx = W * 0.12;
+    const zy = H * 0.30;
+    const zw = W * 0.76;
+    const zh = H * 0.40;
 
-    oc.fillStyle = 'rgba(0,0,0,0.55)';
+    oc.fillStyle = 'rgba(0,0,0,0.60)';
     oc.fillRect(0, 0, W, H);
     oc.clearRect(zx, zy, zw, zh);
 
-    const cLen = 26; const cTh = 3;
+    // Corner brackets
+    const cLen = 22; const cTh = 3;
     oc.strokeStyle = '#22d3ee'; oc.lineWidth = cTh;
     const corner = (x1:number,y1:number,x2:number,y2:number,x3:number,y3:number) => {
       oc.beginPath(); oc.moveTo(x1,y1); oc.lineTo(x2,y2); oc.lineTo(x3,y3); oc.stroke();
     };
-    corner(zx,zy, zx+cLen,zy, zx,zy+cLen);
-    corner(zx+zw-cLen,zy, zx+zw,zy, zx+zw,zy+cLen);
-    corner(zx,zy+zh-cLen, zx,zy+zh, zx+cLen,zy+zh);
+    corner(zx,zy,       zx+cLen,zy,    zx,zy+cLen);
+    corner(zx+zw-cLen,zy, zx+zw,zy,    zx+zw,zy+cLen);
+    corner(zx,zy+zh-cLen, zx,zy+zh,    zx+cLen,zy+zh);
     corner(zx+zw-cLen,zy+zh, zx+zw,zy+zh, zx+zw,zy+zh-cLen);
 
-    laserYRef.current += laserDirRef.current * 2;
+    // Laser line
+    laserYRef.current += laserDirRef.current * 2.5;
     if (laserYRef.current >= zh - 2) laserDirRef.current = -1;
-    if (laserYRef.current <= 2)      laserDirRef.current = 1;
+    if (laserYRef.current <= 2)      laserDirRef.current =  1;
     const ly = zy + laserYRef.current;
     const g = oc.createLinearGradient(zx, ly, zx+zw, ly);
     g.addColorStop(0,   'rgba(34,211,238,0)');
-    g.addColorStop(0.3, 'rgba(34,211,238,0.9)');
-    g.addColorStop(0.7, 'rgba(34,211,238,0.9)');
+    g.addColorStop(0.25,'rgba(34,211,238,0.9)');
+    g.addColorStop(0.75,'rgba(34,211,238,0.9)');
     g.addColorStop(1,   'rgba(34,211,238,0)');
     oc.strokeStyle = g; oc.lineWidth = 2;
     oc.beginPath(); oc.moveTo(zx, ly); oc.lineTo(zx+zw, ly); oc.stroke();
 
-    rafRef.current = requestAnimationFrame(animateOverlay);
+    rafOverlayRef.current = requestAnimationFrame(animateOverlay);
   }, []);
 
-  // ── Stop ────────────────────────────────────────────────────────────────────
-  const stopAll = useCallback(() => {
-    stoppedRef.current = true;
-    cancelAnimationFrame(rafRef.current);
-    try { readerRef.current?.reset?.(); } catch {}
-    streamRef.current?.getTracks().forEach(t => t.stop());
-    streamRef.current = null;
-  }, []);
+  // ── Decode loop (canvas-based with preprocessing) ────────────────────────────
+  const decodeLoop = useCallback(() => {
+    if (stoppedRef.current) return;
 
-  // ── Start camera + ZXing ────────────────────────────────────────────────────
+    const video   = videoRef.current;
+    const capture = captureRef.current;
+    if (!video || !capture || video.readyState < 2 || video.videoWidth === 0) {
+      rafRef.current = requestAnimationFrame(decodeLoop);
+      return;
+    }
+
+    const vw = video.videoWidth;
+    const vh = video.videoHeight;
+
+    // ── Compute crop region matching the visible scan zone ──────────────────
+    // The overlay is sized to the viewport; map the scan zone fraction to video pixels.
+    // Zone: x=12%, y=30%, w=76%, h=40% of the display — we crop the same proportions
+    // from the video feed for faster decoding.
+    const cx = Math.floor(vw * 0.12);
+    const cy = Math.floor(vh * 0.30);
+    const cw = Math.floor(vw * 0.76);
+    const ch = Math.floor(vh * 0.40);
+
+    capture.width  = cw;
+    capture.height = ch;
+
+    const ctx = capture.getContext('2d', { willReadFrequently: true });
+    if (!ctx) { rafRef.current = requestAnimationFrame(decodeLoop); return; }
+
+    // ── Draw cropped zone with image enhancements ───────────────────────────
+    // contrast(1.6) + brightness(1.15) helps low-res / out-of-focus cameras
+    ctx.filter = 'contrast(1.6) brightness(1.15) saturate(0)';
+    ctx.drawImage(video, cx, cy, cw, ch, 0, 0, cw, ch);
+    ctx.filter = 'none';
+
+    // ── Attempt ZXing decode ────────────────────────────────────────────────
+    try {
+      const luminance = new HTMLCanvasElementLuminanceSource(capture);
+      const bitmap    = new BinaryBitmap(new HybridBinarizer(luminance));
+      const result    = readerRef.current.decode(bitmap);
+      const code      = result.getText().trim();
+
+      if (code && code !== lastCodeRef.current && !cooldownRef.current) {
+        cooldownRef.current = true;
+        lastCodeRef.current = code;
+        setLastResult(code);
+        setFlashBg(true);
+        setTimeout(() => setFlashBg(false), 300);
+
+        // Haptic feedback on mobile
+        try { navigator.vibrate?.(60); } catch {}
+
+        onScan(code);
+        if (!continuous) {
+          stopAll();
+          return;
+        }
+        // In batch mode, reset after short cooldown to allow next scan
+        setTimeout(() => {
+          lastCodeRef.current = '';
+          cooldownRef.current = false;
+        }, 1200);
+      }
+    } catch (e) {
+      // NotFoundException is normal — no barcode in this frame
+      if (!(e instanceof NotFoundException)) {
+        // Unexpected error — reset lastCode to allow retry
+        lastCodeRef.current = '';
+      }
+    }
+
+    if (!stoppedRef.current) {
+      rafRef.current = requestAnimationFrame(decodeLoop);
+    }
+  }, [onScan, continuous, stopAll]);
+
+  // ── Torch toggle ─────────────────────────────────────────────────────────────
+  const toggleTorch = useCallback(async () => {
+    const track = streamRef.current?.getVideoTracks()[0];
+    if (!track) return;
+    const next = !torchOn;
+    try {
+      await (track as any).applyConstraints({ advanced: [{ torch: next }] });
+      setTorchOn(next);
+    } catch {}
+  }, [torchOn]);
+
+  // ── Start camera ─────────────────────────────────────────────────────────────
   const startCamera = useCallback(async () => {
     stoppedRef.current = false;
+    lastCodeRef.current = '';
+    cooldownRef.current = false;
     setError('');
     setScanning(false);
 
-    let stream: MediaStream;
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
-        audio: false,
-      });
-    } catch (e: any) {
-      if (e.name === 'NotAllowedError' || e.name === 'PermissionDeniedError') {
-        setError('Permiso de cámara denegado. Actívalo en configuración del navegador.');
-      } else if (e.name === 'NotFoundError') {
-        setError('No se encontró cámara en este dispositivo.');
-      } else {
-        setError('Error al iniciar la cámara: ' + (e.message || e.name));
-      }
+    // Try best quality first, fall back to any available camera
+    const constraints: MediaStreamConstraints[] = [
+      { video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920, min: 640 }, height: { ideal: 1080, min: 480 }, advanced: [{ focusMode: 'continuous' } as any] }, audio: false },
+      { video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false },
+      { video: { facingMode: 'environment' }, audio: false },
+      { video: true, audio: false },
+    ];
+
+    let stream: MediaStream | null = null;
+    for (const c of constraints) {
+      try { stream = await navigator.mediaDevices.getUserMedia(c); break; } catch {}
+    }
+
+    if (!stream) {
+      setError('No se pudo acceder a la cámara. Verifica los permisos en la configuración del navegador.');
       return;
     }
 
@@ -134,51 +271,17 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
     if (!videoRef.current) return;
     videoRef.current.srcObject = stream;
     try { await videoRef.current.play(); } catch {}
+
     setScanning(true);
+    rafRef.current      = requestAnimationFrame(decodeLoop);
+    rafOverlayRef.current = requestAnimationFrame(animateOverlay);
+  }, [decodeLoop, animateOverlay]);
 
-    const reader = new BrowserMultiFormatReader();
-    readerRef.current = reader;
-    try {
-      await reader.decodeFromStream(stream, videoRef.current, (result) => {
-        if (stoppedRef.current || !result) return;
-        const code = result.getText().trim();
-        if (code === lastCodeRef.current) {
-          confirmRef.current++;
-        } else {
-          lastCodeRef.current = code;
-          confirmRef.current = 1;
-        }
-        if (confirmRef.current >= 2) {
-          confirmRef.current = 0;
-          lastCodeRef.current = '';
-          setLastResult(code);
-          onScan(code);
-          if (!continuous) stopAll();
-        }
-      });
-    } catch (e: any) {
-      if (!stoppedRef.current) setError('Error al iniciar el escáner: ' + (e.message || String(e)));
-    }
-  }, [onScan, continuous, stopAll]);
-
-  // ── Torch ───────────────────────────────────────────────────────────────────
-  const toggleTorch = useCallback(async () => {
-    const track = streamRef.current?.getVideoTracks()[0];
-    if (!track) return;
-    const next = !torchOn;
-    try { await (track as any).applyConstraints({ advanced: [{ torch: next }] }); setTorchOn(next); } catch {}
-  }, [torchOn]);
-
-  // ── Lifecycle ───────────────────────────────────────────────────────────────
+  // ── Lifecycle ─────────────────────────────────────────────────────────────────
   useEffect(() => {
     startCamera();
     return () => stopAll();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    if (scanning) rafRef.current = requestAnimationFrame(animateOverlay);
-    return () => cancelAnimationFrame(rafRef.current);
-  }, [scanning, animateOverlay]);
 
   const handleManualSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -186,6 +289,7 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
     if (!code) return;
     onScan(code);
     if (continuous) setManualCode('');
+    else { stopAll(); }
   };
 
   const isBatchMode = continuous && onConfirmBatch;
@@ -193,7 +297,10 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
   return (
     <div className="fixed inset-0 z-[9999] bg-black flex flex-col" style={{ height: '100dvh' }}>
 
-      {/* Header — safe area aware */}
+      {/* Green flash on scan */}
+      {flashBg && <div className="absolute inset-0 z-50 bg-emerald-400/30 pointer-events-none animate-ping" style={{ animationDuration: '0.3s', animationIterationCount: 1 }}/>}
+
+      {/* Header */}
       <div className="relative z-20 flex items-center justify-between px-4 py-3 bg-gradient-to-b from-black/90 to-transparent"
            style={{ paddingTop: 'max(env(safe-area-inset-top, 0px), 12px)' }}>
         <div className="flex-1 min-w-0 mr-2">
@@ -203,12 +310,14 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
         <div className="flex gap-2 shrink-0">
           {torchAvail && (
             <button onClick={toggleTorch}
-              className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${torchOn ? 'bg-yellow-400 text-black' : 'bg-white/20 text-white'}`}>
+              className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${torchOn ? 'bg-yellow-400 text-black' : 'bg-white/20 text-white'}`}
+              title="Linterna">
               <ZapOff size={18}/>
             </button>
           )}
           <button onClick={() => setFallback(f => !f)}
-            className="w-10 h-10 rounded-full bg-white/20 text-white flex items-center justify-center">
+            className="w-10 h-10 rounded-full bg-white/20 text-white flex items-center justify-center"
+            title="Ingresar código manualmente">
             <Keyboard size={18}/>
           </button>
           <button onClick={() => { stopAll(); onClose(); }}
@@ -218,15 +327,17 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
         </div>
       </div>
 
-      {/* Camera */}
+      {/* Camera feed */}
       {!error && (
         <>
           <video ref={videoRef} className="absolute inset-0 w-full h-full object-cover" playsInline muted autoPlay/>
           <canvas ref={overlayRef} className="absolute inset-0 w-full h-full pointer-events-none"/>
+          {/* Hidden processing canvas — never visible */}
+          <canvas ref={captureRef} className="hidden"/>
         </>
       )}
 
-      {/* Error */}
+      {/* Error state */}
       {error && (
         <div className="flex-1 flex flex-col items-center justify-center gap-4 px-6 text-center">
           <div className="w-16 h-16 rounded-full bg-red-500/20 flex items-center justify-center">
@@ -238,12 +349,11 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
         </div>
       )}
 
-      {/* Bottom area: batch status + confirm button OR scanning indicator */}
+      {/* Bottom: status / batch */}
       {!error && !fallback && (
         <div className="absolute bottom-0 left-0 right-0 z-20 flex flex-col items-center gap-3 pb-safe"
              style={{ paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 16px)' }}>
 
-          {/* Last scanned in batch mode */}
           {lastResult && continuous && (
             <div className="mx-4 w-full max-w-sm">
               <div className="bg-emerald-500/90 backdrop-blur-sm text-white rounded-2xl px-4 py-2.5 flex items-center gap-3 shadow-xl">
@@ -253,7 +363,6 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
             </div>
           )}
 
-          {/* Batch: item count + confirm button */}
           {isBatchMode ? (
             <div className="flex items-center gap-3 px-4 w-full max-w-sm">
               <div className="flex-1 bg-black/60 backdrop-blur-sm border border-white/20 rounded-2xl px-4 py-3 flex items-center gap-3">
@@ -286,13 +395,22 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
       {fallback && (
         <div className="absolute inset-0 z-30 bg-slate-900/97 flex flex-col items-center justify-center px-6 gap-5">
           <ScanLine size={36} className="text-cyan-400"/>
-          <p className="text-white font-bold text-center text-sm">Ingresa el código manualmente</p>
+          <div className="text-center space-y-1">
+            <p className="text-white font-bold text-sm">Ingresa el código manualmente</p>
+            <p className="text-slate-400 text-xs">Acepta números, letras y símbolos</p>
+          </div>
           <form onSubmit={handleManualSubmit} className="w-full max-w-xs space-y-3">
             <input
-              autoFocus inputMode="numeric" type="text"
-              value={manualCode} onChange={e => setManualCode(e.target.value)}
-              placeholder="123456789012"
-              className="w-full px-4 py-4 text-xl font-mono font-bold rounded-2xl bg-white/10 text-white border border-white/20 outline-none focus:border-cyan-400 text-center tracking-widest"
+              autoFocus
+              inputMode="text"
+              autoCapitalize="characters"
+              autoCorrect="off"
+              spellCheck={false}
+              type="text"
+              value={manualCode}
+              onChange={e => setManualCode(e.target.value.toUpperCase())}
+              placeholder="Ej: ABC-12345 / 7501234"
+              className="w-full px-4 py-4 text-lg font-mono font-bold rounded-2xl bg-white/10 text-white border border-white/20 outline-none focus:border-cyan-400 text-center tracking-widest"
             />
             <button type="submit" className="w-full py-4 bg-cyan-500 text-black font-black rounded-2xl text-sm tracking-widest">
               CONFIRMAR
