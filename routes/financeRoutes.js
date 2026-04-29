@@ -205,6 +205,19 @@ router.delete('/ingresos/:id', authenticateToken, async (req, res) => {
     try {
         await client.query('BEGIN');
 
+        // Obtener datos del ingreso antes de eliminarlo
+        const ingRes = await client.query(
+            `SELECT idCaja as "idCaja", subtipo_movimiento as "subtipo_movimiento", costo,
+             descripcion, TO_CHAR(fechaCreacion, 'YYYY-MM-DD') as fecha_local
+             FROM ingresos WHERE idIngreso = $1`,
+            [req.params.id]
+        );
+        if (ingRes.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ error: 'Ingreso no encontrado' });
+        }
+        const ingreso = ingRes.rows[0];
+
         // Verificar si este ingreso está asociado a una venta (factura)
         const ventaRes = await client.query(
             'SELECT DISTINCT idVenta FROM detalleventa WHERE idIngreso = $1 LIMIT 1',
@@ -223,6 +236,23 @@ router.delete('/ingresos/:id', authenticateToken, async (req, res) => {
                     await client.query("UPDATE telefonos SET estado = 'Disponible' WHERE codigo = $1", [d.idtelefono]);
                 } else if (d.idaccesorio) {
                     await client.query("UPDATE inventario SET cantidad = cantidad + $1 WHERE codInventario = $2", [d.cantidad, d.idaccesorio]);
+                }
+            }
+        }
+
+        // Si es una recarga, restaurar el saldo de la red correspondiente
+        if (ingreso.subtipo_movimiento === 'Recarga' && Number(ingreso.costo) > 0) {
+            const red = ingreso.descripcion?.split(' - ')[0]?.trim().toUpperCase();
+            if (red === 'TIGO' || red === 'CLARO') {
+                const saldoRes = await client.query(
+                    "SELECT idsaldos FROM saldos WHERE red = $1 AND TO_CHAR(fecha, 'YYYY-MM-DD') = $2",
+                    [red, ingreso.fecha_local]
+                );
+                if (saldoRes.rows.length > 0) {
+                    await client.query(
+                        "UPDATE saldos SET saldoFinal = saldoFinal + $1 WHERE idsaldos = $2",
+                        [ingreso.costo, saldoRes.rows[0].idsaldos]
+                    );
                 }
             }
         }
