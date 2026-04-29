@@ -284,9 +284,9 @@ const AdminCashDashboard: React.FC = () => {
       try {
           if(editingItem.type === 'INGRESO') await CashService.updateIngreso(editingItem.id, { descripcion: editForm.descripcion, monto: Number(editForm.monto), costo: Number(editForm.costo) });
           else await CashService.updateEgreso(editingItem.id, { descripcion: editForm.descripcion, monto: Number(editForm.monto), subtipo_egreso: editForm.subtipo, id_socio_asignado: editForm.idSocio ? Number(editForm.idSocio) : null });
-          setEditingItem({id:'', type: null}); 
-          loadSessionById(sessionDetails.arqueo.idArqueo, selectedBox); 
-          loadData(); 
+          setEditingItem({id:'', type: null});
+          await loadSessionById(sessionDetails.arqueo.idArqueo, selectedBox);
+          loadData();
           Swal.fire('Guardado', 'Registro actualizado y balance recalculado.', 'success');
       } catch(e:any) { Swal.fire('Error', e.message, 'error'); }
   };
@@ -318,8 +318,8 @@ const AdminCashDashboard: React.FC = () => {
           try {
               if(type === 'INGRESO') await CashService.deleteIngreso(id);
               else await CashService.deleteEgreso(id);
-              loadSessionById(sessionDetails.arqueo.idArqueo, selectedBox); 
-              loadData(); 
+              await loadSessionById(sessionDetails.arqueo.idArqueo, selectedBox);
+              loadData();
               Swal.fire('Eliminado', 'Transacción eliminada con éxito.', 'success');
           } catch(e:any) { Swal.fire('Error', e.message, 'error'); }
       }
