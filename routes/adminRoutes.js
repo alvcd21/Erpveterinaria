@@ -2,13 +2,15 @@
 const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
+const BCRYPT_ROUNDS = 12;
 const { pool, generateNextId, handleDbError, updateArqueoBalance } = require('../config/db');
-const { authenticateToken } = require('../middleware/auth');
+const { authenticateToken, requireAdmin } = require('../middleware/auth');
 
 // --- ENDPOINT PARA ESQUEMA DE DATOS (REQUERIDO POR IMPRESIÓN/DISEÑO) ---
 const SCHEMA_TABLES = ['telefonos', 'inventario', 'accesorios', 'ventas', 'clientes', 'configuracion', 'empleado', 'usuarios', 'detalleventa', 'reparaciones'];
 
-router.get('/schema', authenticateToken, async (req, res) => {
+router.get('/schema', authenticateToken, requireAdmin, async (req, res) => {
     try {
         const colQuery = `
             SELECT
@@ -90,7 +92,7 @@ router.get('/config', authenticateToken, async (req, res) => {
     } catch(e) { handleDbError(res, e); }
 });
 
-router.put('/config', authenticateToken, async (req, res) => {
+router.put('/config', authenticateToken, express.json({ limit: '10mb' }), async (req, res) => {
     try {
         const { nombreEmpresa, rtn, direccion, telefono, correo, cai, rangoInicial, rangoFinal, fechaLimite, isv, mensajeFinal, logoBase64 } = req.body;
         await pool.query(`
@@ -210,7 +212,7 @@ router.put('/admin/saldos/:id', authenticateToken, async (req, res) => {
     } catch(e) { handleDbError(res, e); }
 });
 
-router.get('/users', authenticateToken, async (req, res) => {
+router.get('/users', authenticateToken, requireAdmin, async (req, res) => {
     try {
         const result = await pool.query(`
             SELECT u.codUsuario as "codUsuario", u.usuario, u.identidad, u.idCaja as "idCaja", u.idrol, u.estado,
@@ -224,13 +226,12 @@ router.get('/users', authenticateToken, async (req, res) => {
     } catch(e) { handleDbError(res, e); }
 });
 
-router.post('/users', authenticateToken, async (req, res) => {
+router.post('/users', authenticateToken, requireAdmin, async (req, res) => {
     try {
         const { usuario, identidad, idrol, idCaja, estado } = req.body;
         const codUsuario = await generateNextId('usuarios', 'codUsuario', 'USER');
-        // Generate a temporary password; admin must share it with the user
-        const tempPassword = `Temp@${Math.floor(1000 + Math.random() * 9000)}`;
-        const hashedPassword = await bcrypt.hash(tempPassword, 10);
+        const tempPassword = 'Sc-' + crypto.randomBytes(8).toString('hex');
+        const hashedPassword = await bcrypt.hash(tempPassword, BCRYPT_ROUNDS);
         await pool.query(
             `INSERT INTO usuarios (codUsuario, usuario, password, identidad, idCaja, idrol, estado, requires_password_change, fechaCreacion)
              VALUES ($1, $2, $3, $4, $5, $6, $7, TRUE, NOW())`,
@@ -239,13 +240,13 @@ router.post('/users', authenticateToken, async (req, res) => {
     } catch(e) { handleDbError(res, e); }
 });
 
-router.put('/users/:id', authenticateToken, async (req, res) => {
+router.put('/users/:id', authenticateToken, requireAdmin, async (req, res) => {
     try {
         const { usuario, password, identidad, idrol, idCaja, estado } = req.body;
         let query = `UPDATE usuarios SET usuario=$1, identidad=$2, idrol=$3, idCaja=$4, estado=$5`;
         let params = [usuario, identidad, idrol, idCaja, estado];
         if (password && password.trim() !== '') {
-            const hashedPassword = await bcrypt.hash(password, 10);
+            const hashedPassword = await bcrypt.hash(password, BCRYPT_ROUNDS);
             query += `, password=$${params.length + 1}`;
             params.push(hashedPassword);
         }
@@ -256,8 +257,11 @@ router.put('/users/:id', authenticateToken, async (req, res) => {
     } catch(e) { handleDbError(res, e); }
 });
 
-router.delete('/users/:id', authenticateToken, async (req, res) => {
+router.delete('/users/:id', authenticateToken, requireAdmin, async (req, res) => {
     try {
+        if (req.params.id === req.user.codUsuario) {
+            return res.status(400).json({ error: 'No puede eliminar su propia cuenta' });
+        }
         await pool.query('DELETE FROM usuarios WHERE codUsuario=$1', [req.params.id]);
         res.json({ message: 'OK' });
     } catch(e) { handleDbError(res, e); }
@@ -295,7 +299,7 @@ router.delete('/empleados/:id', authenticateToken, async (req, res) => {
     } catch(e) { handleDbError(res, e); }
 });
 
-router.get('/roles', authenticateToken, async (req, res) => {
+router.get('/roles', authenticateToken, requireAdmin, async (req, res) => {
     try {
         const roles = await pool.query('SELECT idrol, nombre, estado FROM roles');
         const rolesWithPerms = await Promise.all(roles.rows.map(async (rol) => {
@@ -306,7 +310,7 @@ router.get('/roles', authenticateToken, async (req, res) => {
     } catch(e) { handleDbError(res, e); }
 });
 
-router.post('/roles', authenticateToken, async (req, res) => {
+router.post('/roles', authenticateToken, requireAdmin, async (req, res) => {
     const client = await pool.connect();
     try {
         const { nombre, estado, permisos } = req.body;
@@ -323,7 +327,7 @@ router.post('/roles', authenticateToken, async (req, res) => {
     } catch(e) { await client.query('ROLLBACK'); handleDbError(res, e); } finally { client.release(); }
 });
 
-router.put('/roles/:id', authenticateToken, async (req, res) => {
+router.put('/roles/:id', authenticateToken, requireAdmin, async (req, res) => {
     const client = await pool.connect();
     try {
         const { nombre, estado, permisos } = req.body;
@@ -340,7 +344,7 @@ router.put('/roles/:id', authenticateToken, async (req, res) => {
     } catch(e) { await client.query('ROLLBACK'); handleDbError(res, e); } finally { client.release(); }
 });
 
-router.delete('/roles/:id', authenticateToken, async (req, res) => {
+router.delete('/roles/:id', authenticateToken, requireAdmin, async (req, res) => {
     try {
         await pool.query('DELETE FROM roles WHERE idrol=$1', [req.params.id]);
         res.json({ message: 'OK' });

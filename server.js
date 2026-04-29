@@ -1,13 +1,21 @@
 
+require('dotenv').config();
 const express = require('express');
 const path = require('path');
 const cors = require('cors');
+const rateLimit = require('express-rate-limit');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 
 // Configs y Middleware
 const { pool } = require('./config/db');
 const { authenticateToken, JWT_SECRET } = require('./middleware/auth');
+
+const REFRESH_SECRET = process.env.REFRESH_SECRET;
+if (!REFRESH_SECRET) {
+    console.error('[FATAL] REFRESH_SECRET no está configurado. El servidor no puede arrancar de forma segura.');
+    process.exit(1);
+}
 
 // Rutas Modulares
 const adminRoutes = require('./routes/adminRoutes');
@@ -22,18 +30,25 @@ const serviceRoutes = require('./routes/serviceRoutes');
 const app = express();
 const port = process.env.PORT || 3000;
 
-// Configuración CORS restrictiva en producción
+// Rate limiting — protección contra fuerza bruta en endpoints de autenticación
+const authLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 20,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Demasiados intentos. Intente de nuevo en 15 minutos.' },
+});
+
+// Configuración CORS — fallback seguro a localhost en lugar de wildcard
 const allowedOrigins = process.env.ALLOWED_ORIGINS
-    ? process.env.ALLOWED_ORIGINS.split(',')
-    : null;
+    ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
+    : ['http://localhost:3000', 'http://localhost:5173'];
 
 app.use(cors({
-    origin: allowedOrigins
-        ? (origin, cb) => {
-            if (!origin || allowedOrigins.includes(origin)) cb(null, true);
-            else cb(new Error('CORS: origen no permitido'));
-          }
-        : true,
+    origin: (origin, cb) => {
+        if (!origin || allowedOrigins.includes(origin)) cb(null, true);
+        else cb(new Error('CORS: origen no permitido'));
+    },
     credentials: true,
 }));
 
@@ -41,12 +56,16 @@ app.use(cors({
 app.use((req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Frame-Options', 'DENY');
-    res.setHeader('X-XSS-Protection', '1; mode=block');
     res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    res.setHeader('Content-Security-Policy',
+        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none';"
+    );
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+    res.setHeader('X-XSS-Protection', '0');
     next();
 });
 
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '100kb' }));
 
 // --- INICIALIZACIÓN BD ---
 const initDB = async () => {
@@ -277,7 +296,7 @@ app.use('/api/accounting', accountingRoutes);
 app.use('/api', serviceRoutes);
 
 // --- AUTH ROUTE ---
-app.post('/api/auth/login', async (req, res) => {
+app.post('/api/auth/login', authLimiter, async (req, res) => {
   const { usuario, password } = req.body;
   if (!usuario || !password) return res.status(400).json({ error: 'Usuario y contraseña son requeridos' });
 
@@ -341,12 +360,11 @@ app.post('/api/auth/login', async (req, res) => {
       requiresPasswordChange: userRaw.requiresPasswordChange || false
     };
 
-    const REFRESH_SECRET = process.env.REFRESH_SECRET || (JWT_SECRET + '_refresh');
     const token = jwt.sign(userData, JWT_SECRET, { expiresIn: '8h' });
     const refreshToken = jwt.sign(
       { codUsuario: userData.codUsuario, tokenType: 'refresh' },
       REFRESH_SECRET,
-      { expiresIn: '30d' }
+      { expiresIn: '7d' }
     );
     res.json({ token, refreshToken, user: userData });
   } catch (err) {
@@ -395,11 +413,10 @@ async function _registrarIntentoLogin(usuario, exitoso, ip, userAgent) {
     }
 }
 
-app.post('/api/auth/refresh', async (req, res) => {
+app.post('/api/auth/refresh', authLimiter, async (req, res) => {
   const { refreshToken } = req.body;
   if (!refreshToken) return res.status(401).json({ error: 'Refresh token requerido' });
   try {
-    const REFRESH_SECRET = process.env.REFRESH_SECRET || (JWT_SECRET + '_refresh');
     const decoded = jwt.verify(refreshToken, REFRESH_SECRET);
     if (decoded.tokenType !== 'refresh') return res.status(403).json({ error: 'Token inválido' });
 
@@ -468,4 +485,5 @@ app.post('/api/auth/change-password', authenticateToken, async (req, res) => {
 app.use(express.static(path.join(__dirname, 'build')));
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'build', 'index.html')));
 
-app.listen(port, () => console.log(`SmartCloud running on port ${port}`));
+const host = process.env.HOST || '127.0.0.1';
+app.listen(port, host, () => console.log(`SmartCloud running on ${host}:${port}`));

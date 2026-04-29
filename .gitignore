@@ -26,6 +26,11 @@ dist-ssr
 # Build output
 build/
 
+# Variables de entorno — NUNCA subir al repositorio
+.env
+.env.local
+.env.production
+
 # Claude Code (herramienta de desarrollo local, no va al repo)
 .claude/
 .claude-flow/

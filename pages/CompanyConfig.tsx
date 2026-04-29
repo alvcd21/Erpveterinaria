@@ -56,9 +56,24 @@ const CompanyConfig: React.FC = () => {
       Swal.fire('Archivo muy grande', 'El logo debe pesar menos de 500 KB.', 'warning');
       return;
     }
-    const reader = new FileReader();
-    reader.onloadend = () => setConfig(c => ({ ...c, logoBase64: reader.result as string }));
-    reader.readAsDataURL(file);
+    // Verificar magic bytes para confirmar que es imagen real (no SVG con scripts)
+    const headerReader = new FileReader();
+    headerReader.onloadend = () => {
+      const bytes = new Uint8Array(headerReader.result as ArrayBuffer);
+      const isPNG  = bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4E && bytes[3] === 0x47;
+      const isJPEG = bytes[0] === 0xFF && bytes[1] === 0xD8 && bytes[2] === 0xFF;
+      const isWEBP = bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46
+                  && bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50;
+      if (!isPNG && !isJPEG && !isWEBP) {
+        Swal.fire('Formato no permitido', 'Solo se aceptan imágenes PNG, JPEG o WebP.', 'warning');
+        e.target.value = '';
+        return;
+      }
+      const dataReader = new FileReader();
+      dataReader.onloadend = () => setConfig(c => ({ ...c, logoBase64: dataReader.result as string }));
+      dataReader.readAsDataURL(file);
+    };
+    headerReader.readAsArrayBuffer(file.slice(0, 12));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {

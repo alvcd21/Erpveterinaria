@@ -3,7 +3,7 @@ const { Pool } = require('pg');
 
 const pool = new Pool({
   connectionString: process.env.DB_INTERNAL_URL || process.env.DATABASE_URL,
-  ssl: process.env.DB_INTERNAL_URL ? false : { rejectUnauthorized: false },
+  ssl: process.env.DB_INTERNAL_URL ? false : { rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED !== 'false' },
   // Configuración de pool para escalabilidad
   max: 20,
   idleTimeoutMillis: 30000,
@@ -45,7 +45,19 @@ pool.on('error', (err) => {
  * race conditions cuando múltiples requests concurrentes generan IDs.
  * IMPORTANTE: siempre llamar con un `client` de transacción activa.
  */
+const ALLOWED_ID_COMBOS = new Set([
+    'arqueo:idarqueo', 'saldos:idsaldos', 'ingresos:idingreso', 'egresos:idegresos',
+    'usuarios:codusuario', 'roles:idrol', 'caja:idcaja', 'telefonos:codigo',
+    'inventario:codinventario', 'accesorios:codaccesorio', 'categoria:codcategoria',
+    'ubicacion:idubicacion', 'proveedores:codproveedor', 'paquetes:idpaquete',
+    'ventas:codventa', 'detalleventa:coddetalleventa',
+]);
+
 async function generateNextId(table, column, prefix, client = pool) {
+    const key = `${table.toLowerCase()}:${column.toLowerCase()}`;
+    if (!ALLOWED_ID_COMBOS.has(key)) {
+        throw new Error(`generateNextId: combinación no permitida: ${table}/${column}`);
+    }
     const safeTable  = table.replace(/[^a-z_]/gi, '');
     const safeColumn = column.replace(/[^a-z_]/gi, '');
     const safePrefix = prefix.replace(/[^A-Z0-9_]/gi, '');

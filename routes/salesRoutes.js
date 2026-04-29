@@ -123,7 +123,13 @@ router.post('/ventas', authenticateToken, async (req, res) => {
   try {
     const { identidadCliente, tipoCompra, total, detalles, isv, descuento, montoPrima, montoFinanciado } = req.body;
     const { codUsuario } = req.user;
-    
+
+    const toSafeNum = (v) => { const n = parseFloat(v); return isFinite(n) && n >= 0 ? n : null; };
+    const totalNum = toSafeNum(total);
+    if (totalNum === null) return res.status(400).json({ error: 'total debe ser un número positivo' });
+    if (isv !== undefined && toSafeNum(isv) === null) return res.status(400).json({ error: 'isv debe ser un número positivo' });
+    if (descuento !== undefined && toSafeNum(descuento) === null) return res.status(400).json({ error: 'descuento debe ser un número positivo' });
+
     await client.query('BEGIN');
 
     // CORRECCIÓN: Usar idcaja en minúsculas para coincidir con el retorno de PG
@@ -359,7 +365,8 @@ router.put('/ventas/:id/anular', authenticateToken, async (req, res) => {
         if (!spResult) {
             // Fallback manual (SP pendiente de migración)
             await client.query("UPDATE ventas SET estado = 'Anulada', updated_at = NOW(), updated_by = $2 WHERE codVenta = $1", [id, codUsuario]);
-            await client.query("DELETE FROM ingresos WHERE descripcion LIKE $1", [`%FACTURA #${id}%`]);
+            const safeId = id.replace(/%/g, '\\%').replace(/_/g, '\\_');
+            await client.query("DELETE FROM ingresos WHERE descripcion LIKE $1 ESCAPE '\\'", [`%FACTURA #${safeId}%`]);
 
             const details = await client.query('SELECT * FROM detalleventa WHERE idVenta = $1', [id]);
             for (const d of details.rows) {

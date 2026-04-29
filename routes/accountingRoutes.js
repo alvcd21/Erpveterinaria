@@ -7,15 +7,22 @@ const { authenticateToken } = require('../middleware/auth');
 router.get('/audit/transactions', authenticateToken, async (req, res) => {
     try {
         const { date, startDate, endDate } = req.query;
+        const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
         const params = [];
         let whereIngresos = '1=1';
         let whereEgresos = '1=1';
 
         if (startDate && endDate) {
+            if (!DATE_RE.test(startDate) || !DATE_RE.test(endDate)) {
+                return res.status(400).json({ error: 'Formato de fecha inválido. Use YYYY-MM-DD' });
+            }
             whereIngresos = "i.fechaCreacion BETWEEN $1 AND $2";
             whereEgresos = "e.fechaCreacion BETWEEN $1 AND $2";
             params.push(`${startDate} 00:00:00`, `${endDate} 23:59:59`);
         } else if (date) {
+            if (!DATE_RE.test(date)) {
+                return res.status(400).json({ error: 'Formato de fecha inválido. Use YYYY-MM-DD' });
+            }
             whereIngresos = "TO_CHAR(i.fechaCreacion, 'YYYY-MM-DD') = $1";
             whereEgresos = "TO_CHAR(e.fechaCreacion, 'YYYY-MM-DD') = $1";
             params.push(date);

@@ -415,7 +415,11 @@ const LabelDesigner: React.FC = () => {
     if (view !== 'DESIGNER' || !template.name || template.name === 'Nuevo Diseño') return;
     const timer = setTimeout(() => {
       try {
-        localStorage.setItem('ld_autosave', JSON.stringify({ template, savedAt: Date.now() }));
+        const safeTemplate = {
+          ...template,
+          elements: template.elements.map(({ visibilityCondition: _vc, ...el }: typeof template.elements[0] & { visibilityCondition?: unknown }) => el),
+        };
+        localStorage.setItem('ld_autosave', JSON.stringify({ template: safeTemplate, savedAt: Date.now() }));
         setLastAutoSave(new Date());
       } catch { /* ignore if localStorage full */ }
     }, 3000);

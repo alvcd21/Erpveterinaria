@@ -94,6 +94,10 @@ router.put('/inventory/telefonos/:id', authenticateToken, async (req, res) => {
 router.put('/inventory/telefonos/:id/status', authenticateToken, async (req, res) => {
     try {
         const { estado } = req.body;
+        const ESTADOS_TELEFONO = ['Disponible', 'Vendido', 'Consignado', 'Garantia', 'Defectuoso', 'Dado de Baja', 'Reparacion'];
+        if (!ESTADOS_TELEFONO.includes(estado)) {
+            return res.status(400).json({ error: `Estado inválido. Valores permitidos: ${ESTADOS_TELEFONO.join(', ')}` });
+        }
         await pool.query('UPDATE telefonos SET estado = $1 WHERE codigo = $2', [estado, req.params.id]);
         res.json({ message: 'Estado actualizado' });
     } catch(e) { handleDbError(res, e); }

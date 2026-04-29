@@ -129,7 +129,35 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     const response = await fetch(`${API_URL}${endpoint}`, { ...options, headers });
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.error || `Error ${response.status}: ${response.statusText}`);
+      // Si el token expiró, intentar refresh silencioso y reintentar una vez
+      if (response.status === 401 && errorData.code === 'TOKEN_EXPIRED') {
+        const storedRefresh = localStorage.getItem('sc_refresh');
+        if (storedRefresh) {
+          try {
+            const refreshRes = await fetch('/api/auth/refresh', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ refreshToken: storedRefresh }),
+            });
+            if (refreshRes.ok) {
+              const refreshData = await refreshRes.json();
+              localStorage.setItem('sc_token', refreshData.token);
+              localStorage.setItem('sc_user', JSON.stringify(refreshData.user));
+              window.dispatchEvent(new CustomEvent('smartcloud:token-refreshed', { detail: refreshData }));
+              // Reintentar con el nuevo token
+              const retryHeaders = { ...headers, 'Authorization': `Bearer ${refreshData.token}` };
+              const retryResponse = await fetch(`${API_URL}${endpoint}`, { ...options, headers: retryHeaders });
+              if (retryResponse.ok) return retryResponse.json() as T;
+            }
+          } catch { /* si falla el refresh, continuar al throw original */ }
+        }
+      }
+      // No exponer detalles internos de errores 5xx al cliente
+      if (response.status >= 500) {
+        console.error('[API Error]', endpoint, errorData);
+        throw new Error('Error interno del servidor. Por favor contacte al administrador.');
+      }
+      throw new Error(errorData.error || `Error ${response.status}`);
     }
     const data = await response.json();
     // Cachear respuestas GET en IndexedDB para uso offline

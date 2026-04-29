@@ -217,6 +217,7 @@ const PreviewModal: React.FC<PreviewModalProps> = ({ template, onClose }) => {
               <iframe
                 ref={iframeRef}
                 srcDoc={previewHtml}
+                sandbox="allow-same-origin"
                 className="bg-white shadow-xl rounded"
                 style={{ border: 'none', width: `${pageW}px`, height: `${pageH}px`, display: 'block', margin: '0 auto' }}
                 title="Vista previa de la plantilla"

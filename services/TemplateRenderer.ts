@@ -8,6 +8,44 @@ import { getLogoSync } from './logoLoader';
 const MM_TO_PX = 3.7795;
 const CM_TO_PX = 37.795;
 
+// ─── Security helpers ─────────────────────────────────────────────────────────
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function parseConditionOperand(s: string): string {
+  if ((s.startsWith("'") && s.endsWith("'")) || (s.startsWith('"') && s.endsWith('"'))) {
+    return s.slice(1, -1);
+  }
+  return s;
+}
+
+function safeEvaluateCondition(expr: string): boolean {
+  const e = expr.trim();
+  if (e === 'true') return true;
+  if (e === 'false') return false;
+  const m = e.match(/^(.+?)\s*(===|!==|==|!=|>=|<=|>|<)\s*(.+)$/);
+  if (!m) return true;
+  const lv = parseConditionOperand(m[1].trim());
+  const op = m[2];
+  const rv = parseConditionOperand(m[3].trim());
+  if (op === '==' || op === '===') return lv === rv;
+  if (op === '!=' || op === '!==') return lv !== rv;
+  const ln = Number(lv), rn = Number(rv);
+  if (isNaN(ln) || isNaN(rn)) return true;
+  if (op === '>') return ln > rn;
+  if (op === '<') return ln < rn;
+  if (op === '>=') return ln >= rn;
+  if (op === '<=') return ln <= rn;
+  return true;
+}
+
 // ─── Data context passed to the renderer ─────────────────────────────────────
 export interface PrintDataContext {
   empresa?: Partial<EmpresaConfig>;
@@ -178,12 +216,8 @@ function elementToHTML(
 ): string {
   // Evaluate visibilityCondition if present
   if (el.visibilityCondition) {
-    try {
-      const expr = resolveContent(el.visibilityCondition, ctx);
-      // Simple evaluation: replace == with === and eval
-      const result = Function('"use strict"; return (' + expr.replace(/==/g, '===').replace(/!=/g, '!==') + ')')();
-      if (!result) return '';
-    } catch { /* if eval fails, show the element */ }
+    const expr = resolveContent(el.visibilityCondition, ctx);
+    if (!safeEvaluateCondition(expr)) return '';
   }
 
   const left = el.x * scale;
@@ -210,7 +244,7 @@ function elementToHTML(
       `background-color:${el.backgroundColor || 'transparent'};` +
       `width:100%;height:100%;display:flex;align-items:center;padding:0 2px;` +
       `justify-content:${justifyMap[el.textAlign || 'left'] || 'flex-start'};`;
-    return `<div style="${base}"><div style="${inner}">${resolved}</div></div>`;
+    return `<div style="${base}"><div style="${inner}">${escapeHtml(resolved)}</div></div>`;
   }
 
   // ── SHAPE ────────────────────────────────────────────────────────────────
@@ -244,10 +278,12 @@ function elementToHTML(
 
   // ── IMAGE ────────────────────────────────────────────────────────────────
   if (el.type === 'IMAGE') {
-    // Resolve variable references (e.g. {{empresa.logoBase64}})
     const imgSrc = /\{\{/.test(el.content || '') ? resolveContent(el.content || '', ctx) : (el.content || '');
-    if (!imgSrc || /\{\{/.test(imgSrc)) return ''; // unresolved variable → skip
-    return `<div style="${base}"><img src="${imgSrc}" style="width:100%;height:100%;object-fit:${el.imageObjectFit || 'contain'};" /></div>`;
+    if (!imgSrc || /\{\{/.test(imgSrc)) return '';
+    // Solo permitir data URIs y rutas relativas (bloquear URLs externas arbitrarias)
+    const safeSrc = /^(data:|\/|\.\/|\.\.\/)/i.test(imgSrc) ? imgSrc : '';
+    if (!safeSrc) return '';
+    return `<div style="${base}"><img src="${escapeHtml(safeSrc)}" style="width:100%;height:100%;object-fit:${el.imageObjectFit || 'contain'};" /></div>`;
   }
 
   // ── COMPANY_HEADER ────────────────────────────────────────────────────────
@@ -262,10 +298,10 @@ function elementToHTML(
         : '';
 
       const companyInfo =
-        `<div style="font-weight:bold;font-size:${fs + 4}pt;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:0.5px;">${emp.nombreEmpresa || 'EMPRESA'}</div>` +
-        (el.companyShowRTN !== false && emp.rtn ? `<div style="font-size:${fs}pt;color:rgba(255,255,255,0.88);">RTN: ${emp.rtn}</div>` : '') +
-        (emp.direccion ? `<div style="font-size:${fs}pt;color:rgba(255,255,255,0.88);">${emp.direccion}</div>` : '') +
-        (el.companyShowPhone !== false && emp.telefono ? `<div style="font-size:${fs}pt;color:rgba(255,255,255,0.88);">Tel: ${emp.telefono}${el.companyShowEmail && emp.correo ? ' | ' + emp.correo : ''}</div>` : '');
+        `<div style="font-weight:bold;font-size:${fs + 4}pt;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:0.5px;">${escapeHtml(emp.nombreEmpresa || 'EMPRESA')}</div>` +
+        (el.companyShowRTN !== false && emp.rtn ? `<div style="font-size:${fs}pt;color:rgba(255,255,255,0.88);">RTN: ${escapeHtml(String(emp.rtn))}</div>` : '') +
+        (emp.direccion ? `<div style="font-size:${fs}pt;color:rgba(255,255,255,0.88);">${escapeHtml(String(emp.direccion))}</div>` : '') +
+        (el.companyShowPhone !== false && emp.telefono ? `<div style="font-size:${fs}pt;color:rgba(255,255,255,0.88);">Tel: ${escapeHtml(String(emp.telefono))}${el.companyShowEmail && emp.correo ? ' | ' + escapeHtml(String(emp.correo)) : ''}</div>` : '');
 
       const docTitle = el.companyDocTitle || '';
       const titleHtml = docTitle
@@ -288,11 +324,11 @@ function elementToHTML(
     const align = el.companyAlign || 'center';
     const col   = el.color || '#000000';
     const inner =
-      `<div style="font-weight:bold;font-size:${fs + 2}pt;color:${col};">${emp.nombreEmpresa || ''}</div>` +
-      (el.companyShowRTN !== false && emp.rtn ? `<div style="font-size:${fs}pt;color:${col};">RTN: ${emp.rtn}</div>` : '') +
-      (emp.direccion ? `<div style="font-size:${fs}pt;color:${col};">${emp.direccion}</div>` : '') +
-      (el.companyShowPhone !== false && emp.telefono ? `<div style="font-size:${fs}pt;color:${col};">Tel: ${emp.telefono}</div>` : '') +
-      (el.companyShowEmail && emp.correo ? `<div style="font-size:${fs}pt;color:${col};">${emp.correo}</div>` : '');
+      `<div style="font-weight:bold;font-size:${fs + 2}pt;color:${col};">${escapeHtml(emp.nombreEmpresa || '')}</div>` +
+      (el.companyShowRTN !== false && emp.rtn ? `<div style="font-size:${fs}pt;color:${col};">RTN: ${escapeHtml(String(emp.rtn))}</div>` : '') +
+      (emp.direccion ? `<div style="font-size:${fs}pt;color:${col};">${escapeHtml(String(emp.direccion))}</div>` : '') +
+      (el.companyShowPhone !== false && emp.telefono ? `<div style="font-size:${fs}pt;color:${col};">Tel: ${escapeHtml(String(emp.telefono))}</div>` : '') +
+      (el.companyShowEmail && emp.correo ? `<div style="font-size:${fs}pt;color:${col};">${escapeHtml(String(emp.correo))}</div>` : '');
     return `<div style="${base}text-align:${align};line-height:1.5;padding:2px;">${inner}</div>`;
   }
 
@@ -309,8 +345,8 @@ function elementToHTML(
       const formatted = formatValue(resolved, row.format);
       return sepLine +
         `<div style="display:flex;justify-content:space-between;padding:1px 4px;font-weight:${row.bold ? 'bold' : 'normal'};font-size:${fSize}pt;">` +
-        `<span style="color:${lCol};">${row.label}</span>` +
-        `<span style="color:${vCol};font-family:monospace;">${formatted}</span>` +
+        `<span style="color:${lCol};">${escapeHtml(row.label)}</span>` +
+        `<span style="color:${vCol};font-family:monospace;">${escapeHtml(formatted)}</span>` +
         `</div>`;
     }).join('');
     return `<div style="${base}background-color:${bgCol};">${rowsHTML}</div>`;
@@ -343,7 +379,7 @@ function elementToHTML(
     const altBg = el.tableAlternateBg || '#f8fafc';
 
     const thCells = cols.map(col =>
-      `<th style="width:${col.widthPct}%;text-align:${col.align};padding:2px 4px;font-size:${fSize}px;font-weight:bold;overflow:hidden;border-right:1px solid rgba(255,255,255,0.2);">${col.header}</th>`
+      `<th style="width:${col.widthPct}%;text-align:${col.align};padding:2px 4px;font-size:${fSize}px;font-weight:bold;overflow:hidden;border-right:1px solid rgba(255,255,255,0.2);">${escapeHtml(col.header)}</th>`
     ).join('');
 
     const rows = tableItems && tableItems.length > 0
@@ -353,7 +389,7 @@ function elementToHTML(
             const fieldMatch = col.field.match(/\{\{item\.([^}]+)\}\}/);
             const rawVal    = fieldMatch ? String(item[fieldMatch[1]] ?? '') : resolveContent(col.field, ctx);
             const formatted = formatValue(rawVal, col.format);
-            return `<td style="width:${col.widthPct}%;text-align:${col.align};padding:2px 4px;font-size:${fSize}px;overflow:hidden;">${formatted}</td>`;
+            return `<td style="width:${col.widthPct}%;text-align:${col.align};padding:2px 4px;font-size:${fSize}px;overflow:hidden;">${escapeHtml(formatted)}</td>`;
           }).join('');
           return `<tr style="background-color:${bg};border-top:1px solid #e2e8f0;">${tdCells}</tr>`;
         }).join('')

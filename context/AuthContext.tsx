@@ -90,6 +90,31 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   }, []);
 
+  // Sincronizar estado cuando api.ts renueva el token por intercepción de 401
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { token: newToken, user: newUser } = (e as CustomEvent).detail;
+      if (newToken && newUser) applySession(newToken, newUser);
+    };
+    window.addEventListener('smartcloud:token-refreshed', handler);
+    return () => window.removeEventListener('smartcloud:token-refreshed', handler);
+  }, []);
+
+  // Renovar token proactivamente cada 15 minutos si queda menos de 60 minutos
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      const storedToken = localStorage.getItem(KEYS.token);
+      if (!storedToken) return;
+      const payload = decodeJWTPayload(storedToken);
+      if (!payload?.exp) return;
+      const minutesLeft = (payload.exp * 1000 - Date.now()) / 60000;
+      if (minutesLeft < 60) {
+        await silentRefresh();
+      }
+    }, 15 * 60 * 1000); // cada 15 minutos
+    return () => clearInterval(interval);
+  }, [silentRefresh]);
+
   // Restaurar sesión al montar — espera a resolver antes de renderizar rutas protegidas
   useEffect(() => {
     // Migrar keys viejas si existen

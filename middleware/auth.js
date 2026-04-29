@@ -1,11 +1,18 @@
 
 const jwt = require('jsonwebtoken');
 
-// Advertir en arranque si se usa el secreto por defecto (solo en desarrollo)
-const JWT_SECRET = process.env.JWT_SECRET || 'smartcloud_secret_key_CHANGE_IN_PRODUCTION';
-if (!process.env.JWT_SECRET) {
-    console.warn('[SECURITY WARNING] JWT_SECRET no está configurado. Usando valor por defecto. Configure la variable de entorno en producción.');
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+    console.error('[FATAL] JWT_SECRET no está configurado. El servidor no puede arrancar de forma segura.');
+    process.exit(1);
 }
+
+const requireAdmin = (req, res, next) => {
+    if (!req.user || (req.user.rol !== 'Administrador' && req.user.rol !== 'Admin')) {
+        return res.status(403).json({ error: 'Acceso denegado: se requiere rol de administrador' });
+    }
+    next();
+};
 
 const authenticateToken = (req, res, next) => {
     const authHeader = req.headers['authorization'];
@@ -26,4 +33,4 @@ const authenticateToken = (req, res, next) => {
     });
 };
 
-module.exports = { authenticateToken, JWT_SECRET };
+module.exports = { authenticateToken, requireAdmin, JWT_SECRET };

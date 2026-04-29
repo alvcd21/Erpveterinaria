@@ -411,7 +411,9 @@ router.put('/notificaciones/leer-todas', authenticateToken, async (req, res) => 
 router.get('/kardex/:tipo/:cod', authenticateToken, async (req, res) => {
     try {
         const { tipo, cod } = req.params;
-        const campo = tipo === 'TELEFONO' ? 'cod_telefono' : 'cod_inventario';
+        const TIPO_MAP = { TELEFONO: 'cod_telefono', ACCESORIO: 'cod_inventario' };
+        const campo = TIPO_MAP[tipo];
+        if (!campo) return res.status(400).json({ error: 'tipo inválido. Use TELEFONO o ACCESORIO' });
         const r = await pool.query(`
             SELECT id, tipo_producto as "tipoProducto", tipo_movimiento as "tipoMovimiento",
                    cantidad, precio_costo as "precioCosto", precio_venta as "precioVenta",

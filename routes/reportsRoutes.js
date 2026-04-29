@@ -6,12 +6,24 @@ const { authenticateToken } = require('../middleware/auth');
 
 // Helper: convierte "YYYY-MM-DD" a timestamps para BETWEEN
 const toRange = (start, end) => [`${start} 00:00:00`, `${end} 23:59:59`];
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const validateDates = (res, startDate, endDate) => {
+    if (!startDate || !endDate) { res.status(400).json({ error: 'startDate y endDate requeridos' }); return false; }
+    if (!DATE_RE.test(startDate) || !DATE_RE.test(endDate)) { res.status(400).json({ error: 'Formato de fecha inválido. Use YYYY-MM-DD' }); return false; }
+    return true;
+};
+const validateYear = (res, year) => {
+    const y = parseInt(year, 10);
+    if (isNaN(y) || y < 2000 || y > 2100) { res.status(400).json({ error: 'Año inválido' }); return null; }
+    return y;
+};
 
 // --- 1. TENDENCIA DE VENTAS (Gráfico Mensual) ---
 router.get('/reports/sales-trend', authenticateToken, async (req, res) => {
     try {
         const { year } = req.query;
-        // FIX: TRIM elimina los espacios que PostgreSQL añade en TO_CHAR('Month')
+        const y = validateYear(res, year || new Date().getFullYear());
+        if (y === null) return;
         const query = `
             SELECT
                 TRIM(TO_CHAR(fecha, 'Month')) as mes,
@@ -23,7 +35,7 @@ router.get('/reports/sales-trend', authenticateToken, async (req, res) => {
             GROUP BY 1, 2
             ORDER BY 2
         `;
-        const result = await pool.query(query, [year || new Date().getFullYear()]);
+        const result = await pool.query(query, [y]);
         res.json(result.rows);
     } catch(e) { handleDbError(res, e); }
 });
@@ -32,6 +44,7 @@ router.get('/reports/sales-trend', authenticateToken, async (req, res) => {
 router.get('/reports/top-products', authenticateToken, async (req, res) => {
     try {
         const { startDate, endDate } = req.query;
+        if (!validateDates(res, startDate, endDate)) return;
         const [start, end] = toRange(startDate, endDate);
         // FIX: dv.idAccesorio → inventario.codInventario → accesorios (no directo)
         const query = `
@@ -63,6 +76,8 @@ router.get('/reports/top-products', authenticateToken, async (req, res) => {
 router.get('/reports/recharges-profit', authenticateToken, async (req, res) => {
     try {
         const { year } = req.query;
+        const y = validateYear(res, year || new Date().getFullYear());
+        if (y === null) return;
         // FIX: ingresos no tiene columna 'red'. Se extrae del inicio de descripcion.
         const query = `
             SELECT
@@ -81,7 +96,7 @@ router.get('/reports/recharges-profit', authenticateToken, async (req, res) => {
             GROUP BY 1, 2, 3
             ORDER BY 3
         `;
-        const result = await pool.query(query, [year || new Date().getFullYear()]);
+        const result = await pool.query(query, [y]);
         res.json(result.rows);
     } catch(e) { handleDbError(res, e); }
 });
@@ -111,6 +126,7 @@ router.get('/reports/inventory-valuation', authenticateToken, async (req, res) =
 router.get('/reports/top-clients', authenticateToken, async (req, res) => {
     try {
         const { startDate, endDate } = req.query;
+        if (!validateDates(res, startDate, endDate)) return;
         const [start, end] = toRange(startDate, endDate);
         const query = `
             SELECT
@@ -135,6 +151,7 @@ router.get('/reports/top-clients', authenticateToken, async (req, res) => {
 router.get('/reports/daily-sales', authenticateToken, async (req, res) => {
     try {
         const { startDate, endDate } = req.query;
+        if (!validateDates(res, startDate, endDate)) return;
         const [start, end] = toRange(startDate, endDate);
         // FIX: timestamps correctos + nombre real del vendedor
         const query = `
@@ -159,6 +176,7 @@ router.get('/reports/daily-sales', authenticateToken, async (req, res) => {
 router.get('/reports/kpi-summary', authenticateToken, async (req, res) => {
     try {
         const { startDate, endDate } = req.query;
+        if (!validateDates(res, startDate, endDate)) return;
         const [start, end] = toRange(startDate, endDate);
 
         const [ventasRow, ingresosRow, egresosRow, recargasRow] = await Promise.all([
@@ -196,6 +214,7 @@ router.get('/reports/kpi-summary', authenticateToken, async (req, res) => {
 router.get('/reports/sales-by-seller', authenticateToken, async (req, res) => {
     try {
         const { startDate, endDate } = req.query;
+        if (!validateDates(res, startDate, endDate)) return;
         const [start, end] = toRange(startDate, endDate);
         const query = `
             SELECT
