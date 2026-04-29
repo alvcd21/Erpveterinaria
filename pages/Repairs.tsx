@@ -1,6 +1,13 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { RepairService, InventoryService, ClientService, ConfigService } from '../services/api';
+
+// Temporary stub — will be replaced once AIService is exported from api.ts
+const AIService = {
+  diagnoseRepair: async (d: any) => { const r = await fetch('/api/ai/repair-diagnosis', {method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${localStorage.getItem('smartcloud_token')}`},body:JSON.stringify(d)}); return r.json(); },
+  analyzeClient: async (id: any) => { const r = await fetch('/api/ai/client-analysis', {method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${localStorage.getItem('smartcloud_token')}`},body:JSON.stringify({idCliente:id})}); return r.json(); },
+  suggestPrice: async (m: any, p: any) => { const r = await fetch('/api/ai/price-suggestion', {method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${localStorage.getItem('smartcloud_token')}`},body:JSON.stringify({modelo:m,precioCompra:p})}); return r.json(); },
+};
 import { useOfflineSync } from '../hooks/useOfflineSync';
 import { downloadRepairOrderPDF } from '../services/DocumentService';
 import { Reparacion, Telefono, Cliente } from '../types';
@@ -38,6 +45,9 @@ const Repairs: React.FC = () => {
   });
 
   const [selectedComplementos, setSelectedComplementos] = useState<string[]>([]);
+  const [aiDiag, setAiDiag] = useState<any>(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiDiagOpen, setAiDiagOpen] = useState(true);
 
   useEffect(() => { loadData(); loadDependencies(); }, []);
 
@@ -76,10 +86,24 @@ const Repairs: React.FC = () => {
       );
   };
 
+  const handleAiDiagnose = async () => {
+    setAiLoading(true);
+    setAiDiag(null);
+    try {
+      const result = await AIService.diagnoseRepair({ deviceDesc: `${form.marca} ${form.modelo}`, issueDescription: form.descripcion_falla });
+      setAiDiag(result?.error ? { error: true } : result);
+    } catch {
+      setAiDiag({ error: true });
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
   const openNew = () => {
       setIsEditing(false);
       setCurrentId(null);
       setSelectedComplementos([]);
+      setAiDiag(null);
       setForm({
           estado_reparacion: 'Pendiente',
           pago_tecnico_estado: 'Pendiente',
@@ -101,6 +125,7 @@ const Repairs: React.FC = () => {
       setCurrentId(r.id_reparacion);
       const comps = r.complementos ? r.complementos.split(', ') : [];
       setSelectedComplementos(comps);
+      setAiDiag(null);
       setForm(r);
       setShowModal(true);
   };
@@ -320,6 +345,57 @@ const Repairs: React.FC = () => {
                                 <label className="text-[10px] font-black text-slate-400 uppercase mb-1 block ml-1">Falla Reportada</label>
                                 <textarea required className="w-full p-3 bg-white border border-slate-200 rounded-2xl text-sm outline-none focus:ring-2 focus:ring-indigo-500/20" value={form.descripcion_falla || ''} onChange={e => setForm({...form, descripcion_falla: e.target.value})} rows={2} placeholder="Describa el problema..." />
                             </div>
+                            {/* AI DIAGNOSIS PANEL */}
+                            {form.marca && form.modelo && form.descripcion_falla && (
+                              <div className="mt-2">
+                                <button type="button" onClick={handleAiDiagnose} disabled={aiLoading} className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white text-xs font-black rounded-xl shadow-md shadow-indigo-600/20 transition-all active:scale-95">
+                                  {aiLoading ? <span className="inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"/> : '🤖'}
+                                  {aiLoading ? 'Analizando...' : 'Analizar con IA'}
+                                </button>
+                                {aiDiag && (
+                                  <div className="mt-3 bg-gradient-to-br from-indigo-50 to-purple-50 border border-indigo-200 rounded-2xl overflow-hidden">
+                                    <button type="button" onClick={() => setAiDiagOpen(o => !o)} className="w-full flex justify-between items-center px-4 py-3 text-xs font-black text-indigo-700 uppercase tracking-widest hover:bg-indigo-100/50 transition-colors">
+                                      <span>Diagnóstico IA</span>
+                                      <span>{aiDiagOpen ? '▲' : '▼'}</span>
+                                    </button>
+                                    {aiDiagOpen && (
+                                      aiDiag.error ? (
+                                        <p className="px-4 pb-4 text-xs text-slate-500 italic">IA no disponible en este momento.</p>
+                                      ) : (
+                                        <div className="px-4 pb-4 space-y-3">
+                                          {aiDiag.causasProbables?.length > 0 && (
+                                            <div>
+                                              <p className="text-[10px] font-black text-purple-700 uppercase mb-1">Causas probables</p>
+                                              <ul className="list-disc list-inside space-y-0.5">{aiDiag.causasProbables.map((c: string, i: number) => <li key={i} className="text-xs text-slate-700">{c}</li>)}</ul>
+                                            </div>
+                                          )}
+                                          {aiDiag.partesNecesarias?.length > 0 && (
+                                            <div>
+                                              <p className="text-[10px] font-black text-purple-700 uppercase mb-1">Partes necesarias</p>
+                                              <div className="flex flex-wrap gap-1">{aiDiag.partesNecesarias.map((p: string, i: number) => <span key={i} className="bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full text-[10px] font-bold">{p}</span>)}</div>
+                                            </div>
+                                          )}
+                                          {aiDiag.tiempoEstimado && (
+                                            <div className="flex items-center gap-2">
+                                              <p className="text-[10px] font-black text-purple-700 uppercase">Tiempo estimado:</p>
+                                              <span className="bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full text-[10px] font-bold">{aiDiag.tiempoEstimado}</span>
+                                            </div>
+                                          )}
+                                          {aiDiag.precioSugerido && (
+                                            <div className="flex items-center gap-3 flex-wrap">
+                                              <p className="text-[10px] font-black text-purple-700 uppercase">Precio sugerido:</p>
+                                              <span className="text-sm font-black text-indigo-700">L.{aiDiag.precioSugerido.min} - L.{aiDiag.precioSugerido.max}</span>
+                                              <button type="button" onClick={() => setForm(f => ({...f, precio_cliente: aiDiag.precioSugerido.max}))} className="text-[10px] px-2 py-1 bg-emerald-500 hover:bg-emerald-600 text-white font-black rounded-lg transition-all">Usar este precio</button>
+                                            </div>
+                                          )}
+                                          {aiDiag.observaciones && <p className="text-[10px] text-slate-500 italic border-t border-indigo-100 pt-2">{aiDiag.observaciones}</p>}
+                                        </div>
+                                      )
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            )}
                             <div>
                                 <label className="text-[10px] font-black text-slate-400 uppercase mb-2 block ml-1">Artículos Adicionales</label>
                                 <div className="flex flex-wrap gap-2">

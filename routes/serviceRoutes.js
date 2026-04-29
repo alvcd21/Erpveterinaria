@@ -3,6 +3,7 @@ const express = require('express');
 const router = express.Router();
 const { pool, generateNextId, handleDbError, updateArqueoBalance, getLocalTimestamp } = require('../config/db');
 const { authenticateToken } = require('../middleware/auth');
+const { sendRepairReadyEmail } = require('../services/emailService');
 
 // --- REPARACIONES ---
 router.get('/reparaciones', authenticateToken, async (req, res) => {
@@ -45,7 +46,34 @@ router.put('/reparaciones/:id', authenticateToken, async (req, res) => {
 
 router.put('/reparaciones/:id/estado', authenticateToken, async (req, res) => {
     try {
-        await pool.query('UPDATE reparaciones SET estado_reparacion=$1 WHERE id_reparacion=$2', [req.body.estado, req.params.id]);
+        const { estado } = req.body;
+        await pool.query('UPDATE reparaciones SET estado_reparacion=$1 WHERE id_reparacion=$2', [estado, req.params.id]);
+
+        // Enviar email al cliente cuando la reparación está lista para retirar
+        if (estado === 'Lista para Retirar' || estado === 'Listo') {
+            try {
+                const repRes = await pool.query(`
+                    SELECT r.id_reparacion, r.marca, r.modelo, r.descripcion_falla,
+                           c.nombre, c.apellido, c.email
+                    FROM reparaciones r
+                    LEFT JOIN clientes c ON r.identidad_cliente = c.identidad
+                    WHERE r.id_reparacion = $1
+                `, [req.params.id]);
+                const rep = repRes.rows[0];
+                if (rep?.email) {
+                    await sendRepairReadyEmail(
+                        rep.email,
+                        `${rep.nombre} ${rep.apellido}`,
+                        req.params.id,
+                        `${rep.marca} ${rep.modelo}`,
+                        rep.descripcion_falla
+                    );
+                }
+            } catch (emailErr) {
+                console.error('[EMAIL] Error enviando notificación de reparación lista:', emailErr.message);
+            }
+        }
+
         res.json({ message: 'OK' });
     } catch(e) { handleDbError(res, e); }
 });

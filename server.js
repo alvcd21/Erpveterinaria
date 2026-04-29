@@ -1,5 +1,6 @@
 
 require('dotenv').config();
+const { startCronJobs } = require('./services/cronJobs');
 const express = require('express');
 const path = require('path');
 const cors = require('cors');
@@ -26,6 +27,8 @@ const reportsRoutes = require('./routes/reportsRoutes');
 const labelRoutes = require('./routes/labelRoutes');
 const accountingRoutes = require('./routes/accountingRoutes');
 const serviceRoutes = require('./routes/serviceRoutes');
+const notifRoutes = require('./routes/notificationRoutes');
+const aiRoutes = require('./routes/aiRoutes');
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -294,6 +297,8 @@ app.use('/api', reportsRoutes);
 app.use('/api', labelRoutes); 
 app.use('/api/accounting', accountingRoutes);
 app.use('/api', serviceRoutes);
+app.use('/api', notifRoutes);
+app.use('/api', aiRoutes);
 
 // --- AUTH ROUTE ---
 app.post('/api/auth/login', authLimiter, async (req, res) => {
@@ -486,4 +491,8 @@ app.use(express.static(path.join(__dirname, 'build')));
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'build', 'index.html')));
 
 const host = process.env.NODE_ENV === 'production' ? '0.0.0.0' : (process.env.HOST || '127.0.0.1');
-app.listen(port, host, () => console.log(`SmartCloud running on ${host}:${port}`));
+app.listen(port, host, () => {
+    console.log(`SmartCloud running on ${host}:${port}`);
+    startCronJobs();
+    console.log('[server] Cron jobs iniciados.');
+});

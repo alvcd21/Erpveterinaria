@@ -1,6 +1,13 @@
 
 import React, { useState, useEffect } from 'react';
 import { ClientService } from '../services/api';
+
+// Temporary stub — will be replaced once AIService is exported from api.ts
+const AIService = {
+  diagnoseRepair: async (d: any) => { const r = await fetch('/api/ai/repair-diagnosis', {method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${localStorage.getItem('smartcloud_token')}`},body:JSON.stringify(d)}); return r.json(); },
+  analyzeClient: async (id: any) => { const r = await fetch('/api/ai/client-analysis', {method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${localStorage.getItem('smartcloud_token')}`},body:JSON.stringify({idCliente:id})}); return r.json(); },
+  suggestPrice: async (m: any, p: any) => { const r = await fetch('/api/ai/price-suggestion', {method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${localStorage.getItem('smartcloud_token')}`},body:JSON.stringify({modelo:m,precioCompra:p})}); return r.json(); },
+};
 import { Cliente } from '../types';
 import { useOfflineSync } from '../hooks/useOfflineSync';
 import { Search, PlusCircle, Users, Edit2, Trash2, X, RefreshCw } from 'lucide-react';
@@ -15,6 +22,23 @@ const Clients: React.FC = () => {
   const [showModal, setShowModal] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [form, setForm] = useState<Partial<Cliente>>({});
+
+  // AI State
+  const [clientAI, setClientAI] = useState<{[key: string]: any}>({});
+  const [clientAILoading, setClientAILoading] = useState<string | null>(null);
+
+  const handleAIAnalyze = async (identidad: string) => {
+    if (clientAI[identidad] || clientAILoading === identidad) return;
+    setClientAILoading(identidad);
+    try {
+      const result = await AIService.analyzeClient(identidad);
+      setClientAI(prev => ({ ...prev, [identidad]: result?.error ? { error: true } : result }));
+    } catch {
+      setClientAI(prev => ({ ...prev, [identidad]: { error: true } }));
+    } finally {
+      setClientAILoading(null);
+    }
+  };
 
   useEffect(() => {
     loadClients();
@@ -147,17 +171,61 @@ const Clients: React.FC = () => {
               {loading ? (
                  <tr><td colSpan={6} className="p-8 text-center text-slate-500">Cargando...</td></tr>
               ) : filteredClients.map(c => (
-                <tr key={c.identidad} className="hover:bg-slate-50">
-                  <td className="p-4 font-mono text-slate-600 font-bold">{c.identidad}</td>
-                  <td className="p-4 text-slate-800 font-medium">{c.nombre} {c.apellido}</td>
-                  <td className="p-4 text-sm text-slate-500 truncate max-w-[200px]">{c.direccion}</td>
-                  <td className="p-4 text-sm font-mono text-slate-600">{c.telefono}</td>
-                  <td className="p-4 text-sm text-blue-600">{c.correo}</td>
-                  <td className="p-4 text-center flex justify-center gap-2">
-                    <button onClick={() => openEditModal(c)} className="text-blue-500 hover:bg-blue-50 p-1.5 rounded"><Edit2 size={16}/></button>
-                    <button onClick={() => handleDelete(c.identidad)} className="text-red-500 hover:bg-red-50 p-1.5 rounded"><Trash2 size={16}/></button>
-                  </td>
-                </tr>
+                <React.Fragment key={c.identidad}>
+                  <tr className="hover:bg-slate-50">
+                    <td className="p-4 font-mono text-slate-600 font-bold">{c.identidad}</td>
+                    <td className="p-4 text-slate-800 font-medium">{c.nombre} {c.apellido}</td>
+                    <td className="p-4 text-sm text-slate-500 truncate max-w-[200px]">{c.direccion}</td>
+                    <td className="p-4 text-sm font-mono text-slate-600">{c.telefono}</td>
+                    <td className="p-4 text-sm text-blue-600">{c.correo}</td>
+                    <td className="p-4 text-center">
+                      <div className="flex justify-center gap-2">
+                        <button onClick={() => handleAIAnalyze(c.identidad)} disabled={clientAILoading === c.identidad} title="Análisis IA" className="text-[10px] font-black px-2 py-1 rounded-lg bg-indigo-50 text-indigo-600 hover:bg-indigo-100 disabled:opacity-50 transition-all border border-indigo-100 flex items-center gap-1">
+                          {clientAILoading === c.identidad ? <span className="inline-block w-2.5 h-2.5 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"/> : '🤖'}
+                          IA
+                        </button>
+                        <button onClick={() => openEditModal(c)} className="text-blue-500 hover:bg-blue-50 p-1.5 rounded"><Edit2 size={16}/></button>
+                        <button onClick={() => handleDelete(c.identidad)} className="text-red-500 hover:bg-red-50 p-1.5 rounded"><Trash2 size={16}/></button>
+                      </div>
+                    </td>
+                  </tr>
+                  {clientAI[c.identidad] && (
+                    <tr className="bg-indigo-50/40">
+                      <td colSpan={6} className="px-6 pb-4 pt-0">
+                        {clientAI[c.identidad].error ? (
+                          <p className="text-xs text-slate-400 italic py-2">IA no disponible para este cliente.</p>
+                        ) : (
+                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 py-3">
+                            {clientAI[c.identidad].perfilCliente && (
+                              <div className="bg-white rounded-xl p-3 border border-indigo-100 shadow-sm">
+                                <p className="text-[9px] font-black text-indigo-500 uppercase mb-1">Perfil</p>
+                                <p className="text-xs font-bold text-slate-700">{clientAI[c.identidad].perfilCliente}</p>
+                              </div>
+                            )}
+                            {clientAI[c.identidad].resumen && (
+                              <div className="bg-white rounded-xl p-3 border border-indigo-100 shadow-sm md:col-span-1">
+                                <p className="text-[9px] font-black text-indigo-500 uppercase mb-1">Resumen</p>
+                                <p className="text-xs text-slate-600 leading-relaxed">{clientAI[c.identidad].resumen}</p>
+                              </div>
+                            )}
+                            {clientAI[c.identidad].sugerenciaAccion && (
+                              <div className="bg-amber-50 rounded-xl p-3 border border-amber-200 shadow-sm">
+                                <p className="text-[9px] font-black text-amber-600 uppercase mb-1">Accion sugerida</p>
+                                <p className="text-xs font-bold text-amber-800">{clientAI[c.identidad].sugerenciaAccion}</p>
+                              </div>
+                            )}
+                            {clientAI[c.identidad].valorEstimadoFuturo != null && (
+                              <div className="bg-white rounded-xl p-3 border border-emerald-100 shadow-sm flex flex-col justify-center items-start">
+                                <p className="text-[9px] font-black text-emerald-600 uppercase mb-1">Valor futuro est.</p>
+                                <span className="text-sm font-black text-emerald-700">L. {Number(clientAI[c.identidad].valorEstimadoFuturo).toLocaleString()}</span>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
               ))}
             </tbody>
           </table>

@@ -367,3 +367,16 @@ export const AccountingService = {
   deleteSocio: (id: number) => request(`/accounting/socios/${id}`, { method: 'DELETE' }),
   updateAuditTransaction: (tipo: string, id: string, data: any) => request(`/accounting/audit/transactions/${tipo}/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
 };
+
+export const AIService = {
+  diagnoseRepair: (data: { repairId?: string; deviceDesc: string; issueDescription: string }) =>
+    request<any>('/ai/repair-diagnosis', { method: 'POST', body: JSON.stringify(data) }),
+  analyzeClient: (idCliente: string) =>
+    request<any>('/ai/client-analysis', { method: 'POST', body: JSON.stringify({ idCliente }) }),
+  suggestPrice: (modelo: string, precioCompra: number) =>
+    request<any>('/ai/price-suggestion', { method: 'POST', body: JSON.stringify({ modelo, precioCompra }) }),
+  checkAnomaly: (idArqueo: string) =>
+    request<any>(`/ai/anomaly-check/${idArqueo}`),
+  predictRecharge: (red: 'TIGO' | 'CLARO') =>
+    request<any>(`/ai/recharge-prediction/${red}`),
+};
