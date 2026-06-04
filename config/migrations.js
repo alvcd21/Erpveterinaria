@@ -4,6 +4,107 @@ const path = require('path');
 const MIGRATIONS_DIR = path.join(__dirname, '../scripts/migrations');
 const MIGRATION_LOCK_KEY = 'smartcloud:schema_migrations';
 
+function splitSqlStatements(sql) {
+    const statements = [];
+    let current = '';
+    let i = 0;
+    let singleQuote = false;
+    let doubleQuote = false;
+    let dollarTag = null;
+
+    while (i < sql.length) {
+        const ch = sql[i];
+        const next = sql[i + 1];
+
+        if (dollarTag) {
+            if (sql.startsWith(dollarTag, i)) {
+                current += dollarTag;
+                i += dollarTag.length;
+                dollarTag = null;
+                continue;
+            }
+            current += ch;
+            i += 1;
+            continue;
+        }
+
+        if (singleQuote) {
+            current += ch;
+            if (ch === "'" && next === "'") {
+                current += next;
+                i += 2;
+                continue;
+            }
+            if (ch === "'") singleQuote = false;
+            i += 1;
+            continue;
+        }
+
+        if (doubleQuote) {
+            current += ch;
+            if (ch === '"' && next === '"') {
+                current += next;
+                i += 2;
+                continue;
+            }
+            if (ch === '"') doubleQuote = false;
+            i += 1;
+            continue;
+        }
+
+        if (ch === '-' && next === '-') {
+            while (i < sql.length && sql[i] !== '\n') i += 1;
+            continue;
+        }
+
+        if (ch === '/' && next === '*') {
+            i += 2;
+            while (i < sql.length && !(sql[i] === '*' && sql[i + 1] === '/')) i += 1;
+            i += 2;
+            continue;
+        }
+
+        if (ch === "'") {
+            singleQuote = true;
+            current += ch;
+            i += 1;
+            continue;
+        }
+
+        if (ch === '"') {
+            doubleQuote = true;
+            current += ch;
+            i += 1;
+            continue;
+        }
+
+        if (ch === '$') {
+            const match = sql.slice(i).match(/^\$[A-Za-z_][A-Za-z0-9_]*\$|^\$\$/);
+            if (match) {
+                dollarTag = match[0];
+                current += dollarTag;
+                i += dollarTag.length;
+                continue;
+            }
+        }
+
+        if (ch === ';') {
+            const statement = current.trim();
+            if (statement) statements.push(statement);
+            current = '';
+            i += 1;
+            continue;
+        }
+
+        current += ch;
+        i += 1;
+    }
+
+    const tail = current.trim();
+    if (tail) statements.push(tail);
+    return statements;
+}
+
 /**
  * Applies all pending SQL migrations from scripts/migrations/ in alphabetical order.
  * Tracks applied versions in schema_migrations.
@@ -57,12 +158,8 @@ async function applyPendingMigrations(client) {
 
         console.log(`[migrations] Applying: ${file}`);
         const sql = fs.readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8');
-        // Split on semicolons to avoid pg DeprecationWarning when a file has
-        // multiple statements — pg.query() must receive one statement at a time.
-        const statements = sql
-            .split(';')
-            .map(s => s.replace(/--[^\n]*/g, '').trim())
-            .filter(s => s.length > 0);
+        // Send one statement at a time without breaking DO $$ / function bodies.
+        const statements = splitSqlStatements(sql);
         for (const stmt of statements) {
             await client.query(stmt);
         }
