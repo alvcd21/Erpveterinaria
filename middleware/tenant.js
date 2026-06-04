@@ -93,13 +93,16 @@ const requireTenantFromJWT = async (req, res, next) => {
 const resolveTenantBySlug = async (req, res, next) => {
     if (req.tenantId) return next(); // already resolved from JWT
 
-    let slug = req.headers['x-tenant-id'];
+    let slug = req.body?.tenantSlug || req.headers['x-tenant-id'];
 
     if (!slug) {
         const host = req.hostname || '';
         const parts = host.split('.');
-        if (parts.length >= 3) slug = parts[0];
+        const isRenderHost = host.endsWith('.onrender.com');
+        if (parts.length >= 3 && !isRenderHost) slug = parts[0];
     }
+
+    if (typeof slug === 'string') slug = slug.trim().toLowerCase();
 
     if (!slug) return next(); // public routes — no tenant required
 
