@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { X, Printer, Loader2, Eye, Search } from 'lucide-react';
 import { LabelTemplate } from '../../types';
 import { renderToHTML, printTemplate, PrintDataContext } from '../../services/TemplateRenderer';
-import { SalesService, RepairService, InventoryService, ConfigService } from '../../services/api';
+import { SalesService, MedicamentosService, ConfigService } from '../../services/api';
 
 interface PreviewModalProps {
   template: LabelTemplate;
@@ -51,21 +51,13 @@ const PreviewModal: React.FC<PreviewModalProps> = ({ template, onClose }) => {
           sublabel: `${v.nombreCliente || 'Sin nombre'} · L. ${v.total?.toFixed(2)}`,
           raw: v,
         })));
-      } else if (ds === 'TELEPHONES') {
-        const tels = await InventoryService.getTelefonos();
-        setRecords(tels.slice(0, 30).map(t => ({
-          id: t.codigo,
-          label: `${t.marca} ${t.modelo}`,
-          sublabel: `IMEI: ${t.imei1} · L. ${t.precioVenta}`,
-          raw: t,
-        })));
-      } else if (ds === 'INVENTORY_ACCESSORIES') {
-        const stock = await InventoryService.getStockAccesorios();
-        setRecords(stock.slice(0, 30).map(s => ({
-          id: s.codInventario,
-          label: s.descripcionAccesorio || s.codAccesorio,
-          sublabel: `Stock: ${s.cantidad} · L. ${s.precioVenta}`,
-          raw: s,
+      } else if (ds === 'MEDICAMENTOS') {
+        const meds = await MedicamentosService.getAll();
+        setRecords(meds.slice(0, 50).map(m => ({
+          id: m.codigo,
+          label: m.nombre_generico,
+          sublabel: `${m.nombre_comercial || ''} · ${m.concentracion || ''}`.trim().replace(/^·\s*/, ''),
+          raw: m,
         })));
       } else {
         // No data source or unknown — preview with empty context (shows placeholders)
@@ -89,10 +81,8 @@ const PreviewModal: React.FC<PreviewModalProps> = ({ template, onClose }) => {
         const detalles = await SalesService.getDetallesVenta(raw.codVenta);
         newCtx.venta  = { ...raw, detalles };
         newCtx.cliente = { nombre: raw.nombreCliente, identidad: raw.identidadCliente, direccion: raw.direccionCliente };
-      } else if (ds === 'TELEPHONES') {
-        // Flatten telefono fields to top level for {{marca}}, {{modelo}} etc.
-        Object.assign(newCtx, raw);
-      } else if (ds === 'INVENTORY_ACCESSORIES') {
+      } else if (ds === 'MEDICAMENTOS') {
+        newCtx.medicamento = raw;
         Object.assign(newCtx, raw);
       } else if (ds === 'NONE' || !ds) {
         // Just empresa context
@@ -219,7 +209,7 @@ const PreviewModal: React.FC<PreviewModalProps> = ({ template, onClose }) => {
                 srcDoc={previewHtml}
                 sandbox="allow-same-origin"
                 className="bg-white shadow-xl rounded"
-                style={{ border: 'none', width: `${pageW}px`, height: `${pageH}px`, display: 'block', margin: '0 auto' }}
+                style={{ border: 'none', width: `${pageW + 64}px`, height: `${pageH + 64}px`, display: 'block', margin: '0 auto' }}
                 title="Vista previa de la plantilla"
               />
             ) : (

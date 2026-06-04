@@ -5,12 +5,6 @@ const { pool } = require('../config/db');
 const emailService = require('./emailService');
 const { getSystemConfig } = require('../config/systemConfig');
 
-// In-memory Set to prevent duplicate low-balance alerts per day per red
-const alertasSaldoEnviadas = new Set();
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 function getHondurasDateString() {
     return new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Tegucigalpa' });
 }
@@ -25,320 +19,200 @@ function getWeekLabel(offsetWeeks = 0) {
     return `${fmt(monday)} - ${fmt(sunday)}`;
 }
 
+async function getActiveTenants() {
+    try {
+        const { rows } = await pool.query(
+            `SELECT id, slug FROM tenants WHERE estado = 'activo'`
+        );
+        return rows;
+    } catch (err) {
+        // tenants table may not exist yet (pre-migration); fall back to env-only mode
+        console.warn('[cronJobs] tenants table not found, running in single-tenant mode:', err.message);
+        return [{ id: null, slug: 'default' }];
+    }
+}
+
 // ---------------------------------------------------------------------------
-// a) Daily report — 11:00 PM Honduras = 05:00 UTC
+// a) Daily report — scoped to a single tenant
 // ---------------------------------------------------------------------------
-async function runDailyReport() {
-    const { adminEmail } = await getSystemConfig();
+async function runDailyReport(tenantId = null) {
+    const { adminEmail } = await getSystemConfig(tenantId);
     if (!adminEmail) {
-        console.warn('[cronJobs] ADMIN_EMAIL no configurado, omitiendo reporte diario.');
+        console.warn(`[cronJobs] adminEmail not set for tenant ${tenantId ? tenantId.substring(0, 8) : 'env'}, skipping daily report.`);
         return;
     }
 
     try {
-        console.log('[cronJobs] Generando reporte diario...');
+        console.log(`[cronJobs] Generating daily report for tenant ${tenantId ? tenantId.substring(0, 8) : 'env'}...`);
+        const hoy = getHondurasDateString();
 
-        const [ventasRes, egresosRes, saldosRes, repRes] = await Promise.all([
+        const tenantFilter = tenantId ? 'AND tenant_id = $2' : '';
+        const baseParams   = tenantId ? [hoy, tenantId] : [hoy];
+
+        const [ventasRow, topRow, stockRow] = await Promise.all([
             pool.query(`
                 SELECT
-                    COALESCE(SUM(monto), 0) AS total_ventas,
-                    COALESCE(SUM(costo),  0) AS total_costos
-                FROM ingresos
-                WHERE TO_CHAR(fechaCreacion AT TIME ZONE 'America/Tegucigalpa', 'YYYY-MM-DD')
-                    = TO_CHAR(NOW() AT TIME ZONE 'America/Tegucigalpa', 'YYYY-MM-DD')
-            `),
-            pool.query(`
-                SELECT COALESCE(SUM(monto), 0) AS total_egresos
-                FROM egresos
-                WHERE TO_CHAR(fechaCreacion AT TIME ZONE 'America/Tegucigalpa', 'YYYY-MM-DD')
-                    = TO_CHAR(NOW() AT TIME ZONE 'America/Tegucigalpa', 'YYYY-MM-DD')
-            `),
-            pool.query(`
-                SELECT DISTINCT ON (red) red, saldoFinal
-                FROM saldos
-                ORDER BY red, fecha DESC
-            `),
-            pool.query(`
-                SELECT estado, COUNT(*) AS cantidad
-                FROM reparaciones
-                GROUP BY estado
-            `),
-        ]);
+                    COUNT(codVenta)         AS num_facturas,
+                    COALESCE(SUM(total), 0) AS total_ventas,
+                    COALESCE(SUM(isv_calculado), 0) AS isv_total
+                FROM ventas
+                WHERE TO_CHAR(fecha AT TIME ZONE 'America/Tegucigalpa', 'YYYY-MM-DD') = $1
+                  AND estado = 'Completada'
+                  ${tenantFilter}
+            `, baseParams),
 
-        const totalVentas   = Number(ventasRes.rows[0].total_ventas);
-        const totalCostos   = Number(ventasRes.rows[0].total_costos);
-        const totalEgresos  = Number(egresosRes.rows[0].total_egresos);
-        const gananciaEstimada = totalVentas - totalCostos - totalEgresos;
-
-        const saldoRow = (red) => {
-            const r = saldosRes.rows.find(s => s.red && s.red.toUpperCase() === red);
-            return r ? Number(r.saldofinal) : 0;
-        };
-
-        const repCompletas  = saldosRes.rows.length; // placeholder; use repRes
-        const repEstados    = repRes.rows.reduce((acc, r) => { acc[r.estado] = Number(r.cantidad); return acc; }, {});
-        const completadas   = repEstados['Completada'] || repEstados['Completado'] || 0;
-        const pendientes    = Object.entries(repEstados)
-            .filter(([k]) => !['Completada', 'Completado', 'Entregado', 'Cancelada'].includes(k))
-            .reduce((s, [, v]) => s + v, 0);
-
-        const fecha = getHondurasDateString();
-
-        await emailService.sendDailyReportEmail(adminEmail, {
-            fecha,
-            totalVentas,
-            totalRecargas: 0, // campo para desglose futuro
-            gananciaEstimada,
-            totalEgresos,
-            saldoTigoFinal:  saldoRow('TIGO'),
-            saldoClaroFinal: saldoRow('CLARO'),
-            reparacionesCompletadas: completadas,
-            reparacionesPendientes:  pendientes,
-            topProductos: [],
-        });
-
-        console.log('[cronJobs] Reporte diario enviado a', adminEmail);
-    } catch (err) {
-        console.error('[cronJobs] Error en reporte diario:', err.message);
-    }
-}
-
-// ---------------------------------------------------------------------------
-// b) Warranty expiry — 9:00 AM Honduras = 15:00 UTC
-// ---------------------------------------------------------------------------
-async function runWarrantyCheck() {
-    try {
-        console.log('[cronJobs] Revisando garantias proximas a vencer...');
-
-        const { rows } = await pool.query(`
-            SELECT
-                g.idGarantia,
-                g.descripcion,
-                g.fechaVencimiento,
-                (g.fechaVencimiento::date - CURRENT_DATE) AS dias_restantes,
-                c.nombre,
-                c.email
-            FROM garantias g
-            JOIN clientes c ON g.idCliente = c.idCliente
-            WHERE g.estado NOT IN ('Vencida', 'Procesada')
-              AND c.email IS NOT NULL AND c.email != ''
-              AND (g.fechaVencimiento::date - CURRENT_DATE) IN (7, 3)
-        `);
-
-        if (rows.length === 0) {
-            console.log('[cronJobs] No hay garantias proximas a vencer hoy.');
-            return;
-        }
-
-        for (const row of rows) {
-            try {
-                const expiryFormatted = new Date(row.fechavencimiento)
-                    .toLocaleDateString('es-HN', { day: '2-digit', month: 'long', year: 'numeric', timeZone: 'America/Tegucigalpa' });
-
-                await emailService.sendWarrantyExpiryEmail(
-                    row.email,
-                    row.nombre,
-                    row.idgarantia,
-                    row.descripcion,
-                    expiryFormatted,
-                    Number(row.dias_restantes)
-                );
-                console.log(`[cronJobs] Alerta garantia enviada a ${row.email} (${row.idgarantia})`);
-            } catch (sendErr) {
-                console.error(`[cronJobs] Error enviando alerta garantia ${row.idgarantia}:`, sendErr.message);
-            }
-        }
-    } catch (err) {
-        console.error('[cronJobs] Error en warranty check:', err.message);
-    }
-}
-
-// ---------------------------------------------------------------------------
-// c) Low balance monitor — every hour
-// ---------------------------------------------------------------------------
-async function runLowBalanceMonitor() {
-    const { adminEmail, saldoTigoUmbral: umbralTigo, saldoClaroUmbral: umbralClaro } = await getSystemConfig();
-    if (!adminEmail) return;
-    const hoyKey      = getHondurasDateString();
-
-    try {
-        const { rows } = await pool.query(`
-            SELECT DISTINCT ON (red) red, saldoFinal
-            FROM saldos
-            ORDER BY red, fecha DESC
-        `);
-
-        for (const row of rows) {
-            const red    = (row.red || '').toUpperCase();
-            const saldo  = Number(row.saldofinal);
-            const umbral = red === 'TIGO' ? umbralTigo : red === 'CLARO' ? umbralClaro : null;
-
-            if (umbral === null) continue;
-
-            const alertKey = `${red}-${hoyKey}`;
-            if (saldo < umbral && !alertasSaldoEnviadas.has(alertKey)) {
-                try {
-                    await emailService.sendLowBalanceAlertEmail(adminEmail, red, saldo, umbral);
-                    alertasSaldoEnviadas.add(alertKey);
-                    console.log(`[cronJobs] Alerta saldo ${red} enviada (saldo: ${saldo}, umbral: ${umbral})`);
-                } catch (sendErr) {
-                    console.error(`[cronJobs] Error enviando alerta saldo ${red}:`, sendErr.message);
-                }
-            }
-        }
-
-        // Clean keys from previous days to avoid unbounded growth
-        for (const key of alertasSaldoEnviadas) {
-            if (!key.endsWith(hoyKey)) {
-                alertasSaldoEnviadas.delete(key);
-            }
-        }
-    } catch (err) {
-        console.error('[cronJobs] Error en low balance monitor:', err.message);
-    }
-}
-
-// ---------------------------------------------------------------------------
-// d) Weekly report — Monday 8:00 AM Honduras = 14:00 UTC
-// ---------------------------------------------------------------------------
-async function runWeeklyReport() {
-    const { adminEmail } = await getSystemConfig();
-    if (!adminEmail) {
-        console.warn('[cronJobs] ADMIN_EMAIL no configurado, omitiendo reporte semanal.');
-        return;
-    }
-
-    try {
-        console.log('[cronJobs] Generando reporte semanal...');
-
-        const [thisWeekRes, lastWeekRes, clientesRes, stockRes] = await Promise.all([
-            // Ventas + ganancia de los ultimos 7 dias
             pool.query(`
                 SELECT
-                    COALESCE(SUM(monto), 0) AS ventas,
-                    COALESCE(SUM(monto) - SUM(costo), 0) AS ganancia
-                FROM ingresos
-                WHERE fechaCreacion AT TIME ZONE 'America/Tegucigalpa'
-                    >= (NOW() AT TIME ZONE 'America/Tegucigalpa') - INTERVAL '7 days'
-            `),
-            // Ventas semana anterior (7-14 dias atras)
-            pool.query(`
-                SELECT COALESCE(SUM(monto), 0) AS ventas
-                FROM ingresos
-                WHERE fechaCreacion AT TIME ZONE 'America/Tegucigalpa'
-                    BETWEEN (NOW() AT TIME ZONE 'America/Tegucigalpa') - INTERVAL '14 days'
-                        AND (NOW() AT TIME ZONE 'America/Tegucigalpa') - INTERVAL '7 days'
-            `),
-            // Top 5 clientes por ventas en los ultimos 7 dias
-            pool.query(`
-                SELECT c.nombre, COALESCE(SUM(i.monto), 0) AS total
-                FROM ingresos i
-                JOIN clientes c ON i.identidadCliente = c.identidad
-                WHERE i.fechaCreacion AT TIME ZONE 'America/Tegucigalpa'
-                    >= (NOW() AT TIME ZONE 'America/Tegucigalpa') - INTERVAL '7 days'
-                GROUP BY c.nombre
+                    COALESCE(m.nombre_comercial, m.nombre_generico, dv.producto, 'Medicamento') AS producto,
+                    SUM(dv.cantidad) AS cantidad,
+                    SUM(dv.cantidad * COALESCE(dv.precioUnitario, dv.precioVenta, 0)) AS total
+                FROM detalleventa dv
+                JOIN ventas v ON dv.idVenta = v.codVenta
+                LEFT JOIN presentaciones_venta pv ON dv.id_presentacion = pv.id_presentacion
+                LEFT JOIN medicamentos m ON pv.id_medicamento = m.codigo
+                WHERE TO_CHAR(v.fecha AT TIME ZONE 'America/Tegucigalpa', 'YYYY-MM-DD') = $1
+                  AND v.estado = 'Completada' AND dv.tipoProducto = 'MEDICAMENTO'
+                  ${tenantId ? 'AND v.tenant_id = $2' : ''}
+                GROUP BY 1
                 ORDER BY total DESC
                 LIMIT 5
-            `),
-            // Stock critico: accesorios/inventario con stock <= 5
+            `, baseParams),
+
             pool.query(`
-                SELECT nombre AS producto, stock
-                FROM inventario
-                WHERE stock <= 5
+                SELECT m.nombre_generico AS producto, SUM(l.cantidad_actual) AS stock
+                FROM lotes_medicamento l
+                JOIN medicamentos m ON l.id_medicamento = m.codigo
+                WHERE l.estado = 'Activo' AND l.cantidad_actual <= m.stock_minimo
+                  ${tenantId ? 'AND m.tenant_id = $1' : ''}
+                GROUP BY m.nombre_generico
                 ORDER BY stock ASC
-                LIMIT 10
-            `),
+                LIMIT 5
+            `, tenantId ? [tenantId] : []),
         ]);
 
-        const semana         = getWeekLabel(0);
-        const ventas         = Number(thisWeekRes.rows[0].ventas);
-        const gananciaSemana = Number(thisWeekRes.rows[0].ganancia);
-        const ventasAntSemana = Number(lastWeekRes.rows[0].ventas);
+        const totalVentas  = Number(ventasRow.rows[0].total_ventas);
+        const numFacturas  = Number(ventasRow.rows[0].num_facturas);
+        const topProductos = topRow.rows.map(r => ({ producto: r.producto, cantidad: Number(r.cantidad), total: Number(r.total) }));
+        const stockCritico = stockRow.rows.map(r => ({ producto: r.producto, stock: Number(r.stock) }));
 
-        const topClientes = clientesRes.rows.map(r => ({ nombre: r.nombre, total: Number(r.total) }));
-        const stockCritico = stockRes.rows.map(r => ({ producto: r.producto, stock: Number(r.stock) }));
-
-        await emailService.sendWeeklyReportEmail(adminEmail, {
-            semana,
-            ventas,
-            ventasAntSemana,
-            gananciaSemana,
-            topClientes,
+        await emailService.sendDailyReportEmail(adminEmail, {
+            fecha: hoy,
+            totalVentas,
+            numFacturas,
+            gananciaEstimada: 0,
+            totalEgresos: 0,
+            saldoTigoFinal: 0,
+            saldoClaroFinal: 0,
+            reparacionesCompletadas: 0,
+            reparacionesPendientes: 0,
+            topProductos,
             stockCritico,
         });
 
-        console.log('[cronJobs] Reporte semanal enviado a', adminEmail);
+        console.log(`[cronJobs] Daily report sent (tenant: ${tenantId ? tenantId.substring(0, 8) : 'env'})`);
     } catch (err) {
-        console.error('[cronJobs] Error en reporte semanal:', err.message);
+        console.error(`[cronJobs] Error in daily report (tenant: ${tenantId ? tenantId.substring(0, 8) : 'env'}):`, err.message);
     }
 }
 
 // ---------------------------------------------------------------------------
-// Register all cron jobs
+// b) Weekly report — scoped to a single tenant
+// ---------------------------------------------------------------------------
+async function runWeeklyReport(tenantId = null) {
+    const { adminEmail } = await getSystemConfig(tenantId);
+    if (!adminEmail) {
+        console.warn(`[cronJobs] adminEmail not set for tenant ${tenantId ? tenantId.substring(0, 8) : 'env'}, skipping weekly report.`);
+        return;
+    }
+
+    try {
+        console.log(`[cronJobs] Generating weekly report for tenant ${tenantId ? tenantId.substring(0, 8) : 'env'}...`);
+
+        const tf = tenantId ? 'AND tenant_id = $1' : '';
+        const tp = tenantId ? [tenantId] : [];
+
+        const [thisWeekRes, lastWeekRes, clientesRes, stockRes] = await Promise.all([
+            pool.query(`
+                SELECT
+                    COALESCE(SUM(total), 0) AS ventas,
+                    COALESCE(SUM(isv_calculado), 0) AS isv
+                FROM ventas
+                WHERE fecha AT TIME ZONE 'America/Tegucigalpa'
+                    >= (NOW() AT TIME ZONE 'America/Tegucigalpa') - INTERVAL '7 days'
+                  AND estado = 'Completada'
+                  ${tf}
+            `, tp),
+
+            pool.query(`
+                SELECT COALESCE(SUM(total), 0) AS ventas
+                FROM ventas
+                WHERE fecha AT TIME ZONE 'America/Tegucigalpa'
+                    BETWEEN (NOW() AT TIME ZONE 'America/Tegucigalpa') - INTERVAL '14 days'
+                        AND (NOW() AT TIME ZONE 'America/Tegucigalpa') - INTERVAL '7 days'
+                  AND estado = 'Completada'
+                  ${tf}
+            `, tp),
+
+            pool.query(`
+                SELECT
+                    COALESCE(c.nombre || ' ' || c.apellido, 'Consumidor Final') AS nombre,
+                    COALESCE(SUM(v.total), 0) AS total
+                FROM ventas v
+                LEFT JOIN clientes c ON v.identidadCliente = c.identidad
+                WHERE v.fecha AT TIME ZONE 'America/Tegucigalpa'
+                    >= (NOW() AT TIME ZONE 'America/Tegucigalpa') - INTERVAL '7 days'
+                  AND v.estado = 'Completada'
+                  ${tenantId ? 'AND v.tenant_id = $1' : ''}
+                GROUP BY 1
+                ORDER BY total DESC
+                LIMIT 5
+            `, tp),
+
+            pool.query(`
+                SELECT m.nombre_generico AS producto, SUM(l.cantidad_actual) AS stock
+                FROM lotes_medicamento l
+                JOIN medicamentos m ON l.id_medicamento = m.codigo
+                WHERE l.estado = 'Activo' AND l.cantidad_actual <= m.stock_minimo
+                  ${tenantId ? 'AND m.tenant_id = $1' : ''}
+                GROUP BY m.nombre_generico
+                ORDER BY stock ASC
+                LIMIT 10
+            `, tp),
+        ]);
+
+        await emailService.sendWeeklyReportEmail(adminEmail, {
+            semana:          getWeekLabel(0),
+            ventas:          Number(thisWeekRes.rows[0].ventas),
+            ventasAntSemana: Number(lastWeekRes.rows[0].ventas),
+            gananciaSemana:  0,
+            topClientes:     clientesRes.rows.map(r => ({ nombre: r.nombre, total: Number(r.total) })),
+            stockCritico:    stockRes.rows.map(r => ({ producto: r.producto, stock: Number(r.stock) })),
+        });
+
+        console.log(`[cronJobs] Weekly report sent (tenant: ${tenantId ? tenantId.substring(0, 8) : 'env'})`);
+    } catch (err) {
+        console.error(`[cronJobs] Error in weekly report (tenant: ${tenantId ? tenantId.substring(0, 8) : 'env'}):`, err.message);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Register all cron jobs — fan out per active tenant
 // ---------------------------------------------------------------------------
 function startCronJobs() {
-
     // Daily report — 11:00 PM Honduras (UTC-6) = 05:00 UTC
-    cron.schedule('0 5 * * *', runDailyReport, { timezone: 'UTC' });
-
-    // Warranty expiry check — 9:00 AM Honduras = 15:00 UTC
-    cron.schedule('0 15 * * *', runWarrantyCheck, { timezone: 'UTC' });
-
-    // Low balance monitor — every hour
-    cron.schedule('0 * * * *', runLowBalanceMonitor, { timezone: 'UTC' });
+    cron.schedule('0 5 * * *', async () => {
+        const tenants = await getActiveTenants();
+        await Promise.allSettled(tenants.map(t => runDailyReport(t.id)));
+    }, { timezone: 'UTC' });
 
     // Weekly report — Monday 8:00 AM Honduras = 14:00 UTC
-    cron.schedule('0 14 * * 1', runWeeklyReport, { timezone: 'UTC' });
-
-    // Alerta semanal de consignaciones vencidas/sin movimiento — Viernes 5PM Honduras = Viernes 23:00 UTC
-    cron.schedule('0 23 * * 5', async () => {
-      if (!process.env.ADMIN_EMAIL) return;
-      try {
-        // Get consignments older than 30 days that haven't been settled
-        const result = await pool.query(`
-          SELECT c.idConsignacion, c.fechaConsignacion, c.estado,
-                 cli.nombre || ' ' || cli.apellido as consignatario,
-                 COUNT(dc.id) as totalEquipos,
-                 (CURRENT_DATE - c.fechaConsignacion::date) as diasTranscurridos
-          FROM consignaciones c
-          JOIN clientes cli ON c.idCliente = cli.idCliente
-          LEFT JOIN detalle_consignacion dc ON c.idConsignacion = dc.idConsignacion
-          WHERE c.estado = 'Activa'
-            AND (CURRENT_DATE - c.fechaConsignacion::date) > 30
-          GROUP BY c.idConsignacion, c.fechaConsignacion, c.estado, consignatario
-          ORDER BY diasTranscurridos DESC
-        `);
-
-        if (result.rows.length === 0) return;
-
-        // Build simple email report
-        const { Resend } = require('resend');
-        const resend = new Resend(process.env.RESEND_API_KEY);
-        const rows = result.rows.map(r =>
-          `<tr><td>${r.consignatario}</td><td>${r.totalequipos}</td><td>${r.diastranscurridos} días</td></tr>`
-        ).join('');
-
-        await resend.emails.send({
-          from: process.env.EMAIL_FROM || 'SmartCloud <noreply@erpsmartcloud.com>',
-          to: process.env.ADMIN_EMAIL,
-          subject: `⚠️ ${result.rows.length} consignación(es) sin liquidar — Semana del ${new Date().toLocaleDateString('es-HN')}`,
-          html: `<div style="font-family:sans-serif;max-width:600px;margin:0 auto">
-            <h2 style="color:#dc2626">Consignaciones sin liquidar</h2>
-            <p>Las siguientes consignaciones llevan más de 30 días activas sin ser liquidadas:</p>
-            <table border="1" cellpadding="8" style="border-collapse:collapse;width:100%">
-              <thead><tr style="background:#f3f4f6"><th>Consignatario</th><th>Equipos</th><th>Tiempo</th></tr></thead>
-              <tbody>${rows}</tbody>
-            </table>
-            <p style="color:#6b7280;font-size:12px">Sistema ERP SmartCloud</p>
-          </div>`
-        });
-        console.log('[CRON] Alertas consignaciones enviadas:', result.rows.length);
-      } catch(err) {
-        console.error('[CRON] Error alertas consignaciones:', err.message);
-      }
+    cron.schedule('0 14 * * 1', async () => {
+        const tenants = await getActiveTenants();
+        await Promise.allSettled(tenants.map(t => runWeeklyReport(t.id)));
     }, { timezone: 'UTC' });
 
     // Daily database backup — midnight Honduras (UTC-6) = 06:00 UTC
+    // Backup runs once (global), not per-tenant; email uses env var
     cron.schedule('0 6 * * *', async () => {
         if (!process.env.GOOGLE_SERVICE_ACCOUNT_KEY) return;
         try {
@@ -361,7 +235,43 @@ function startCronJobs() {
         }
     }, { timezone: 'UTC' });
 
-    console.log('[cronJobs] Cron jobs registrados: reporte diario, garantias, saldo bajo, reporte semanal, backup Drive.');
+    // Monthly quota usage cleanup — 2nd of each month at 07:00 UTC (01:00 AM Honduras)
+    // Removes ai_quota_usage rows older than 13 months to keep rolling year data.
+    cron.schedule('0 7 2 * *', async () => {
+        try {
+            const cutoff = new Date();
+            cutoff.setMonth(cutoff.getMonth() - 13);
+            const periodo_corte = cutoff.toLocaleDateString('sv-SE', { timeZone: 'America/Tegucigalpa' }).slice(0, 7);
+            const { rowCount } = await pool.query(
+                `DELETE FROM ai_quota_usage WHERE periodo < $1`,
+                [periodo_corte]
+            );
+            if (rowCount > 0) {
+                console.log(`[cronJobs] Limpieza cuota IA: eliminados ${rowCount} registros anteriores a ${periodo_corte}`);
+            }
+        } catch (err) {
+            console.error('[cronJobs] Error limpiando cuota IA antigua:', err.message);
+        }
+    }, { timezone: 'UTC' });
+
+    // Loyalty points expiration — 2:00 AM Honduras (UTC-6) = 08:00 UTC
+    cron.schedule('0 8 * * *', async () => {
+        const { expirePoints } = require('./loyalty/loyaltyEngine');
+        const tenants = await getActiveTenants();
+        for (const t of tenants) {
+            if (!t.id) continue;
+            try {
+                const expired = await expirePoints(t.id);
+                if (expired > 0) {
+                    console.log(`[loyalty] Expired ${expired} points for tenant ${t.id.substring(0, 8)}`);
+                }
+            } catch (err) {
+                console.error(`[loyalty] expirePoints error (tenant ${t.id?.substring(0, 8)}):`, err.message);
+            }
+        }
+    }, { timezone: 'UTC' });
+
+    console.log('[cronJobs] Cron jobs registered: daily report, weekly report, Drive backup, AI quota cleanup, loyalty expiry.');
 }
 
-module.exports = { startCronJobs, runDailyReport, runWarrantyCheck, runLowBalanceMonitor, runWeeklyReport };
+module.exports = { startCronJobs, runDailyReport, runWeeklyReport };

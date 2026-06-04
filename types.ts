@@ -2,11 +2,6 @@
 
 export type EstadoGeneral = 'Activo' | 'Inactivo' | 'Disponible' | 'Vendido' | 'Completada' | 'Anulada' | 'Cerrada' | 'Registrado' | 'Garantia' | 'Defectuoso';
 
-// Clasificación unificada para compatibilidad con DB (debe coincidir con ENUM tipo_movimiento_contable)
-export type SubtipoIngreso = 'Venta' | 'Reparacion' | 'Recarga' | 'KrediYa_Prima' | 'KrediYa_Deposito' | 'Cobros Venta a Negocios Externos' | 'Cobro Consignacion' | 'Ajuste_Utilidad' | 'Garantia_Cobro' | 'Consignacion_Cobro' | 'Otro';
-// Debe coincidir con CHECK constraint chk_egresos_categoria
-export type SubtipoEgreso = 'Gasto Operativo' | 'Retiro Personal' | 'Retiro Socio' | 'Pago Servicio de Reparación' | 'Pago Servicio de Reparacion' | 'Pago Inventario Externo' | 'Nomina' | 'Compra Saldo' | 'Compra Inventario' | 'Compra de Producto' | 'Perdida Margen Garantia' | 'Otros' | 'Otro';
-
 export interface Usuario {
   codUsuario: string;
   usuario: string;
@@ -15,6 +10,8 @@ export interface Usuario {
   idCaja: string;
   idrol: string;
   estado: EstadoGeneral;
+  id_sucursal?: number;
+  sucursal_nombre?: string;
   nombreEmpleado?: string;
   nombreRol?: string;
   permisos?: string[];
@@ -22,11 +19,38 @@ export interface Usuario {
 
 export interface UserSession extends Usuario {
   rol: string;
+  tenantId?: string;
+  tenantSlug?: string;
+  isSuperAdmin?: boolean;
+  tenantPlan?: 'basico' | 'profesional' | 'enterprise';
+  planFeatures?: string[];
 }
+
+export type PlanFeatureKey =
+    | 'modulo_pos' | 'modulo_medicamentos' | 'modulo_clientes' | 'modulo_caja'
+    | 'modulo_config' | 'ia_basica' | 'modulo_recetas' | 'modulo_lealtad'
+    | 'modulo_ordenes_compra' | 'modulo_vencimientos' | 'modulo_proveedores'
+    | 'modulo_contabilidad' | 'modulo_etiquetas' | 'reportes_exportar' | 'ia_avanzada'
+    | 'modulo_sucursales' | 'modulo_transferencias' | 'modulo_entregas' | 'modulo_panel_cajas';
+
+export const PERMISSIONS = {
+    VER_POS: 'VER_POS', VER_CLIENTES: 'VER_CLIENTES', VER_INVENTARIO: 'VER_INVENTARIO',
+    VER_RECETAS: 'VER_RECETAS', VER_LEALTAD: 'VER_LEALTAD', VER_CAJA: 'VER_CAJA',
+    VER_CONTABILIDAD: 'VER_CONTABILIDAD', VER_REPORTES: 'VER_REPORTES',
+    VER_PROVEEDORES: 'VER_PROVEEDORES', VER_ADMIN: 'VER_ADMIN',
+    GESTIONAR_USUARIOS: 'GESTIONAR_USUARIOS', GESTIONAR_ROLES: 'GESTIONAR_ROLES',
+    GESTIONAR_PANEL_CAJAS: 'GESTIONAR_PANEL_CAJAS', CONFIGURAR_EMPRESA: 'CONFIGURAR_EMPRESA',
+    DISEÑAR_ETIQUETAS: 'DISEÑAR_ETIQUETAS',
+    ANULAR_VENTA: 'ANULAR_VENTA', GESTIONAR_CAJA: 'GESTIONAR_CAJA',
+    ELIMINAR_MEDICAMENTO: 'ELIMINAR_MEDICAMENTO', CONFIGURAR_LEALTAD: 'CONFIGURAR_LEALTAD',
+    AJUSTAR_PUNTOS_LEALTAD: 'AJUSTAR_PUNTOS_LEALTAD',
+    AUTORIZAR_PSICOFARMACOS: 'AUTORIZAR_PSICOFARMACOS', EXPORTAR_REPORTES: 'EXPORTAR_REPORTES',
+} as const;
 
 export interface LoginCredentials {
   usuario: string;
   password?: string;
+  tenantSlug?: string;
 }
 
 export interface AuthResponse {
@@ -42,6 +66,8 @@ export interface Empleado {
   telefono: string;
   estado: EstadoGeneral;
   fechaCreacion?: string;
+  id_sucursal?: number;
+  sucursal_nombre?: string;
 }
 
 export interface Rol {
@@ -61,6 +87,8 @@ export interface Caja {
   idCaja: string;
   nombre: string;
   estado: 'Activo' | 'Inactivo';
+  id_sucursal?: number;
+  sucursal_nombre?: string;
 }
 
 export interface Cliente {
@@ -73,78 +101,12 @@ export interface Cliente {
   fechaCreacion?: string;
 }
 
-export interface Categoria {
-  codCategoria: string;
-  tipo: string;
-}
-
-export interface Ubicacion {
-  idUbicacion: string;
-  nombre: string;
-  descripcion: string;
-  estante: string;
-  nivel: string;
-  estado: EstadoGeneral;
-}
-
 export interface Proveedor {
   codProveedor: string;
   nombre: string;
   telefono: string;
   direccion: string;
   fechaCreacion?: string;
-}
-
-export interface Telefono {
-  codigo: string;
-  imei1: string;
-  imei2: string;
-  marca: string;
-  modelo: string;
-  precioCompra: number;
-  precioVenta: number;
-  codProveedor: string;
-  idubicacion: string;
-  estado: EstadoGeneral;
-  fecha: string;
-  nombreUbicacion?: string;
-}
-
-export interface Accesorio {
-  codAccesorio: string;
-  codCategoria: string;
-  descripcion: string;
-  nombreCategoria?: string;
-}
-
-export interface Inventario {
-  codInventario: string;
-  codAccesorio: string;
-  cantidad: number;
-  precioCompra: number;
-  precioVenta: number;
-  codProveedor: string;
-  idubicacion: string;
-  estado: EstadoGeneral;
-  fecha: string;
-  descripcionAccesorio?: string;
-  categoriaAccesorio?: string;
-  nombreUbicacion?: string;
-}
-
-export interface ProductoUnified {
-  id: string;
-  tipo: 'TELEFONO' | 'ACCESORIO' | 'SERVICIO';
-  nombre: string;
-  codigo: string;
-  precioVenta: number;
-  /* Added precioCompra to ProductoUnified interface */
-  precioCompra: number;
-  stock: number;
-  imei?: string;
-  ubicacion: string;
-  marca?: string;
-  categoria?: string;
 }
 
 export interface Venta {
@@ -176,74 +138,25 @@ export interface VentaPayload {
   montoFinanciado?: number;
   detalles: Partial<DetalleVenta>[];
   fecha?: string;
+  clientMutationId?: string;
 }
 
 export interface DetalleVenta {
   codDetalleVenta?: string;
   idVenta?: string;
-  idAccesorio?: string;
-  idTelefono?: string;
-  idInventario?: string; 
+  idInventario?: string;
   idIngreso?: string;
   cantidad: number;
   precioVenta: number;
   // Fix: Added precioCompra property to match backend response and usage in components
   precioCompra?: number;
   descripcionProducto?: string;
-  tipoProducto?: 'TELEFONO' | 'ACCESORIO' | 'SERVICIO';
+  tipoProducto?: 'SERVICIO' | 'MEDICAMENTO';
   estado?: EstadoGeneral;
-}
-
-export interface Reparacion {
-  id_reparacion: number;
-  identidad_cliente?: string;
-  nombre_cliente?: string;
-  descripcion_falla: string;
-  imei_equipo?: string;
-  marca: string;
-  modelo: string;
-  marca_modelo?: string; // Legacy
-  complementos?: string; // Cargador, cobertor, etc.
-  costo_tecnico: number;
-  precio_cliente: number;
-  nombre_tecnico: string;
-  estado_reparacion: 'Pendiente' | 'En Taller' | 'Listo' | 'Entregado';
-  pago_tecnico_estado: 'Pendiente' | 'Pagado';
-  fecha_ingreso: string;
-  fecha_entrega_estimada?: string;
-}
-
-export interface Garantia {
-  id_garantia: number;
-  cod_venta: string;
-  id_producto_original: string;
-  tipo_producto: 'TELEFONO' | 'ACCESORIO';
-  falla_reportada: string;
-  // Fix: Added 'Entregado' to possible status values to match component logic
-  estado_garantia: 'Pendiente' | 'En Taller' | 'Proveedor' | 'Listo' | 'Cambiado' | 'Entregado';
-  fecha_ingreso: string;
-  fecha_resolucion?: string;
-  costo_original: number;
-  precio_venta_original: number;
-  observaciones?: string;
-  identidad_cliente: string;
-  nombre_cliente?: string;
-  // Fix: Added dispositivo_nombre to match backend response
-  dispositivo_nombre?: string;
-}
-
-export interface Consignacion {
-  id_consignacion: number;
-  id_producto: string;
-  tipo_producto: 'TELEFONO' | 'ACCESORIO';
-  negocio_destino: string;
-  cantidad_prestada: number;
-  precio_especial_pago: number;
-  estado_consignacion: 'Prestado' | 'Vendido_Pagado' | 'Devuelto';
-  fecha_salida: string;
-  fecha_limite?: string;
-  nombre_producto?: string;
-  codigo_referencia?: string;
+  // Pharmacy fields
+  id_medicamento?: string;
+  id_presentacion?: number;
+  tipoIsv?: 'exento' | '15' | '18';
 }
 
 export interface Arqueo {
@@ -257,59 +170,6 @@ export interface Arqueo {
   estado: 'Activo' | 'Cerrada';
   totalVentas?: number;
   ganancia?: number;
-  saldoTigoFinal?: number;
-  saldoClaroFinal?: number;
-  totalCostos?: number;
-  TotalGastos?: number;
-}
-
-export interface Ingreso {
-  idIngreso: string;
-  idCaja: string;
-  descripcion: string;
-  monto: number;
-  costo: number;
-  fechaCreacion?: string;
-  estado: string;
-  subtipo_movimiento?: SubtipoIngreso;
-}
-
-export interface Egreso {
-  idegresos: string;
-  idCaja: string;
-  descripcion: string;
-  monto: number;
-  fechaCreacion?: string;
-  estado: string;
-  categoria?: string;
-  subtipo_egreso?: SubtipoEgreso;
-  id_socio_asignado?: number | null;
-}
-
-export interface Saldo {
-  idsaldos: string;
-  red: 'TIGO' | 'CLARO';
-  saldoInicio: number;
-  saldoComprado: number;
-  saldoFinal: number;
-  fecha: string;
-}
-
-export interface Paquete {
-  idPaquete: string;
-  red: 'TIGO' | 'CLARO';
-  nombre: string;
-  precio: number;
-  costo: number;
-  estado: EstadoGeneral;
-}
-
-export interface Socio {
-  idSocio: number;
-  nombre: string;
-  porcentajeParticipacion: number;
-  estado: EstadoGeneral;
-  fechaIngreso?: string;
 }
 
 export interface EmpresaConfig {
@@ -325,16 +185,6 @@ export interface EmpresaConfig {
   isv: number;
   mensajeFinal: string;
   logoBase64?: string;
-}
-
-export type TipoCosto = 'Costo Directo' | 'Costo Indirecto';
-
-export interface Costo {
-  codCostos: string;
-  tipo: TipoCosto;
-  descripcion: string;
-  monto: number;
-  estado: EstadoGeneral;
 }
 
 export interface InvoiceColumn {
@@ -357,7 +207,7 @@ export interface SummaryRow {
 
 export interface LabelElement {
   id: string;
-  type: 'TEXT' | 'BARCODE' | 'QR' | 'IMAGE' | 'SHAPE' | 'INVOICE_TABLE' | 'SUMMARY_BOX' | 'COMPANY_HEADER';
+  type: 'TEXT' | 'BARCODE' | 'QR' | 'IMAGE' | 'SHAPE' | 'INVOICE_TABLE' | 'SUMMARY_BOX' | 'COMPANY_HEADER' | 'RECEIPT_ITEMS';
   x: number;
   y: number;
   width: number;
@@ -421,6 +271,7 @@ export interface LabelElement {
   tableAlternateBg?: string;
   tableBorderColor?: string;
   tableFontSize?: number;
+  receiptLineChars?: number;
   // SUMMARY_BOX specific
   summaryRows?: SummaryRow[];
   summaryBg?: string;
@@ -453,50 +304,429 @@ export interface LabelTemplate {
   showGrid?: boolean;
 }
 
-export interface GastoContable {
-  idGasto: string;
-  descripcion: string;
-  monto: number;
-  fecha: string;
-  categoria: string;
-}
+// ─── FARMACIA ────────────────────────────────────────────────────────────────
 
-export interface ReporteFinanciero {
-  ventasBrutas: number;
-  costoVentas: number;
-  utilidadBruta: number;
-  gastosOperativos: number;
-  utilidadNeta: number;
-}
-
-export interface ComponenteCosto {
-  id: string;
+export interface CategoriaTerapeutica {
+  id_categoria: number;
   nombre: string;
-  monto: number;
+  descripcion?: string;
+  codigo_atc_nivel1?: string;
+  activo: boolean;
 }
 
-export interface CostoProducto {
-  codProducto: string;
-  costoUnitario: number;
-  margenUtilidad: number;
+export interface FormaFarmaceutica {
+  id_forma: number;
+  nombre: string;
+  unidad_base: string;
+  activo: boolean;
 }
 
-export interface PresupuestoMensual {
-  mes: string;
-  anio: number;
-  montoEstimado: number;
-  montoReal: number;
+export interface PresentacionVenta {
+  id_presentacion: number;
+  id_medicamento: string;
+  nombre: string;
+  factor_conversion: number;
+  descripcion_presentacion?: string;
+  precio_venta: number;
+  precio_tercera_edad?: number;
+  codigo_barras_presentacion?: string;
+  es_unidad_compra: boolean;
+  es_unidad_venta: boolean;
+  permite_fraccion: boolean;
+  activo: boolean;
 }
 
-export interface DailyTrackingRow {
-  fecha: string;
-  ingresos: number;
-  egresos: number;
-  balance: number;
+export interface Medicamento {
+  codigo: string;
+  nombre_generico: string;
+  nombre_comercial?: string;
+  concentracion?: string;
+  id_forma?: number;
+  via_administracion: string;
+  id_categoria?: number;
+  indicaciones?: string;
+  contraindicaciones?: string;
+  advertencias?: string;
+  registro_sanitario?: string;
+  laboratorio?: string;
+  pais_origen?: string;
+  requiere_receta: boolean;
+  es_controlado: boolean;
+  clase_controlado?: string;
+  tipo_isv: 'exento' | '15' | '18';
+  precio_costo_base?: number;
+  margen_ganancia: number;
+  stock_minimo: number;
+  punto_reorden: number;
+  codigo_ean13?: string;
+  condicion_almacenamiento: string;
+  activo: boolean;
+  fecha_alta?: string;
+  categoriaNombre?: string;
+  formaNombre?: string;
+  unidadBase?: string;
+  stockTotal?: number;
+  presentacionesActivas?: number;
+  presentacionesVendibles?: number;
+  lotesActivos?: number;
+  estadoCatalogo?: 'Borrador' | 'Sin stock' | 'Listo para venta';
+  urlImagenPrincipal?: string;
+  imagenBase64Principal?: string;
+  r2KeyPrincipal?: string;
 }
 
-export interface PnLRow {
-  concepto: string;
-  monto: number;
-  porcentaje: number;
+export interface LoteMedicamento {
+  id_lote: number;
+  id_medicamento: string;
+  numero_lote: string;
+  fecha_vencimiento_display: string;
+  fecha_vencimiento: string;
+  fecha_fabricacion?: string;
+  cantidad_inicial: number;
+  cantidad_actual: number;
+  precio_compra_unitario?: number;
+  id_sucursal?: number;
+  id_proveedor?: string;
+  fecha_ingreso: string;
+  estado: 'Activo' | 'Vencido' | 'Cuarentena' | 'Devuelto' | 'Dado de baja';
+  notas?: string;
+  nombreProveedor?: string;
+  alerta_vencimiento?: string;
+}
+
+export interface ImagenMedicamento {
+  id_imagen: number;
+  id_medicamento: string;
+  url_imagen?: string;
+  imagen_base64?: string;
+  r2_key?: string;
+  signed_url?: string;
+  es_principal: boolean;
+  descripcion?: string;
+}
+
+export interface AIMedicationImagePayload {
+  base64: string;
+  mime: 'image/jpeg' | 'image/png' | 'image/webp';
+  filename?: string;
+}
+
+export interface AIFieldSuggestion<T = string> {
+  value: T;
+  confidence: number;
+  source?: 'front_label' | 'back_label' | 'inferred' | 'external' | string;
+  label?: string;
+}
+
+export interface AIMedicationAnalysisResult {
+  provider: 'openai' | 'anthropic' | 'gemini' | string;
+  model: string;
+  fields: {
+    nombre_generico: AIFieldSuggestion;
+    nombre_comercial: AIFieldSuggestion;
+    concentracion: AIFieldSuggestion;
+    id_forma_sugerida: AIFieldSuggestion<number | null>;
+    laboratorio: AIFieldSuggestion;
+    registro_sanitario: AIFieldSuggestion;
+    codigo_ean13: AIFieldSuggestion;
+    requiere_receta: AIFieldSuggestion<boolean>;
+    es_controlado: AIFieldSuggestion<boolean>;
+    tipo_isv: AIFieldSuggestion<'exento' | '15' | '18'>;
+    via_administracion: AIFieldSuggestion;
+    id_categoria_sugerida: AIFieldSuggestion<number | null>;
+    pais_origen: AIFieldSuggestion;
+    clase_controlado: AIFieldSuggestion;
+    indicaciones: AIFieldSuggestion;
+    advertencias: AIFieldSuggestion;
+    contraindicaciones: AIFieldSuggestion;
+    condicion_almacenamiento: AIFieldSuggestion;
+  };
+  warnings: string[];
+  possibleDuplicates: Array<Pick<Medicamento, 'codigo' | 'nombre_generico' | 'nombre_comercial' | 'concentracion' | 'codigo_ean13'>>;
+  needsReview: boolean;
+}
+
+export type AISymptomAgeRange = 'nino' | 'adulto' | 'adulto_mayor' | 'desconocido';
+export type AIRecommendationAvailability = 'in_current_branch' | 'other_branch' | 'out_of_stock';
+
+export interface AISymptomRecommendationPayload {
+  symptoms: string[];
+  ageRange: AISymptomAgeRange;
+  pregnant: boolean;
+  allergies: string[];
+  currentMedications: string[];
+  chronicConditions: string[];
+  id_sucursal?: number;
+}
+
+export interface AISymptomRecommendation {
+  codigo: string;
+  nombre: string;
+  reason: string;
+  confidence: number;
+  availability: AIRecommendationAvailability;
+  stockCurrentBranch: number;
+  stockTotal: number;
+  requiresPrescription: boolean;
+  isControlled: boolean;
+  warnings: string[];
+}
+
+export interface AISymptomRecommendationResult {
+  provider: 'openai' | 'anthropic' | 'gemini' | string;
+  model: string;
+  requiresMedicalReferral: boolean;
+  referralReasons: string[];
+  summary: string;
+  recommendations: AISymptomRecommendation[];
+  notRecommended: Array<{ codigo: string; nombre?: string; reason: string }>;
+  safetyMessage: string;
+}
+
+export interface AlertaVencimiento {
+  codigo: string;
+  nombreGenerico: string;
+  nombreComercial?: string;
+  idLote: number;
+  numeroLote: string;
+  fechaVencimientoDisplay: string;
+  fechaVencimiento: string;
+  cantidadActual: number;
+  dias_para_vencer: number;
+  nivel_alerta: 'VENCIDO' | 'CRITICO' | 'ALERTA' | 'MONITOREO';
+}
+
+export interface StockCritico {
+  codigo: string;
+  nombreGenerico: string;
+  stockMinimo: number;
+  puntoReorden: number;
+  stockActual: number;
+  categoria?: string;
+}
+
+export interface DetalleReceta {
+  id: number;
+  id_receta: string;
+  id_medicamento?: string;
+  nombre_prescrito?: string;
+  dosis_prescrita?: string;
+  cantidad_prescrita: number;
+  unidad_prescrita?: string;
+  cantidad_dispensada: number;
+  fecha_ultima_dispensacion?: string;
+  estado: 'Pendiente' | 'Dispensado' | 'Parcial';
+  nombreGenerico?: string;
+  nombreComercial?: string;
+  concentracion?: string;
+  tipoIsv?: string;
+}
+
+export interface Receta {
+  codigo: string;
+  id_cliente?: string;
+  nombre_medico?: string;
+  numero_colegiado?: string;
+  especialidad?: string;
+  telefono_medico?: string;
+  clinica_hospital?: string;
+  fecha_emision: string;
+  fecha_vencimiento: string;
+  tipo_receta: 'Normal' | 'Cronica' | 'Controlada';
+  diagnostico?: string;
+  imagen_url?: string;
+  imagen_base64?: string;
+  estado: 'Pendiente' | 'Dispensada' | 'Parcial' | 'Vencida' | 'Anulada';
+  id_sucursal?: number;
+  registrado_por?: string;
+  fecha_registro: string;
+  notas?: string;
+  nombreCliente?: string;
+  telefonoCliente?: string;
+  fechaNacimientoCliente?: string;
+  totalItems?: number;
+  totalDispensado?: number;
+  detalle?: DetalleReceta[];
+}
+
+export interface Sucursal {
+  id_sucursal: number;
+  codigo: string;
+  nombre: string;
+  direccion?: string;
+  telefono?: string;
+  ciudad?: string;
+  regente_farmacia?: string;
+  numero_licencia?: string;
+  estado: 'Activa' | 'Inactiva';
+  created_at?: string;
+}
+
+export interface ProductoFarmacia {
+  codigo: string;
+  nombreGenerico: string;
+  nombreComercial?: string;
+  concentracion?: string;
+  tipoIsv: 'exento' | '15' | '18';
+  requiereReceta: boolean;
+  esControlado: boolean;
+  advertencias?: string;
+  categoria?: string;
+  formaFarmaceutica?: string;
+  stock: number;
+  urlImagen?: string;
+  imagenBase64?: string;
+  presentaciones?: PresentacionVenta[];
+}
+
+export type EstadoEntrega = 'Pendiente' | 'Entregado' | 'Cancelado';
+
+export interface EntregaSucursal {
+  id: number;
+  codVenta: string;
+  idMedicamento: string;
+  nombreMedicamento: string;
+  cantidad: number;
+  nombrePresentacion?: string;
+  identidadCliente?: string;
+  nombreCliente: string;
+  estado: EstadoEntrega;
+  fechaCreacion: string;
+  fechaEntrega?: string;
+  entregadoPor?: string;
+  notasEntrega?: string;
+  sucursalFacturacion: string;
+  ciudadFacturacion?: string;
+}
+
+// ─── LOYALTY PROGRAM ──────────────────────────────────────────────────────────
+
+export type LoyaltyExpiryType = 'rolling' | 'anniversary' | 'never';
+export type LoyaltyTier = 'bronze' | 'silver' | 'gold';
+export type LoyaltyTxTipo = 'earn' | 'redeem' | 'expire' | 'adjust' | 'reversal' | 'bonus';
+
+export interface LoyaltyConfig {
+  id?: number;
+  idSucursal?: number | null;
+  activo: boolean;
+  nombrePrograma: string;
+  earnRate: number;
+  earnMinPurchase: number;
+  redeemRate: number;
+  redeemMinPoints: number;
+  redeemMaxPct: number;
+  expiryMonths: number;
+  expiryType: LoyaltyExpiryType;
+  tierEnabled: boolean;
+  tierThresholds: { silver: number; gold: number };
+  tierMultipliers: { bronze: number; silver: number; gold: number };
+  bonusBirthdayPts: number;
+  bonusEnrollmentPts: number;
+  excludedCategories: number[];
+  excludeIhss: boolean;
+}
+
+export interface LoyaltyAccount {
+  id: number;
+  identidadCliente: string;
+  puntosDisponibles: number;
+  puntosVitalicios: number;
+  tierActual: LoyaltyTier;
+  fechaInscripcion: string;
+  fechaUltimoMov?: string;
+  nombreCliente?: string;
+}
+
+export interface LoyaltyTransaction {
+  id: number;
+  tipo: LoyaltyTxTipo;
+  puntosDelta: number;
+  puntosAntes: number;
+  puntosDespues: number;
+  codVenta?: string;
+  descripcion?: string;
+  expiresAt?: string;
+  createdAt: string;
+}
+
+export interface LoyaltyPreview {
+  activo: boolean;
+  nombrePrograma?: string;
+  puntosDisponibles?: number;
+  puntosVitalicios?: number;
+  tierActual?: LoyaltyTier;
+  tierEnabled?: boolean;
+  puntosGanaria?: number;
+  maxPuntosRedimibles?: number;
+  maxLpsRedimibles?: number;
+  redeemMinPoints?: number;
+  redeemRate?: number;
+  earnRate?: number;
+}
+
+export interface LoyaltyAccountList {
+  rows: LoyaltyAccount[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface LoyaltyStats {
+  cuentas: {
+    total_cuentas: string;
+    puntos_en_circulacion: string;
+    puntos_vitalicios_total: string;
+    cuentas_silver: string;
+    cuentas_gold: string;
+    activos_30d: string;
+  };
+  transacciones30d: { tipo: LoyaltyTxTipo; cantidad: string; puntos_total: string }[];
+}
+
+// ─── SAAS / MULTI-TENANCY ─────────────────────────────────────────────────────
+
+export type PlanTenant = 'basico' | 'profesional' | 'enterprise';
+export type EstadoTenant = 'activo' | 'suspendido' | 'cancelado' | 'prueba';
+
+export interface Tenant {
+  id: string;
+  slug: string;
+  nombreEmpresa: string;
+  emailContacto: string;
+  telefono?: string;
+  pais: string;
+  plan: PlanTenant;
+  estado: EstadoTenant;
+  maxSucursales: number;
+  maxUsuarios: number;
+  maxMedicamentos: number;
+  fechaInicio: string;
+  fechaVencimiento?: string;
+  stripeCustomerId?: string;
+  createdAt: string;
+}
+
+export interface TenantStats {
+  tenantId: string;
+  totalUsuarios: number;
+  totalSucursales: number;
+  totalMedicamentos: number;
+  totalVentasMes: number;
+  totalVentasHoy: number;
+  ultimaActividad?: string;
+}
+
+export interface CreateTenantPayload {
+  slug: string;
+  nombreEmpresa: string;
+  emailContacto: string;
+  telefono?: string;
+  pais?: string;
+  plan: PlanTenant;
+  maxSucursales?: number;
+  maxUsuarios?: number;
+  maxMedicamentos?: number;
+  fechaVencimiento?: string;
+  adminUsuario: string;
+  adminPassword: string;
 }

@@ -15,6 +15,7 @@ export interface SyncItem {
   body: any;
   timestamp: number;
   retries: number;
+  tenantId: string | null;
 }
 
 function openDB(): Promise<IDBDatabase> {
@@ -50,7 +51,7 @@ function promisify<T>(req: IDBRequest<T>): Promise<T> {
 export const offlineDB = {
   // --- COLA DE SINCRONIZACION ---
 
-  async addToQueue(method: string, url: string, body: any): Promise<string> {
+  async addToQueue(method: string, url: string, body: any, tenantId: string | null = null): Promise<string> {
     const db = await openDB();
     const item: SyncItem = {
       id: `sync_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
@@ -58,7 +59,8 @@ export const offlineDB = {
       url,
       body,
       timestamp: Date.now(),
-      retries: 0
+      retries: 0,
+      tenantId,
     };
     await promisify(tx(db, 'sync_queue', 'readwrite').put(item));
     db.close();
@@ -92,6 +94,25 @@ export const offlineDB = {
   async clearQueue(): Promise<void> {
     const db = await openDB();
     await promisify(tx(db, 'sync_queue', 'readwrite').clear());
+    db.close();
+  },
+
+  async clearTenantData(tenantId: string): Promise<void> {
+    const db = await openDB();
+    const queueStore = tx(db, 'sync_queue', 'readwrite');
+    const cacheStore = tx(db, 'data_cache', 'readwrite');
+
+    const queueItems = await promisify<SyncItem[]>(queueStore.getAll());
+    await Promise.all((queueItems || [])
+      .filter(item => item.tenantId === tenantId)
+      .map(item => promisify(queueStore.delete(item.id))));
+
+    const cacheKeys = await promisify<IDBValidKey[]>(cacheStore.getAllKeys());
+    const prefix = `cache:t:${tenantId}:`;
+    await Promise.all((cacheKeys || [])
+      .filter(key => String(key).startsWith(prefix))
+      .map(key => promisify(cacheStore.delete(key))));
+
     db.close();
   },
 

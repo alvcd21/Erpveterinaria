@@ -4,14 +4,96 @@ const router = express.Router();
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const BCRYPT_ROUNDS = 12;
-const { pool, generateNextId, handleDbError, updateArqueoBalance } = require('../config/db');
-const { authenticateToken, requireAdmin } = require('../middleware/auth');
+const { pool, generateNextId, handleDbError, updateArqueoBalance, withTenantContext, tenantQuery } = require('../config/db');
+const { authenticateToken, requireAdmin, validatePasswordStrength } = require('../middleware/auth');
 const { invalidateSystemConfigCache } = require('../config/systemConfig');
 
 // --- ENDPOINT PARA ESQUEMA DE DATOS (REQUERIDO POR IMPRESIÓN/DISEÑO) ---
-const SCHEMA_TABLES = ['telefonos', 'inventario', 'accesorios', 'ventas', 'clientes', 'configuracion', 'empleado', 'usuarios', 'detalleventa', 'reparaciones'];
+const SCHEMA_TABLES = ['ventas', 'detalleventa', 'clientes', 'medicamentos', 'lotes_medicamento', 'presentaciones_venta', 'configuracion', 'empleado', 'usuarios', 'recetas'];
 
-router.get('/schema', authenticateToken, requireAdmin, async (req, res) => {
+const ADMIN_ROLE_NAMES = new Set(['administrador', 'admin', 'superadmin', 'super admin']);
+const CASH_PERMISSIONS = new Set(['VER_POS', 'VER_CAJA', 'perm_ventas_crear', 'perm_caja_abrir', 'perm_caja_cerrar']);
+const DESIGNER_PERMISSION = 'DISEÑAR_ETIQUETAS';
+
+function requireSchemaDesignerAccess(req, res, next) {
+    const role = String(req.user?.rol || '').toLowerCase();
+    const permisos = Array.isArray(req.user?.permisos) ? req.user.permisos : [];
+    if (ADMIN_ROLE_NAMES.has(role) || permisos.includes(DESIGNER_PERMISSION)) return next();
+    return res.status(403).json({
+        error: 'Acceso denegado: se requiere permiso para diseñar etiquetas',
+        requiredPermission: DESIGNER_PERMISSION,
+    });
+}
+
+function normalizeOptional(value) {
+    return value === undefined || value === null || value === '' || value === 'Sin Caja' ? null : value;
+}
+
+async function getRoleProfile(client, tenantId, idrol) {
+    const roleRes = await client.query(
+        'SELECT idrol, nombre FROM roles WHERE idrol = $1 AND tenant_id = $2',
+        [idrol, tenantId]
+    );
+    const role = roleRes.rows[0];
+    if (!role) return null;
+
+    const permRes = await client.query(
+        'SELECT idPermiso FROM rol_permisos WHERE idRol = $1 AND idRol IN (SELECT idrol FROM roles WHERE tenant_id = $2)',
+        [idrol, tenantId]
+    );
+    const permisos = permRes.rows.map(r => r.idpermiso);
+    const roleName = String(role.nombre || '').toLowerCase();
+    const isAdmin = ADMIN_ROLE_NAMES.has(roleName);
+    const requiresCaja = !isAdmin && permisos.some(p => CASH_PERMISSIONS.has(p));
+    return { ...role, permisos, isAdmin, requiresCaja };
+}
+
+async function validateUserAssignment(client, tenantId, { idrol, idCaja, id_sucursal, codUsuario = null }) {
+    const role = await getRoleProfile(client, tenantId, idrol);
+    if (!role) return { error: 'Rol no encontrado para esta farmacia' };
+
+    const cajaId = normalizeOptional(idCaja);
+    const sucursalId = normalizeOptional(id_sucursal);
+
+    if (role.requiresCaja && !cajaId) {
+        return { error: 'Este rol requiere una caja asignada' };
+    }
+
+    if (sucursalId) {
+        const sucRes = await client.query(
+            'SELECT id_sucursal FROM sucursales WHERE id_sucursal = $1 AND tenant_id = $2',
+            [sucursalId, tenantId]
+        );
+        if (!sucRes.rows.length) return { error: 'La sucursal seleccionada no existe para esta farmacia' };
+    }
+
+    if (cajaId) {
+        const cajaRes = await client.query(
+            'SELECT idCaja, id_sucursal FROM caja WHERE idCaja = $1 AND tenant_id = $2 AND estado = $3',
+            [cajaId, tenantId, 'Activo']
+        );
+        const caja = cajaRes.rows[0];
+        if (!caja) return { error: 'La caja seleccionada no existe o esta inactiva' };
+        if (sucursalId && Number(caja.id_sucursal) !== Number(sucursalId)) {
+            return { error: 'La caja seleccionada no pertenece a la sucursal elegida' };
+        }
+
+        const assignedRes = await client.query(
+            `SELECT codUsuario, usuario FROM usuarios
+             WHERE idCaja = $1 AND tenant_id = $2 AND estado = 'Activo'
+               AND ($3::int IS NULL OR codUsuario <> $3::int)
+             LIMIT 1`,
+            [cajaId, tenantId, codUsuario]
+        );
+        if (assignedRes.rows.length) {
+            return { error: `La caja ya esta asignada al usuario ${assignedRes.rows[0].usuario}` };
+        }
+    }
+
+    return { role, idCaja: cajaId, id_sucursal: sucursalId };
+}
+
+router.get('/schema', authenticateToken, requireSchemaDesignerAccess, async (req, res) => {
     try {
         const colQuery = `
             SELECT
@@ -82,16 +164,14 @@ const mapConfigRow = (row) => ({
     mensajeFinal:     row.mensajefinal     || 'LA FACTURA ES BENEFICIO DE TODOS, EXIJALA',
     logoBase64:       row.logo_base64      || '',
     // Automatizaciones (gestionadas desde el sistema)
-    adminEmail:       row.admin_email      || process.env.ADMIN_EMAIL                || '',
-    emailFrom:        row.email_from       || process.env.EMAIL_FROM                 || '',
-    saldoTigoUmbral:  Number(row.saldo_tigo_umbral  ?? process.env.SALDO_TIGO_UMBRAL  ?? 500),
-    saldoClaroUmbral: Number(row.saldo_claro_umbral ?? process.env.SALDO_CLARO_UMBRAL ?? 500),
-    driveFolderId:    row.drive_folder_id  || process.env.GOOGLE_DRIVE_FOLDER_ID     || '',
+    adminEmail:    row.admin_email     || process.env.ADMIN_EMAIL             || '',
+    emailFrom:     row.email_from      || process.env.EMAIL_FROM              || '',
+    driveFolderId: row.drive_folder_id || process.env.GOOGLE_DRIVE_FOLDER_ID  || '',
 });
 
 router.get('/config', authenticateToken, async (req, res) => {
     try {
-        const r = await pool.query('SELECT * FROM configuracion WHERE id = 1');
+        const r = await tenantQuery(req.tenantId, 'SELECT * FROM configuracion WHERE tenant_id = $1', [req.tenantId]);
         if (r.rows.length === 0) {
             return res.json(mapConfigRow({ isv: 15 }));
         }
@@ -99,45 +179,41 @@ router.get('/config', authenticateToken, async (req, res) => {
     } catch(e) { handleDbError(res, e); }
 });
 
-router.put('/config', authenticateToken, express.json({ limit: '10mb' }), async (req, res) => {
+router.put('/config', authenticateToken, requireAdmin, express.json({ limit: '10mb' }), async (req, res) => {
     try {
         const {
             nombreEmpresa, rtn, direccion, telefono, correo, cai,
             rangoInicial, rangoFinal, fechaLimite, isv, mensajeFinal, logoBase64,
-            adminEmail, emailFrom, saldoTigoUmbral, saldoClaroUmbral, driveFolderId,
+            adminEmail, emailFrom, driveFolderId,
         } = req.body;
         await pool.query(`
             INSERT INTO configuracion (
-                id, nombreempresa, rtn, direccion, telefono, correo, cai,
+                tenant_id, nombreempresa, rtn, direccion, telefono, correo, cai,
                 rangoinicial, rangofinal, fechalimite, isv, mensajefinal, logo_base64,
-                admin_email, email_from, saldo_tigo_umbral, saldo_claro_umbral, drive_folder_id
+                admin_email, email_from, drive_folder_id
             )
-            VALUES (1, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
-            ON CONFLICT (id) DO UPDATE SET
-                nombreempresa     = EXCLUDED.nombreempresa,
-                rtn               = EXCLUDED.rtn,
-                direccion         = EXCLUDED.direccion,
-                telefono          = EXCLUDED.telefono,
-                correo            = EXCLUDED.correo,
-                cai               = EXCLUDED.cai,
-                rangoinicial      = EXCLUDED.rangoinicial,
-                rangofinal        = EXCLUDED.rangofinal,
-                fechalimite       = EXCLUDED.fechalimite,
-                isv               = EXCLUDED.isv,
-                mensajefinal      = EXCLUDED.mensajefinal,
-                logo_base64       = EXCLUDED.logo_base64,
-                admin_email       = EXCLUDED.admin_email,
-                email_from        = EXCLUDED.email_from,
-                saldo_tigo_umbral  = EXCLUDED.saldo_tigo_umbral,
-                saldo_claro_umbral = EXCLUDED.saldo_claro_umbral,
-                drive_folder_id   = EXCLUDED.drive_folder_id
+            VALUES ($16, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+            ON CONFLICT (tenant_id) DO UPDATE SET
+                nombreempresa = EXCLUDED.nombreempresa,
+                rtn           = EXCLUDED.rtn,
+                direccion     = EXCLUDED.direccion,
+                telefono      = EXCLUDED.telefono,
+                correo        = EXCLUDED.correo,
+                cai           = EXCLUDED.cai,
+                rangoinicial  = EXCLUDED.rangoinicial,
+                rangofinal    = EXCLUDED.rangofinal,
+                fechalimite   = EXCLUDED.fechalimite,
+                isv           = EXCLUDED.isv,
+                mensajefinal  = EXCLUDED.mensajefinal,
+                logo_base64   = EXCLUDED.logo_base64,
+                admin_email   = EXCLUDED.admin_email,
+                email_from    = EXCLUDED.email_from,
+                drive_folder_id = EXCLUDED.drive_folder_id
         `, [
             nombreEmpresa, rtn, direccion, telefono, correo, cai,
             rangoInicial, rangoFinal, fechaLimite || null, isv, mensajeFinal, logoBase64 || null,
-            adminEmail || null, emailFrom || null,
-            saldoTigoUmbral != null ? Number(saldoTigoUmbral) : null,
-            saldoClaroUmbral != null ? Number(saldoClaroUmbral) : null,
-            driveFolderId || null,
+            adminEmail || null, emailFrom || null, driveFolderId || null,
+            req.tenantId,
         ]);
         invalidateSystemConfigCache();
         res.json({ message: 'Configuración actualizada' });
@@ -147,31 +223,47 @@ router.put('/config', authenticateToken, express.json({ limit: '10mb' }), async 
 // --- PANEL DE CONTROL DE CAJAS ---
 router.get('/admin/boxes/status', authenticateToken, async (req, res) => {
     try {
-        const query = `
-            SELECT 
-                c.idCaja as "idCaja", 
-                c.nombre as "nombreCaja", 
-                last_arq.idArqueo as "idArqueo", 
-                last_arq.estado as "estadoArqueo", 
-                COALESCE(last_arq.montoInicial, 0) as "montoInicial", 
-                COALESCE(last_arq.montoFinal, 0) as "montoFinal", 
-                COALESCE(last_arq.ganancia, 0) as "ganancia", 
-                last_arq.fechaApertura as "fechaApertura", 
-                last_arq.fechaCierre as "fechaCierre",
-                u.usuario,
-                (e.nombre || ' ' || e.apellido) as "nombreEmpleado"
-            FROM caja c
-            LEFT JOIN LATERAL (
-                SELECT * FROM arqueo a 
-                WHERE a.idCaja = c.idCaja 
-                ORDER BY a.fechaApertura DESC LIMIT 1
-            ) last_arq ON true
-            LEFT JOIN usuarios u ON last_arq.idUsuario = u.codUsuario
-            LEFT JOIN empleado e ON u.identidad = e.identidad
-            ORDER BY c.idCaja ASC
-        `;
-        const result = await pool.query(query);
-        res.json(result.rows);
+        // Obtener cajas
+        const cajasRes = await pool.query(
+            `SELECT idCaja as "idCaja", nombre as "nombreCaja" FROM caja WHERE tenant_id = $1 ORDER BY idCaja ASC`,
+            [req.tenantId]
+        );
+        const cajas = cajasRes.rows;
+
+        // Para cada caja obtener el arqueo activo de forma independiente
+        const result = await Promise.all(cajas.map(async (caja) => {
+            try {
+                const arqRes = await pool.query(
+                    `SELECT idArqueo as "idArqueo", idUsuario as "idUsuario", estado as "estadoArqueo",
+                            COALESCE(montoInicial, 0) as "montoInicial",
+                            COALESCE(montoFinal, 0) as "montoFinal",
+                            COALESCE(ganancia, 0) as "ganancia",
+                            fechaApertura as "fechaApertura", fechaCierre as "fechaCierre"
+                     FROM arqueo WHERE idCaja = $1 AND estado = 'Activo' AND tenant_id = $2 LIMIT 1`,
+                    [caja.idCaja, req.tenantId]
+                );
+                const arq = arqRes.rows[0] || null;
+
+                let usuario = null;
+                let nombreEmpleado = null;
+                if (arq?.idUsuario) {
+                    const uRes = await pool.query(
+                        `SELECT u.usuario, COALESCE(e.nombre || ' ' || e.apellido, u.usuario) as "nombreEmpleado"
+                         FROM usuarios u LEFT JOIN empleado e ON u.identidad = e.identidad
+                         WHERE u.codUsuario = $1 AND u.tenant_id = $2`,
+                        [arq.idUsuario, req.tenantId]
+                    );
+                    usuario = uRes.rows[0]?.usuario || null;
+                    nombreEmpleado = uRes.rows[0]?.nombreEmpleado || null;
+                }
+
+                return { ...caja, ...arq, usuario, nombreEmpleado };
+            } catch {
+                return { ...caja, idArqueo: null, estadoArqueo: null, montoInicial: 0, montoFinal: 0, ganancia: 0, usuario: null, nombreEmpleado: null };
+            }
+        }));
+
+        res.json(result);
     } catch(e) { handleDbError(res, e); }
 });
 
@@ -179,21 +271,21 @@ router.get('/admin/boxes/:id/history', authenticateToken, async (req, res) => {
     try {
         const query = `
             SELECT idArqueo as "idArqueo", fechaApertura as "fechaApertura", fechaCierre as "fechaCierre", montoInicial as "montoInicial", montoFinal as "montoFinal", estado
-            FROM arqueo WHERE idCaja = $1 ORDER BY fechaApertura DESC
+            FROM arqueo WHERE idCaja = $1 AND tenant_id = $2 ORDER BY fechaApertura DESC
         `;
-        const result = await pool.query(query, [req.params.id]);
+        const result = await pool.query(query, [req.params.id, req.tenantId]);
         res.json(result.rows);
     } catch(e) { handleDbError(res, e); }
 });
 
-router.put('/admin/arqueo/:id/reopen', authenticateToken, async (req, res) => {
+router.put('/admin/arqueo/:id/reopen', authenticateToken, requireAdmin, async (req, res) => {
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
 
         const arqRes = await client.query(
-            'SELECT idArqueo, idCaja, estado FROM arqueo WHERE idArqueo = $1',
-            [req.params.id]
+            'SELECT idArqueo, idCaja, estado FROM arqueo WHERE idArqueo = $1 AND tenant_id = $2',
+            [req.params.id, req.tenantId]
         );
         if (arqRes.rows.length === 0) throw new Error('Arqueo no encontrado');
         const arqueo = arqRes.rows[0];
@@ -201,88 +293,95 @@ router.put('/admin/arqueo/:id/reopen', authenticateToken, async (req, res) => {
         if (arqueo.estado === 'Activo') throw new Error('Esta caja ya está activa');
 
         const activeCheck = await client.query(
-            "SELECT idArqueo FROM arqueo WHERE idCaja = $1 AND estado = 'Activo'",
-            [arqueo.idcaja]
+            "SELECT idArqueo FROM arqueo WHERE idCaja = $1 AND estado = 'Activo' AND tenant_id = $2",
+            [arqueo.idcaja, req.tenantId]
         );
         if (activeCheck.rows.length > 0) throw new Error('Ya existe una sesión activa para esta caja. Ciérrela primero.');
 
         await client.query(
-            "UPDATE arqueo SET estado = 'Activo', fechaCierre = NULL WHERE idArqueo = $1",
-            [req.params.id]
+            "UPDATE arqueo SET estado = 'Activo', fechaCierre = NULL WHERE idArqueo = $1 AND tenant_id = $2",
+            [req.params.id, req.tenantId]
         );
 
-        await updateArqueoBalance(arqueo.idcaja, client);
+        await updateArqueoBalance(arqueo.idcaja, client, req.tenantId);
         await client.query('COMMIT');
         res.json({ message: 'Caja reaperturada correctamente' });
     } catch(e) { await client.query('ROLLBACK'); handleDbError(res, e); } finally { client.release(); }
-});
-
-// --- SALDOS (PARA ADMIN) ---
-router.get('/admin/saldos', authenticateToken, async (req, res) => {
-    try {
-        const { fecha } = req.query;
-        const result = await pool.query(
-            'SELECT idsaldos as "idsaldos", red, saldoInicio as "saldoInicio", saldoComprado as "saldoComprado", saldoFinal as "saldoFinal", fecha FROM saldos WHERE TO_CHAR(fecha, \'YYYY-MM-DD\') = $1',
-            [fecha]
-        );
-        res.json(result.rows);
-    } catch(e) { handleDbError(res, e); }
-});
-
-router.put('/admin/saldos/:id', authenticateToken, async (req, res) => {
-    try {
-        const { saldoInicio, saldoFinal } = req.body;
-        await pool.query(
-            'UPDATE saldos SET saldoInicio = $1, saldoFinal = $2 WHERE idsaldos = $3',
-            [saldoInicio, saldoFinal, req.params.id]
-        );
-        res.json({ message: 'Saldo actualizado' });
-    } catch(e) { handleDbError(res, e); }
 });
 
 router.get('/users', authenticateToken, requireAdmin, async (req, res) => {
     try {
         const result = await pool.query(`
             SELECT u.codUsuario as "codUsuario", u.usuario, u.identidad, u.idCaja as "idCaja", u.idrol, u.estado,
+            u.id_sucursal,
             COALESCE(u.requires_password_change, FALSE) as "requiresPasswordChange",
-            e.nombre || ' ' || e.apellido as "nombreEmpleado", r.nombre as "nombreRol"
+            e.nombre || ' ' || e.apellido as "nombreEmpleado", r.nombre as "nombreRol",
+            s.nombre as "sucursal_nombre"
             FROM usuarios u
-            LEFT JOIN empleado e ON u.identidad = e.identidad
-            LEFT JOIN roles r ON u.idrol = r.idrol
-        `);
+            LEFT JOIN empleado e ON u.identidad = e.identidad AND e.tenant_id = $1
+            LEFT JOIN roles r ON u.idrol::text = r.idrol::text AND r.tenant_id = $1
+            LEFT JOIN sucursales s ON u.id_sucursal = s.id_sucursal AND s.tenant_id = $1
+            WHERE u.tenant_id = $1
+        `, [req.tenantId]);
         res.json(result.rows);
     } catch(e) { handleDbError(res, e); }
 });
 
 router.post('/users', authenticateToken, requireAdmin, async (req, res) => {
+    const client = await pool.connect();
     try {
-        const { usuario, identidad, idrol, idCaja, estado } = req.body;
-        const codUsuario = await generateNextId('usuarios', 'codUsuario', 'USER');
+        const { usuario, identidad, idrol, idCaja, estado, id_sucursal } = req.body;
+        if (!usuario || typeof usuario !== 'string' || usuario.length < 3 || usuario.length > 50) {
+            return res.status(400).json({ error: 'usuario debe tener entre 3 y 50 caracteres' });
+        }
+        if (!identidad || typeof identidad !== 'string' || identidad.length > 20) {
+            return res.status(400).json({ error: 'identidad es requerida (máx 20 caracteres)' });
+        }
+        if (!idrol) return res.status(400).json({ error: 'idrol es requerido' });
+        if (!estado) return res.status(400).json({ error: 'estado es requerido' });
+        const assignment = await validateUserAssignment(client, req.tenantId, { idrol, idCaja, id_sucursal });
+        if (assignment.error) return res.status(400).json({ error: assignment.error });
+
         const tempPassword = 'Sc-' + crypto.randomBytes(8).toString('hex');
         const hashedPassword = await bcrypt.hash(tempPassword, BCRYPT_ROUNDS);
-        await pool.query(
-            `INSERT INTO usuarios (codUsuario, usuario, password, identidad, idCaja, idrol, estado, requires_password_change, fechaCreacion)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, TRUE, NOW())`,
-            [codUsuario, usuario, hashedPassword, identidad, idCaja, idrol, estado]);
+        // codUsuario is SERIAL — let the DB auto-generate it
+        const result = await client.query(
+            `INSERT INTO usuarios (usuario, password, identidad, idCaja, idrol, id_sucursal, estado, requires_password_change, tenant_id)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, TRUE, $8)
+             RETURNING codUsuario`,
+            [usuario, hashedPassword, identidad, assignment.idCaja, idrol, assignment.id_sucursal, estado, req.tenantId]);
+        const codUsuario = result.rows[0].codusuario;
         res.status(201).json({ message: 'OK', codUsuario, tempPassword });
-    } catch(e) { handleDbError(res, e); }
+    } catch(e) { handleDbError(res, e); } finally { client.release(); }
 });
 
 router.put('/users/:id', authenticateToken, requireAdmin, async (req, res) => {
+    const client = await pool.connect();
     try {
-        const { usuario, password, identidad, idrol, idCaja, estado } = req.body;
-        let query = `UPDATE usuarios SET usuario=$1, identidad=$2, idrol=$3, idCaja=$4, estado=$5`;
-        let params = [usuario, identidad, idrol, idCaja, estado];
+        const { usuario, password, identidad, idrol, idCaja, estado, id_sucursal } = req.body;
+        const assignment = await validateUserAssignment(client, req.tenantId, {
+            idrol,
+            idCaja,
+            id_sucursal,
+            codUsuario: req.params.id,
+        });
+        if (assignment.error) return res.status(400).json({ error: assignment.error });
+
+        let query = `UPDATE usuarios SET usuario=$1, identidad=$2, idrol=$3, idCaja=$4, id_sucursal=$5, estado=$6`;
+        let params = [usuario, identidad, idrol, assignment.idCaja, assignment.id_sucursal, estado];
         if (password && password.trim() !== '') {
+            const pwErr = validatePasswordStrength(password);
+            if (pwErr) return res.status(400).json({ error: pwErr });
             const hashedPassword = await bcrypt.hash(password, BCRYPT_ROUNDS);
             query += `, password=$${params.length + 1}`;
             params.push(hashedPassword);
         }
-        query += ` WHERE codUsuario=$${params.length + 1}`;
+        query += ` WHERE codUsuario=$${params.length + 1} AND tenant_id=$${params.length + 2}`;
         params.push(req.params.id);
-        await pool.query(query, params);
+        params.push(req.tenantId);
+        await client.query(query, params);
         res.json({ message: 'OK' });
-    } catch(e) { handleDbError(res, e); }
+    } catch(e) { handleDbError(res, e); } finally { client.release(); }
 });
 
 router.delete('/users/:id', authenticateToken, requireAdmin, async (req, res) => {
@@ -290,48 +389,128 @@ router.delete('/users/:id', authenticateToken, requireAdmin, async (req, res) =>
         if (req.params.id === req.user.codUsuario) {
             return res.status(400).json({ error: 'No puede eliminar su propia cuenta' });
         }
-        await pool.query('DELETE FROM usuarios WHERE codUsuario=$1', [req.params.id]);
+        await pool.query('DELETE FROM usuarios WHERE codUsuario=$1 AND tenant_id=$2', [req.params.id, req.tenantId]);
         res.json({ message: 'OK' });
     } catch(e) { handleDbError(res, e); }
 });
 
 router.get('/empleados', authenticateToken, async (req, res) => {
     try {
-        const r = await pool.query('SELECT identidad, nombre, apellido, direccion, telefono, estado FROM empleado');
+        const { id_sucursal } = req.query;
+        let query = `
+            SELECT e.identidad, e.nombre, e.apellido, e.direccion, e.telefono, e.estado,
+                   e.id_sucursal, s.nombre AS "sucursal_nombre"
+            FROM empleado e
+            LEFT JOIN sucursales s ON e.id_sucursal = s.id_sucursal AND s.tenant_id = $1
+            WHERE e.tenant_id = $1
+        `;
+        const params = [req.tenantId];
+        if (id_sucursal) { params.push(id_sucursal); query += ` AND e.id_sucursal = $${params.length}`; }
+        query += ' ORDER BY e.nombre';
+        const r = await pool.query(query, params);
         res.json(r.rows);
-    } catch(e) { handleDbError(res, e); }
+    } catch(e) {
+        if (e.code === '42703') {
+            // id_sucursal column not yet migrated — return without sucursal info
+            try {
+                const r = await pool.query('SELECT * FROM empleado WHERE tenant_id = $1 ORDER BY nombre', [req.tenantId]);
+                res.json(r.rows);
+            } catch(e2) { handleDbError(res, e2); }
+        } else { handleDbError(res, e); }
+    }
 });
 
-router.post('/empleados', authenticateToken, async (req, res) => {
+router.post('/empleados', authenticateToken, requireAdmin, async (req, res) => {
     try {
-        const { identidad, nombre, apellido, direccion, telefono, estado } = req.body;
-        await pool.query('INSERT INTO empleado (identidad, nombre, apellido, direccion, telefono, estado, fechaCreacion) VALUES ($1,$2,$3,$4,$5,$6, NOW())',
-            [identidad, nombre, apellido, direccion, telefono, estado]);
+        const { identidad, nombre, apellido, direccion, telefono, estado, id_sucursal } = req.body;
+        try {
+            await pool.query(
+                'INSERT INTO empleado (identidad, nombre, apellido, direccion, telefono, estado, id_sucursal, fechaCreacion, tenant_id) VALUES ($1,$2,$3,$4,$5,$6,$7, NOW(), $8)',
+                [identidad, nombre, apellido, direccion, telefono, estado, id_sucursal || null, req.tenantId]
+            );
+        } catch(e2) {
+            if (e2.code !== '42703') throw e2;
+            await pool.query(
+                'INSERT INTO empleado (identidad, nombre, apellido, direccion, telefono, estado, fechaCreacion, tenant_id) VALUES ($1,$2,$3,$4,$5,$6, NOW(), $7)',
+                [identidad, nombre, apellido, direccion, telefono, estado, req.tenantId]
+            );
+        }
         res.status(201).json({ message: 'OK' });
     } catch(e) { handleDbError(res, e); }
 });
 
-router.put('/empleados/:id', authenticateToken, async (req, res) => {
+router.put('/empleados/:id', authenticateToken, requireAdmin, async (req, res) => {
     try {
-        const { nombre, apellido, direccion, telefono, estado } = req.body;
-        await pool.query('UPDATE empleado SET nombre=$1, apellido=$2, direccion=$3, telefono=$4, estado=$5 WHERE identidad=$6',
-            [nombre, apellido, direccion, telefono, estado, req.params.id]);
+        const { nombre, apellido, direccion, telefono, estado, id_sucursal } = req.body;
+        try {
+            await pool.query(
+                'UPDATE empleado SET nombre=$1, apellido=$2, direccion=$3, telefono=$4, estado=$5, id_sucursal=$6 WHERE identidad=$7 AND tenant_id=$8',
+                [nombre, apellido, direccion, telefono, estado, id_sucursal || null, req.params.id, req.tenantId]
+            );
+        } catch(e2) {
+            if (e2.code !== '42703') throw e2;
+            await pool.query(
+                'UPDATE empleado SET nombre=$1, apellido=$2, direccion=$3, telefono=$4, estado=$5 WHERE identidad=$6 AND tenant_id=$7',
+                [nombre, apellido, direccion, telefono, estado, req.params.id, req.tenantId]
+            );
+        }
         res.json({ message: 'OK' });
     } catch(e) { handleDbError(res, e); }
 });
 
-router.delete('/empleados/:id', authenticateToken, async (req, res) => {
+// Transfer employee to another branch and optionally reassign caja
+router.post('/empleados/:id/transferir', authenticateToken, requireAdmin, async (req, res) => {
+    const client = await pool.connect();
     try {
-        await pool.query('DELETE FROM empleado WHERE identidad=$1', [req.params.id]);
+        const { id_sucursal_destino, nueva_idCaja } = req.body;
+        if (!id_sucursal_destino) return res.status(400).json({ error: 'id_sucursal_destino es requerido' });
+        await client.query('BEGIN');
+        await client.query(
+            'UPDATE empleado SET id_sucursal=$1 WHERE identidad=$2 AND tenant_id=$3',
+            [id_sucursal_destino, req.params.id, req.tenantId]
+        );
+        if (nueva_idCaja) {
+            const userRes = await client.query('SELECT codUsuario, idrol FROM usuarios WHERE identidad=$1 AND tenant_id=$2 LIMIT 1', [req.params.id, req.tenantId]);
+            if (userRes.rows.length) {
+                const assignment = await validateUserAssignment(client, req.tenantId, {
+                    idrol: userRes.rows[0].idrol,
+                    idCaja: nueva_idCaja,
+                    id_sucursal: id_sucursal_destino,
+                    codUsuario: userRes.rows[0].codusuario,
+                });
+                if (assignment.error) throw new Error(assignment.error);
+            }
+            await client.query(
+                'UPDATE usuarios SET idCaja=$1, id_sucursal=$2 WHERE identidad=$3 AND tenant_id=$4',
+                [nueva_idCaja, id_sucursal_destino, req.params.id, req.tenantId]
+            );
+        } else {
+            await client.query(
+                'UPDATE usuarios SET id_sucursal=$1 WHERE identidad=$2 AND tenant_id=$3',
+                [id_sucursal_destino, req.params.id, req.tenantId]
+            );
+        }
+        await client.query('COMMIT');
+        res.json({ message: 'Empleado transferido correctamente' });
+    } catch(e) { await client.query('ROLLBACK'); handleDbError(res, e); } finally { client.release(); }
+});
+
+router.delete('/empleados/:id', authenticateToken, requireAdmin, async (req, res) => {
+    try {
+        await pool.query('DELETE FROM empleado WHERE identidad=$1 AND tenant_id=$2', [req.params.id, req.tenantId]);
         res.json({ message: 'OK' });
     } catch(e) { handleDbError(res, e); }
 });
 
 router.get('/roles', authenticateToken, requireAdmin, async (req, res) => {
     try {
-        const roles = await pool.query('SELECT idrol, nombre, estado FROM roles');
+        const roles = await pool.query('SELECT idrol, nombre, estado FROM roles WHERE tenant_id = $1', [req.tenantId]);
         const rolesWithPerms = await Promise.all(roles.rows.map(async (rol) => {
-            const perms = await pool.query('SELECT idPermiso FROM rol_permisos WHERE idRol = $1', [rol.idrol]);
+            // rol_permisos has no tenant_id — scope via roles subquery
+            const perms = await pool.query(
+                'SELECT idPermiso FROM rol_permisos WHERE idRol = $1 AND idRol IN (SELECT idrol FROM roles WHERE tenant_id = $2)',
+                [rol.idrol, req.tenantId]
+            );
             return { ...rol, permisos: perms.rows.map(p => p.idpermiso) };
         }));
         res.json(rolesWithPerms);
@@ -343,8 +522,12 @@ router.post('/roles', authenticateToken, requireAdmin, async (req, res) => {
     try {
         const { nombre, estado, permisos } = req.body;
         await client.query('BEGIN');
-        const idRol = await generateNextId('roles', 'idrol', 'ROL', client);
-        await client.query('INSERT INTO roles (idrol, nombre, estado) VALUES ($1, $2, $3)', [idRol, nombre, estado]);
+        // idrol is SERIAL — let the DB auto-generate it
+        const r = await client.query(
+            'INSERT INTO roles (nombre, estado, tenant_id) VALUES ($1, $2, $3) RETURNING idrol',
+            [nombre, estado, req.tenantId]
+        );
+        const idRol = r.rows[0].idrol;
         if (permisos && Array.isArray(permisos)) {
             for (const pid of permisos) {
                 await client.query('INSERT INTO rol_permisos (idRol, idPermiso) VALUES ($1, $2)', [idRol, pid]);
@@ -360,8 +543,15 @@ router.put('/roles/:id', authenticateToken, requireAdmin, async (req, res) => {
     try {
         const { nombre, estado, permisos } = req.body;
         await client.query('BEGIN');
-        await client.query('UPDATE roles SET nombre=$1, estado=$2 WHERE idrol=$3', [nombre, estado, req.params.id]);
-        await client.query('DELETE FROM rol_permisos WHERE idRol=$1', [req.params.id]);
+        await client.query(
+            'UPDATE roles SET nombre=$1, estado=$2 WHERE idrol=$3 AND tenant_id=$4',
+            [nombre, estado, req.params.id, req.tenantId]
+        );
+        // rol_permisos scoped via roles — only delete if role belongs to this tenant
+        await client.query(
+            'DELETE FROM rol_permisos WHERE idRol=$1 AND idRol IN (SELECT idrol FROM roles WHERE tenant_id=$2)',
+            [req.params.id, req.tenantId]
+        );
         if (permisos && Array.isArray(permisos)) {
             for (const pid of permisos) {
                 await client.query('INSERT INTO rol_permisos (idRol, idPermiso) VALUES ($1, $2)', [req.params.id, pid]);
@@ -374,12 +564,13 @@ router.put('/roles/:id', authenticateToken, requireAdmin, async (req, res) => {
 
 router.delete('/roles/:id', authenticateToken, requireAdmin, async (req, res) => {
     try {
-        await pool.query('DELETE FROM roles WHERE idrol=$1', [req.params.id]);
+        await pool.query('DELETE FROM roles WHERE idrol=$1 AND tenant_id=$2', [req.params.id, req.tenantId]);
         res.json({ message: 'OK' });
     } catch(e) { handleDbError(res, e); }
 });
 
-router.get('/permisos', authenticateToken, async (req, res) => {
+// permisos is a global catalog — no tenant_id filter
+router.get('/permisos', authenticateToken, requireAdmin, async (req, res) => {
     try {
         const r = await pool.query('SELECT idPermiso as "idPermiso", nombre, modulo FROM permisos ORDER BY modulo, nombre');
         res.json(r.rows);
@@ -388,31 +579,63 @@ router.get('/permisos', authenticateToken, async (req, res) => {
 
 router.get('/cajas', authenticateToken, async (req, res) => {
     try {
-        const r = await pool.query('SELECT idCaja as "idCaja", nombre, estado FROM caja');
+        const { id_sucursal } = req.query;
+        let query = `
+            SELECT c.idCaja as "idCaja", c.nombre, c.estado, c.id_sucursal, s.nombre AS "sucursal_nombre"
+            FROM caja c
+            LEFT JOIN sucursales s ON c.id_sucursal = s.id_sucursal AND s.tenant_id = $1
+            WHERE c.tenant_id = $1
+        `;
+        const params = [req.tenantId];
+        if (id_sucursal) { params.push(id_sucursal); query += ` AND c.id_sucursal = $${params.length}`; }
+        query += ' ORDER BY c.idCaja';
+        const r = await pool.query(query, params);
         res.json(r.rows);
-    } catch(e) { handleDbError(res, e); }
+    } catch(e) {
+        if (e.code === '42703') {
+            // id_sucursal column not yet migrated — return without sucursal info
+            try {
+                const r = await pool.query(`SELECT idCaja as "idCaja", nombre, estado FROM caja WHERE tenant_id = $1 ORDER BY idCaja`, [req.tenantId]);
+                res.json(r.rows);
+            } catch(e2) { handleDbError(res, e2); }
+        } else { handleDbError(res, e); }
+    }
 });
 
-router.post('/cajas', authenticateToken, async (req, res) => {
+router.post('/cajas', authenticateToken, requireAdmin, async (req, res) => {
     try {
-        const { nombre } = req.body;
-        const idCaja = await generateNextId('caja', 'idCaja', 'CAJA');
-        await pool.query('INSERT INTO caja (idCaja, nombre, estado) VALUES ($1, $2, $3)', [idCaja, nombre, 'Activo']);
+        const { nombre, id_sucursal } = req.body;
+        if (!nombre) return res.status(400).json({ error: 'nombre es requerido' });
+        if (!id_sucursal) return res.status(400).json({ error: 'id_sucursal es requerido' });
+        const idCaja = await withTenantContext(req.tenantId, async (client) => {
+            const id = await generateNextId('caja', 'idCaja', 'CAJA', client);
+            await client.query(
+                'INSERT INTO caja (idCaja, nombre, estado, id_sucursal, tenant_id) VALUES ($1, $2, $3, $4, $5)',
+                [id, nombre, 'Activo', id_sucursal, req.tenantId]
+            );
+            return id;
+        });
         res.status(201).json({ message: 'OK', idCaja });
     } catch(e) { handleDbError(res, e); }
 });
 
-router.put('/cajas/:id', authenticateToken, async (req, res) => {
+router.put('/cajas/:id', authenticateToken, requireAdmin, async (req, res) => {
     try {
-        const { nombre, estado } = req.body;
-        await pool.query('UPDATE caja SET nombre=$1, estado=$2 WHERE idCaja=$3', [nombre, estado, req.params.id]);
+        const { nombre, estado, id_sucursal } = req.body;
+        if (estado && !['Activo', 'Inactivo'].includes(estado)) {
+            return res.status(400).json({ error: 'estado debe ser Activo o Inactivo' });
+        }
+        await pool.query(
+            'UPDATE caja SET nombre=$1, estado=$2, id_sucursal=$3 WHERE idCaja=$4 AND tenant_id=$5',
+            [nombre, estado, id_sucursal || null, req.params.id, req.tenantId]
+        );
         res.json({ message: 'OK' });
     } catch(e) { handleDbError(res, e); }
 });
 
-router.delete('/cajas/:id', authenticateToken, async (req, res) => {
+router.delete('/cajas/:id', authenticateToken, requireAdmin, async (req, res) => {
     try {
-        await pool.query('DELETE FROM caja WHERE idCaja=$1', [req.params.id]);
+        await pool.query('DELETE FROM caja WHERE idCaja=$1 AND tenant_id=$2', [req.params.id, req.tenantId]);
         res.json({ message: 'OK' });
     } catch(e) { handleDbError(res, e); }
 });

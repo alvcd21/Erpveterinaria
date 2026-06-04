@@ -187,7 +187,7 @@ async function sendDailyReportEmail(to, reportData) {
     const gananciaColor = gananciaEstimada >= 0 ? '#2e7d32' : '#c62828';
 
     const topProductosRows = topProductos.length > 0
-        ? topProductos.map(p => `<tr><td>${p.nombre}</td><td style="text-align:right;font-weight:600;">${p.cantidad}</td></tr>`).join('')
+        ? topProductos.map(p => `<tr><td>${p.producto ?? p.nombre ?? ''}</td><td style="text-align:right;font-weight:600;">${p.cantidad}</td></tr>`).join('')
         : '<tr><td colspan="2" style="color:#888;text-align:center;">Sin datos</td></tr>';
 
     try {
@@ -435,6 +435,156 @@ async function sendBackupConfirmationEmail(to, date, fileSize, driveLink) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// g) Welcome email para nuevo cliente
+// ---------------------------------------------------------------------------
+async function sendWelcomeEmail(to, nombre, apellido) {
+    await warmEmailConfig();
+    try {
+        const company = getCOMPANY();
+        const html = wrapHtml(
+            'Bienvenido',
+            '#1565c0',
+            `<div class="header">
+               <h1>¡Bienvenido, ${nombre}!</h1>
+               <p>${company}</p>
+             </div>
+             <div class="body">
+               <p>Hola <strong>${nombre} ${apellido || ''}</strong>, gracias por registrarte con nosotros.</p>
+               <p>A partir de ahora podrás disfrutar de todos nuestros servicios: ventas, reparaciones, garantías y más.</p>
+               <div class="success-box">
+                 Guarda este correo — te enviaremos aquí actualizaciones sobre tus reparaciones y recordatorios de garantía.
+               </div>
+               <p style="font-size:13px;color:#555;">Si tienes alguna pregunta, no dudes en contactarnos.<br><strong>${company}</strong></p>
+             </div>`
+        );
+        await getResend().emails.send({ from: getFROM(), to, subject: `Bienvenido a ${company}`, html });
+        return { success: true };
+    } catch (err) {
+        console.error('[emailService] sendWelcomeEmail error:', err.message);
+        throw err;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// h) Monthly report email - receives pre-built HTML content
+// ---------------------------------------------------------------------------
+async function sendMonthlyReportEmail(to, mes, htmlBody) {
+    await warmEmailConfig();
+    try {
+        const html = wrapHtml(`Reporte Mensual ${mes}`, '#1b5e20', htmlBody);
+        await getResend().emails.send({
+            from: getFROM(),
+            to,
+            subject: `Reporte Mensual — ${mes}`,
+            html
+        });
+        return { success: true };
+    } catch (err) {
+        console.error('[emailService] sendMonthlyReportEmail error:', err.message);
+        throw err;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// i) Follow-up post-reparacion
+// ---------------------------------------------------------------------------
+async function sendFollowUpEmail(to, nombre, repairId, deviceDesc) {
+    await warmEmailConfig();
+    try {
+        const company = getCOMPANY();
+        const html = wrapHtml(
+            'Tu experiencia con nosotros',
+            '#4a148c',
+            `<div class="header" style="background:#4a148c;">
+               <h1>¿Cómo estuvo tu experiencia?</h1>
+               <p>${company}</p>
+             </div>
+             <div class="body">
+               <p>Hola <strong>${nombre}</strong>, hace una semana recogiste tu equipo reparado con nosotros.</p>
+               <div class="card">
+                 <div class="label">Orden de reparación</div>
+                 <div class="value">${repairId}</div>
+               </div>
+               ${deviceDesc ? `<div class="card">
+                 <div class="label">Equipo</div>
+                 <div class="value">${deviceDesc}</div>
+               </div>` : ''}
+               <p style="font-size:14px;margin-top:16px;">Esperamos que todo esté funcionando perfectamente. Si tienes algún problema o inconveniente, no dudes en visitarnos — tu satisfacción es nuestra prioridad.</p>
+               <div class="success-box">
+                 Recuerda que ofrecemos garantía en nuestras reparaciones. Estamos aquí para ayudarte.
+               </div>
+               <p style="font-size:13px;color:#555;"><strong>${company}</strong></p>
+             </div>`
+        );
+        await getResend().emails.send({ from: getFROM(), to, subject: `¿Cómo está tu equipo? — ${company}`, html });
+        return { success: true };
+    } catch (err) {
+        console.error('[emailService] sendFollowUpEmail error:', err.message);
+        throw err;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// i) Token upgrade request notification (to SaaS admin)
+// ---------------------------------------------------------------------------
+async function sendTokenUpgradeRequestEmail(to, { empresa, slug, plan, pct, tokensUsados, tokensLimite, paquete, motivo, periodo }) {
+    await warmEmailConfig();
+    try {
+        const barFilled = Math.min(Math.round((pct || 0) / 5), 20);
+        const barEmpty  = 20 - barFilled;
+        const barColor  = pct >= 100 ? '#e53935' : pct >= 80 ? '#ffc107' : '#4f46e5';
+        const html = wrapHtml('Solicitud de Ampliación de Cuota IA', '#4f46e5', `
+            <div class="header">
+              <h1>Solicitud de Ampliación de Cuota IA</h1>
+              <p>Un cliente ha solicitado más tokens de IA desde el panel</p>
+            </div>
+            <div class="body">
+              <div class="card">
+                <div class="label">Empresa</div>
+                <div class="value">${empresa}</div>
+                <div class="label" style="margin-top:8px">Slug / ID</div>
+                <div class="value" style="font-family:monospace;font-size:14px">${slug}</div>
+              </div>
+              <div style="display:flex;gap:12px;margin-bottom:18px">
+                <div class="card" style="flex:1;margin-bottom:0">
+                  <div class="label">Plan Actual</div>
+                  <div class="value">${(plan || '').toUpperCase()}</div>
+                </div>
+                <div class="card" style="flex:1;margin-bottom:0">
+                  <div class="label">Período</div>
+                  <div class="value">${periodo}</div>
+                </div>
+              </div>
+              <div class="card">
+                <div class="label">Uso de Tokens este período</div>
+                <div class="highlight">${pct}%</div>
+                <div style="margin:8px 0 4px;font-size:13px;color:#555">${(tokensUsados||0).toLocaleString()} de ${(tokensLimite||0).toLocaleString()} tokens</div>
+                <div style="background:#eee;border-radius:20px;height:10px;margin-top:6px">
+                  <div style="background:${barColor};width:${Math.min(pct,100)}%;height:10px;border-radius:20px;transition:width .3s"></div>
+                </div>
+              </div>
+              <div class="card" style="background:#eef2ff;border-left:4px solid #4f46e5">
+                <div class="label">Paquete Solicitado</div>
+                <div class="highlight" style="font-size:22px">${paquete}</div>
+              </div>
+              ${motivo ? `<div class="card"><div class="label">Motivo / Justificación</div><div style="font-size:14px;color:#333;margin-top:4px">${motivo}</div></div>` : ''}
+              <div class="success-box">
+                <strong>Acción requerida:</strong> Revisar la solicitud en el panel de SuperAdmin y procesar el ajuste de cuota o actualización de plan.
+              </div>
+            </div>
+        `);
+        await getResend().emails.send({
+            from: getFROM(),
+            to,
+            subject: `[Solicitud IA] Ampliación de cuota – ${empresa} (Plan ${plan})`,
+            html,
+        });
+    } catch (err) {
+        console.error('[emailService] Error enviando solicitud upgrade IA:', err.message);
+    }
+}
+
 module.exports = {
     sendRepairReadyEmail,
     sendWarrantyExpiryEmail,
@@ -442,4 +592,8 @@ module.exports = {
     sendWeeklyReportEmail,
     sendLowBalanceAlertEmail,
     sendBackupConfirmationEmail,
+    sendWelcomeEmail,
+    sendMonthlyReportEmail,
+    sendFollowUpEmail,
+    sendTokenUpgradeRequestEmail,
 };

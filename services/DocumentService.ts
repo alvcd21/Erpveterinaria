@@ -13,8 +13,8 @@
  * connected to this service in a future sprint.
  */
 
-import { LabelTemplate, Reparacion } from '../types';
-import { LabelService, SalesService, ConfigService, InventoryService } from './api';
+import { LabelTemplate } from '../types';
+import { LabelService, SalesService, ConfigService } from './api';
 import { printTemplate, downloadAsPDF, PrintDataContext } from './TemplateRenderer';
 
 // ─── Empresa config cache (one fetch per session) ─────────────────────────────
@@ -134,39 +134,6 @@ export async function printSaleInvoice(ventaId: string): Promise<DocResult> {
 }
 
 /**
- * Print a repair order.
- * Accepts the Reparacion object directly (caller already has it loaded).
- *
- * @param reparacion - full Reparacion object from the Repairs page
- */
-export async function printRepairOrder(reparacion: Reparacion): Promise<DocResult> {
-  const { template, message } = await resolveTemplate(
-    ['REPORT', 'INVOICE'],
-    'DOCUMENT',
-  );
-
-  if (!template) return { success: false, message };
-
-  try {
-    const empresa = await getEmpresa();
-
-    const ctx: PrintDataContext = {
-      empresa,
-      reparacion,
-      cliente: {
-        nombre:    reparacion.nombre_cliente    || '',
-        identidad: reparacion.identidad_cliente || '',
-      },
-    };
-
-    await printTemplate(template, ctx);
-    return { success: true, message: 'Imprimiendo orden de reparación...' };
-  } catch (err: any) {
-    return { success: false, message: err.message || 'Error al generar la orden de reparación.' };
-  }
-}
-
-/**
  * Download a sale invoice as PDF using the designer template.
  * Falls back with an error message if no INVOICE template is configured.
  *
@@ -201,95 +168,22 @@ export async function downloadSaleInvoicePDF(ventaId: string): Promise<DocResult
 }
 
 /**
- * Download a repair order as PDF using the designer template.
- * Falls back with an error message if no template is configured.
- *
- * @param reparacion - full Reparacion object from the Repairs page
+ * Print a medication label using the label designer template.
  */
-export async function downloadRepairOrderPDF(reparacion: Reparacion): Promise<DocResult> {
-  const { template, message } = await resolveTemplate(['REPORT', 'INVOICE'], 'DOCUMENT');
+export async function printMedicamentoLabel(medicamento: Record<string, any>): Promise<DocResult> {
+  const { template, message } = await resolveTemplate(['MEDICAMENTO', 'GENERAL'], 'LABEL', 'MEDICAMENTOS');
   if (!template) return { success: false, message };
 
   try {
     const empresa = await getEmpresa();
-
     const ctx: PrintDataContext = {
       empresa,
-      reparacion,
-      cliente: {
-        nombre:    reparacion.nombre_cliente    || '',
-        identidad: reparacion.identidad_cliente || '',
-      },
+      medicamento,
+      ...medicamento,
     };
-
-    await downloadAsPDF(template, ctx, `Orden_Reparacion_${reparacion.id_reparacion}`);
-    return { success: true, message: '' };
-  } catch (err: any) {
-    return { success: false, message: err.message || 'Error al generar la orden de reparación.' };
-  }
-}
-
-/**
- * Print a product price label.
- * Accepts the product data directly (caller already has it loaded).
- *
- * @param producto  - telefono or inventario/accesorio object
- * @param tipo      - 'TELEFONO' | 'ACCESORIO'
- */
-export async function printProductLabel(
-  producto: Record<string, any>,
-  tipo: 'TELEFONO' | 'ACCESORIO',
-): Promise<DocResult> {
-  const categories = tipo === 'TELEFONO'
-    ? ['TELEPHONE', 'GENERAL']
-    : ['ACCESSORY', 'GENERAL'];
-
-  const { template, message } = await resolveTemplate(categories, 'LABEL');
-
-  if (!template) return { success: false, message };
-
-  try {
-    const empresa = await getEmpresa();
-
-    // Spread product fields to top level so {{marca}}, {{modelo}}, {{precioVenta}} etc. resolve
-    const ctx: PrintDataContext = {
-      empresa,
-      producto: producto as any,
-      ...producto,
-    };
-
     await printTemplate(template, ctx);
     return { success: true, message: 'Imprimiendo etiqueta...' };
   } catch (err: any) {
     return { success: false, message: err.message || 'Error al generar la etiqueta.' };
-  }
-}
-
-/**
- * Print multiple product labels in sequence (one print dialog per label).
- * For batch printing, prefer generating a multi-page HTML and printing once.
- */
-export async function printMultipleLabels(
-  productos: Array<{ data: Record<string, any>; tipo: 'TELEFONO' | 'ACCESORIO' }>,
-): Promise<DocResult> {
-  const categories = ['TELEPHONE', 'ACCESSORY', 'GENERAL'];
-  const { template, message } = await resolveTemplate(categories, 'LABEL');
-
-  if (!template) return { success: false, message };
-
-  try {
-    const empresa = await getEmpresa();
-    // For now print them one by one; a future version can generate a multi-up sheet
-    for (const item of productos) {
-      const ctx: PrintDataContext = {
-        empresa,
-        producto: item.data as any,
-        ...item.data,
-      };
-      await printTemplate(template, ctx);
-    }
-    return { success: true, message: `${productos.length} etiqueta(s) enviadas a imprimir.` };
-  } catch (err: any) {
-    return { success: false, message: err.message || 'Error al imprimir etiquetas.' };
   }
 }

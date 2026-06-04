@@ -1,17 +1,8 @@
 
-import React, { memo, useRef, useEffect, useState, useCallback } from 'react';
-import JsBarcode from 'jsbarcode';
-import QRCode from 'qrcode';
-import { RotateCw, ZoomIn, ZoomOut, Maximize, Lock, Hand, MousePointer2 } from 'lucide-react';
-import { LabelTemplate, LabelElement, InvoiceColumn, SummaryRow, EmpresaConfig } from '../../types';
-
-const defaultCols: InvoiceColumn[] = [
-  { id: 'c1', header: 'Descripción', field: '{{item.descripcion}}', widthPct: 45, align: 'left', format: 'TEXT' },
-  { id: 'c2', header: 'Cant.', field: '{{item.cantidad}}', widthPct: 10, align: 'center', format: 'NUMBER' },
-  { id: 'c3', header: 'P. Unit.', field: '{{item.precioVenta}}', widthPct: 15, align: 'right', format: 'CURRENCY' },
-  { id: 'c4', header: 'ISV', field: '{{item.isv}}', widthPct: 10, align: 'right', format: 'CURRENCY' },
-  { id: 'c5', header: 'Total', field: '{{item.total}}', widthPct: 20, align: 'right', format: 'CURRENCY' },
-];
+import React, { memo, useRef, useEffect, useState } from 'react';
+import { ZoomIn, ZoomOut, Maximize, Hand, MousePointer2 } from 'lucide-react';
+import { LabelTemplate, EmpresaConfig } from '../../types';
+import CanvasElement from './CanvasElement';
 
 interface DesignerCanvasProps {
     template: LabelTemplate;
@@ -35,337 +26,6 @@ interface DesignerCanvasProps {
     lasso?: { x1: number; y1: number; x2: number; y2: number } | null;
 }
 
-/** Resuelve tokens {{empresa.X}} en el canvas para preview */
-const DATE_KEYS_RE = /^(fechaLimite|fechaVenta|fechaIngreso|fechaCreacion|fechaSalida)$/i;
-
-function formatSpanishDatePreview(val: string): string {
-    if (!val) return val;
-    const d = new Date(val);
-    if (isNaN(d.getTime())) return val;
-    const isDateOnly = /^\d{4}-\d{2}-\d{2}(T00:00:00)?/.test(val);
-    const day   = String(isDateOnly ? d.getUTCDate()      : d.getDate()).padStart(2, '0');
-    const month = String(isDateOnly ? d.getUTCMonth() + 1 : d.getMonth() + 1).padStart(2, '0');
-    const year  =        isDateOnly ? d.getUTCFullYear()   : d.getFullYear();
-    return `${day}/${month}/${year}`;
-}
-
-function resolveEmpresaTokens(content: string, emp: Partial<EmpresaConfig>): string {
-    return content.replace(/\{\{empresa\.(\w+)\}\}/g, (_, key) => {
-        const val = (emp as any)[key];
-        if (val === undefined || val === null) return `{{empresa.${key}}}`;
-        const str = String(val);
-        return DATE_KEYS_RE.test(key) ? formatSpanishDatePreview(str) || str : str;
-    });
-}
-
-const renderBarcode = (el: LabelElement) => {
-    const canvas = document.createElement('canvas');
-    try {
-        // FIX: If content has variable braces {{...}}, render a generic code for preview
-        const hasVariable = /{{.*?}}/.test(el.content);
-        const content = hasVariable ? '123456' : el.content;
-
-        JsBarcode(canvas, content, {
-            format: (el.barcodeFormat as any) || "CODE128",
-            displayValue: el.displayValue,
-            margin: 0, width: 2, height: 50, fontSize: 20,
-            lineColor: el.barcodeFgColor || '#000000',
-            background: el.barcodeBgColor || '#ffffff',
-        });
-        return canvas.toDataURL("image/png");
-    } catch (e) { return ''; }
-};
-
-// QR rendering is async — handled inside CanvasElement via useState/useEffect
-
-const CLIP_PATHS: Record<string, string> = {
-  TRIANGLE_TL: 'polygon(0 0, 100% 0, 0 100%)',
-  TRIANGLE_TR: 'polygon(0 0, 100% 0, 100% 100%)',
-  TRIANGLE_BL: 'polygon(0 0, 0 100%, 100% 100%)',
-  TRIANGLE_BR: 'polygon(100% 0, 100% 100%, 0 100%)',
-  RHOMBUS:     'polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)',
-};
-
-// Memoized Element with Scale Injection
-const CanvasElement = memo(({ el, isSelected, isMultiSelected, scale, onPointerDown, onSelect, tool, isEditing, onStartEdit, onCommitEdit, onContextMenu, empresaConfig }: any) => {
-    const emp: Partial<EmpresaConfig> = empresaConfig || {};
-    // QR: async rendering with local state
-    const [qrSrc, setQrSrc] = useState('');
-    useEffect(() => {
-        if (el.type === 'QR') {
-            const hasVariable = /{{.*?}}/.test(el.content);
-            const content = hasVariable ? 'DEMO-QR' : (el.content || 'QR');
-            QRCode.toDataURL(content, {
-                margin: 0,
-                color: {
-                    dark: el.qrFgColor || '#000000',
-                    light: el.qrBgColor || '#ffffff',
-                }
-            })
-                .then((url: string) => setQrSrc(url))
-                .catch(() => setQrSrc(''));
-        }
-    }, [el.type, el.content, el.qrFgColor, el.qrBgColor]);
-    // Logic for "Hollow" objects:
-    const isHollow = el.type === 'SHAPE' && (el.fill === 'transparent' || !el.fill) && !CLIP_PATHS[el.shapeType || ''];
-    const isLocked = el.locked === true;
-    const hasCondition = !!el.visibilityCondition;
-
-    // CRITICAL FIX: If tool is HAND, disable pointer events on individual elements
-    const pointerEventsClass = tool === 'HAND' ? 'pointer-events-none' : (isHollow && !isEditing ? 'pointer-events-none' : '');
-
-    const showHandles = isSelected && tool === 'SELECT' && !isEditing && !isLocked;
-
-    // Shadow CSS
-    const shadowStyle = el.shadowEnabled
-        ? `drop-shadow(${el.shadowOffsetX ?? 2}px ${el.shadowOffsetY ?? 2}px ${el.shadowBlur ?? 4}px ${el.shadowColor ?? 'rgba(0,0,0,0.3)'})`
-        : undefined;
-
-    return (
-        <div
-            onMouseDown={(e) => { if (isEditing || isLocked) return; tool === 'SELECT' && onPointerDown(e, el.id, 'MOVE'); }}
-            onTouchStart={(e) => { if (isEditing || isLocked) return; tool === 'SELECT' && onPointerDown(e, el.id, 'MOVE'); }}
-            onDoubleClick={(e) => { if (tool === 'SELECT' && el.type === 'TEXT' && !isLocked) { e.stopPropagation(); onStartEdit?.(el.id); } }}
-            onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onContextMenu?.(e, el.id); }}
-            className={`absolute group select-none ${isEditing ? 'cursor-text' : isLocked ? 'cursor-default' : 'cursor-move'}
-                ${isSelected ? 'z-50 outline outline-2 outline-indigo-500' : isMultiSelected ? 'z-40 outline outline-2 outline-blue-400 outline-dashed' : 'z-10 hover:outline hover:outline-1 hover:outline-indigo-300'}
-                ${pointerEventsClass}`}
-            style={{
-                left: `${el.x * scale}px`,
-                top: `${el.y * scale}px`,
-                width: `${el.width * scale}px`,
-                height: `${el.height * scale}px`,
-                transform: `rotate(${el.rotation}deg)`,
-                opacity: el.opacity ?? 1,
-                filter: shadowStyle,
-            }}
-            onClick={(e) => { if (isEditing) return; e.stopPropagation(); if(tool === 'SELECT') onSelect(el.id, e); }}
-        >
-            {/* Inner Content */}
-            <div className={`w-full h-full overflow-hidden flex items-center justify-center relative ${tool === 'HAND' ? '' : (isHollow ? 'pointer-events-none' : '')}`} style={{
-                borderRadius: el.shapeType === 'CIRCLE' ? '50%' : (el.borderRadius ? `${el.borderRadius}px` : '0'),
-                background: el.type === 'SHAPE'
-                    ? (el.gradientEnabled && el.gradientColor1 && el.gradientColor2
-                        ? (el.gradientType === 'radial'
-                            ? `radial-gradient(circle, ${el.gradientColor1}, ${el.gradientColor2})`
-                            : `linear-gradient(${el.gradientAngle ?? 135}deg, ${el.gradientColor1}, ${el.gradientColor2})`)
-                        : (el.fill || 'transparent'))
-                    : 'transparent',
-                clipPath: el.type === 'SHAPE' ? (CLIP_PATHS[el.shapeType || ''] ?? undefined) : undefined,
-            }}>
-                {/* Border overlay: only for RECTANGLE/CIRCLE (clip-path shapes don't support CSS border) */}
-                {el.type === 'SHAPE' && !CLIP_PATHS[el.shapeType || ''] && el.shapeType !== 'LINE' && (
-                    <div
-                        className={tool === 'SELECT' && isHollow ? 'pointer-events-auto' : ''}
-                        style={{
-                            position: 'absolute', inset: 0,
-                            border: `${(el.strokeWidth||1)}px solid ${el.stroke}`,
-                            borderRadius: el.shapeType === 'CIRCLE' ? '50%' : (el.borderRadius ? `${el.borderRadius}px` : '0'),
-                        }}
-                    />
-                )}
-
-                {el.type === 'TEXT' && isEditing ? (
-                    <textarea
-                        autoFocus
-                        defaultValue={el.content}
-                        style={{
-                            width: '100%', height: '100%',
-                            fontSize: `${(el.fontSize||10)}pt`,
-                            fontFamily: el.fontFamily,
-                            fontWeight: el.fontWeight,
-                            fontStyle: el.italic ? 'italic' : 'normal',
-                            color: el.color,
-                            textAlign: el.textAlign,
-                            lineHeight: String(el.lineHeight || 1.2),
-                            letterSpacing: el.letterSpacing ? `${el.letterSpacing}px` : 'normal',
-                            background: el.backgroundColor || 'transparent',
-                            border: 'none', outline: '2px solid #6366f1',
-                            resize: 'none', padding: '0 2px',
-                            boxSizing: 'border-box',
-                        }}
-                        onBlur={e => onCommitEdit?.(el.id, e.target.value)}
-                        onKeyDown={e => {
-                            if (e.key === 'Escape') { onCommitEdit?.(el.id, el.content); }
-                            if (e.key === 'Enter' && !el.isMultiline) { e.preventDefault(); e.currentTarget.blur(); }
-                        }}
-                        onClick={e => e.stopPropagation()}
-                        onMouseDown={e => e.stopPropagation()}
-                    />
-                ) : el.type === 'TEXT' ? (
-                    <div className={tool === 'SELECT' ? 'pointer-events-auto' : ''} style={{
-                        fontSize: `${(el.fontSize||10)}pt`,
-                        fontFamily: el.fontFamily,
-                        fontWeight: el.fontWeight,
-                        fontStyle: el.italic ? 'italic' : 'normal',
-                        textDecoration: el.underline ? 'underline' : 'none',
-                        color: el.color,
-                        textAlign: el.textAlign,
-                        whiteSpace: el.isMultiline ? 'pre-wrap' : 'nowrap',
-                        width: '100%', height: '100%',
-                        lineHeight: el.lineHeight || 1.2,
-                        letterSpacing: el.letterSpacing ? `${el.letterSpacing}px` : 'normal',
-                        backgroundColor: el.backgroundColor || 'transparent',
-                        display: 'flex', alignItems: 'center',
-                        justifyContent: el.textAlign === 'center' ? 'center' : el.textAlign === 'right' ? 'flex-end' : 'flex-start',
-                        padding: '0 2px',
-                    }}>{resolveEmpresaTokens(el.content || '', emp)}</div>
-                ) : null}
-                {el.type === 'BARCODE' && <img src={renderBarcode(el)} className="w-full h-full object-fill pointer-events-none"/>}
-                {el.type === 'QR' && qrSrc && <img src={qrSrc} className="w-full h-full object-contain pointer-events-none"/>}
-                {el.type === 'IMAGE' && (
-                    el.content === '{{empresa.logoBase64}}' && emp.logoBase64 ? (
-                        <img src={emp.logoBase64} className="w-full h-full pointer-events-none" style={{ objectFit: (el.imageObjectFit || 'contain') as any }}/>
-                    ) : /^\{\{/.test(el.content || '') ? (
-                        <div className="w-full h-full flex flex-col items-center justify-center bg-slate-100 border border-dashed border-slate-300 pointer-events-none gap-1">
-                            <span className="text-[9px] font-mono text-slate-400 text-center px-1 leading-tight">{el.elementLabel || el.content}</span>
-                            <span className="text-[8px] text-slate-300">Logo cargado al imprimir</span>
-                        </div>
-                    ) : (
-                        <img src={el.content} className="w-full h-full pointer-events-none" style={{ objectFit: (el.imageObjectFit || 'contain') as any }}/>
-                    )
-                )}
-                {el.type === 'SHAPE' && el.shapeType === 'LINE' && <div className={tool === 'SELECT' && isHollow ? 'pointer-events-auto' : ''} style={{width:'100%', height:`${(el.strokeWidth||1)}px`, backgroundColor: el.stroke}}/>}
-
-                {el.type === 'COMPANY_HEADER' && el.companyStyle === 'GEOMETRIC' && (
-                    <div className={`w-full h-full overflow-hidden relative ${tool === 'SELECT' ? 'pointer-events-auto' : ''}`}>
-                        {/* Dark blue base */}
-                        <div style={{ position: 'absolute', inset: 0, background: '#1e3a8a' }} />
-                        {/* Accent triangle */}
-                        <div style={{ position: 'absolute', inset: 0, background: '#3b82f6', clipPath: 'polygon(0 0, 48% 0, 0 100%)' }} />
-                        {/* Content */}
-                        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', padding: '6px 10px', gap: 8 }}>
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                                <div style={{ fontWeight: 'bold', fontSize: `${(el.fontSize || 9) + 3}pt`, color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{emp.nombreEmpresa || 'NOMBRE DE LA EMPRESA'}</div>
-                                {el.companyShowRTN !== false && <div style={{ color: 'rgba(255,255,255,0.85)', fontSize: `${el.fontSize || 9}pt` }}>RTN: {emp.rtn || '0000-0000-000000'}</div>}
-                                <div style={{ color: 'rgba(255,255,255,0.85)', fontSize: `${el.fontSize || 9}pt` }}>{emp.direccion || 'Dirección'}{emp.telefono ? ` · Tel: ${emp.telefono}` : ''}</div>
-                            </div>
-                            {el.companyDocTitle && (
-                                <div style={{ color: '#fff', fontWeight: 900, fontSize: `${(el.fontSize || 9) + 10}pt`, letterSpacing: 2, flexShrink: 0 }}>
-                                    {el.companyDocTitle}
-                                </div>
-                            )}
-                        </div>
-                    </div>
-                )}
-
-                {el.type === 'COMPANY_HEADER' && el.companyStyle !== 'GEOMETRIC' && (
-                    <div className={`w-full h-full p-1 overflow-hidden ${tool === 'SELECT' ? 'pointer-events-auto' : ''}`}
-                        style={{ textAlign: el.companyAlign || 'center', fontSize: `${el.fontSize || 9}pt`, lineHeight: 1.4 }}>
-                        <div style={{ fontWeight: 'bold', fontSize: `${(el.fontSize || 9) + 2}pt`, color: el.color || '#000' }}>{emp.nombreEmpresa || 'NOMBRE DE LA EMPRESA'}</div>
-                        {el.companyShowRTN !== false && <div style={{ color: el.color || '#555', fontSize: `${el.fontSize || 9}pt` }}>RTN: {emp.rtn || '0000-0000-000000'}</div>}
-                        <div style={{ color: el.color || '#555', fontSize: `${el.fontSize || 9}pt` }}>{emp.direccion || 'Dirección de la Empresa'}</div>
-                        {el.companyShowPhone !== false && <div style={{ color: el.color || '#555', fontSize: `${el.fontSize || 9}pt` }}>Tel: {emp.telefono || '0000-0000'}</div>}
-                        {el.companyShowEmail && <div style={{ color: el.color || '#555', fontSize: `${el.fontSize || 9}pt` }}>{emp.correo || 'empresa@correo.com'}</div>}
-                    </div>
-                )}
-
-                {el.type === 'SUMMARY_BOX' && (
-                    <div className={`w-full h-full overflow-hidden ${tool === 'SELECT' ? 'pointer-events-auto' : ''}`}
-                        style={{ backgroundColor: el.summaryBg || 'transparent', fontSize: `${el.summaryFontSize || 9}pt` }}>
-                        {(el.summaryRows || []).map((row: SummaryRow) => (
-                            <div key={row.id}>
-                                {row.separator && <div style={{ borderTop: '1px solid #cbd5e1', margin: '2px 0' }} />}
-                                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '1px 4px',
-                                    fontWeight: row.bold ? 'bold' : 'normal', color: el.summaryLabelColor || '#000' }}>
-                                    <span>{row.label}</span>
-                                    <span style={{ color: el.summaryValueColor || '#000', fontFamily: 'monospace' }}>{row.field}</span>
-                                </div>
-                            </div>
-                        ))}
-                        {(!el.summaryRows || el.summaryRows.length === 0) && (
-                            <div className="w-full h-full flex items-center justify-center text-slate-300 text-xs">RESUMEN TOTALES</div>
-                        )}
-                    </div>
-                )}
-
-                {el.type === 'INVOICE_TABLE' && (
-                    <div className={`w-full h-full overflow-hidden text-[8px] border border-slate-300 ${tool === 'SELECT' ? 'pointer-events-auto' : ''}`}>
-                        {/* Header row */}
-                        <div className="flex" style={{ backgroundColor: el.tableHeaderBg || '#1e293b', color: el.tableHeaderColor || '#ffffff', minHeight: (el.tableRowHeight || 8) * scale / scale }}>
-                            {(el.tableColumns || defaultCols).map((col: InvoiceColumn, ci: number) => (
-                                <div key={ci} className="font-bold px-1 flex items-center overflow-hidden truncate" style={{
-                                    width: `${col.widthPct}%`,
-                                    justifyContent: col.align === 'center' ? 'center' : col.align === 'right' ? 'flex-end' : 'flex-start',
-                                    fontSize: `${el.tableFontSize || 8}px`,
-                                }}>
-                                    {col.header}
-                                </div>
-                            ))}
-                        </div>
-                        {/* Sample data rows */}
-                        {[1,2,3].map((row, ri) => (
-                            <div key={ri} className="flex border-t border-slate-200" style={{
-                                backgroundColor: (el.tableAlternateRows && ri % 2 === 1) ? (el.tableAlternateBg || '#f8fafc') : 'white',
-                            }}>
-                                {(el.tableColumns || defaultCols).map((col: InvoiceColumn, ci: number) => (
-                                    <div key={ci} className="px-1 flex items-center text-slate-400 overflow-hidden truncate" style={{
-                                        width: `${col.widthPct}%`,
-                                        justifyContent: col.align === 'center' ? 'center' : col.align === 'right' ? 'flex-end' : 'flex-start',
-                                        fontSize: `${el.tableFontSize || 8}px`,
-                                    }}>
-                                        {col.format === 'CURRENCY' ? 'L. 0.00' : col.format === 'NUMBER' ? '0' : '···'}
-                                    </div>
-                                ))}
-                            </div>
-                        ))}
-                    </div>
-                )}
-            </div>
-
-            {/* Can-Grow indicator — visible dashed bottom border with arrow */}
-            {el.canGrow && (
-                <div className="absolute bottom-0 left-0 right-0 pointer-events-none z-40"
-                    style={{ borderBottom: '2px dashed #3b82f6' }}>
-                    <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 bg-blue-500 text-white rounded px-1 py-0 text-[8px] font-bold leading-4 whitespace-nowrap">
-                        ↕ Crece
-                    </div>
-                </div>
-            )}
-
-            {/* Lock indicator */}
-            {isLocked && isSelected && (
-                <div className="absolute -top-5 -right-1 bg-amber-500 text-white rounded-full w-4 h-4 flex items-center justify-center shadow-sm z-50 pointer-events-none">
-                    <Lock size={8}/>
-                </div>
-            )}
-
-            {/* Conditional visibility indicator */}
-            {hasCondition && !isLocked && (
-                <div className="absolute top-0 right-0 w-3 h-3 bg-orange-400 rounded-full z-50 pointer-events-none" title="Visibilidad condicional"/>
-            )}
-
-            {/* 8 Resize Handles + Rotate */}
-            {showHandles && (
-                <>
-                    {[
-                        { handle: 'n',  style: { top: -4, left: '50%', transform: 'translateX(-50%)', cursor: 'n-resize' } as React.CSSProperties },
-                        { handle: 's',  style: { bottom: -4, left: '50%', transform: 'translateX(-50%)', cursor: 's-resize' } as React.CSSProperties },
-                        { handle: 'e',  style: { right: -4, top: '50%', transform: 'translateY(-50%)', cursor: 'e-resize' } as React.CSSProperties },
-                        { handle: 'w',  style: { left: -4, top: '50%', transform: 'translateY(-50%)', cursor: 'w-resize' } as React.CSSProperties },
-                        { handle: 'ne', style: { top: -4, right: -4, cursor: 'ne-resize' } as React.CSSProperties },
-                        { handle: 'nw', style: { top: -4, left: -4, cursor: 'nw-resize' } as React.CSSProperties },
-                        { handle: 'se', style: { bottom: -4, right: -4, cursor: 'se-resize' } as React.CSSProperties },
-                        { handle: 'sw', style: { bottom: -4, left: -4, cursor: 'sw-resize' } as React.CSSProperties },
-                    ].map(({ handle, style }) => (
-                        <div
-                            key={handle}
-                            className="absolute w-3 h-3 bg-white border-2 border-indigo-600 rounded-sm shadow-sm pointer-events-auto"
-                            style={{ position: 'absolute', ...style }}
-                            onMouseDown={(e) => { e.stopPropagation(); onPointerDown(e, el.id, 'RESIZE', handle); }}
-                            onTouchStart={(e) => { e.stopPropagation(); onPointerDown(e, el.id, 'RESIZE', handle); }}
-                        />
-                    ))}
-                    <div className="absolute -top-6 left-1/2 -translate-x-1/2 w-6 h-6 bg-white border border-slate-200 rounded-full flex items-center justify-center cursor-grab shadow-sm text-slate-500 pointer-events-auto"
-                            onMouseDown={(e) => onPointerDown(e, el.id, 'ROTATE')} onTouchStart={(e) => onPointerDown(e, el.id, 'ROTATE')}>
-                        <RotateCw size={12}/>
-                    </div>
-                </>
-            )}
-        </div>
-    );
-});
-
 const DesignerCanvas: React.FC<DesignerCanvasProps> = ({ template, selectedId, selectedIds = [], zoom, setZoom, setPan, setSelectedId, setSelectedIds, onPointerDown, tool, setTool, pan, editingId, onStartEdit, onCommitEdit, snapGuides = [], onContextMenu, empresaConfig, lasso }) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const lastDist = useRef<number | null>(null);
@@ -374,17 +34,14 @@ const DesignerCanvas: React.FC<DesignerCanvasProps> = ({ template, selectedId, s
     const [containerSize, setContainerSize] = useState({ w: 0, h: 0 });
     const [editingZoomInput, setEditingZoomInput] = useState(false);
     const [zoomInputVal, setZoomInputVal] = useState('');
-    // Middle-mouse panning
     const mmPan = useRef<{ startX: number; startY: number; startPan: { x: number; y: number } } | null>(null);
 
     const currentScale = template.type === 'DOCUMENT' ? 37.795 : 3.7795;
     const currentUnit = template.type === 'DOCUMENT' ? 'cm' : 'mm';
 
-    // Keep refs in sync with latest prop values (for use inside event-listener closures)
     useEffect(() => { panRef.current = pan; }, [pan]);
     useEffect(() => { zoomRef.current = zoom; }, [zoom]);
 
-    // --- GESTURE LOGIC ---
     useEffect(() => {
         const container = containerRef.current;
         if (!container) return;
@@ -392,7 +49,6 @@ const DesignerCanvas: React.FC<DesignerCanvasProps> = ({ template, selectedId, s
         const handleWheel = (e: WheelEvent) => {
             e.preventDefault();
             if (e.ctrlKey || e.metaKey) {
-                // Zoom toward cursor
                 const rect = container.getBoundingClientRect();
                 const mx = e.clientX - rect.left - rect.width / 2;
                 const my = e.clientY - rect.top - rect.height / 2;
@@ -402,21 +58,13 @@ const DesignerCanvas: React.FC<DesignerCanvasProps> = ({ template, selectedId, s
                 const ratio = newZoom / prevZoom;
                 const prevPan = panRef.current;
                 setZoom(newZoom);
-                setPan?.({
-                    x: mx + (prevPan.x - mx) * ratio,
-                    y: my + (prevPan.y - my) * ratio,
-                });
+                setPan?.({ x: mx + (prevPan.x - mx) * ratio, y: my + (prevPan.y - my) * ratio });
             } else {
-                // Pan: scroll naturally (shift = horizontal)
                 const prevPan = panRef.current;
-                setPan?.({
-                    x: prevPan.x - (e.shiftKey ? e.deltaY : e.deltaX),
-                    y: prevPan.y - (e.shiftKey ? e.deltaX : e.deltaY),
-                });
+                setPan?.({ x: prevPan.x - (e.shiftKey ? e.deltaY : e.deltaX), y: prevPan.y - (e.shiftKey ? e.deltaX : e.deltaY) });
             }
         };
 
-        // Middle-mouse pan
         const handleMouseDown = (e: MouseEvent) => {
             if (e.button === 1) {
                 e.preventDefault();
@@ -430,17 +78,11 @@ const DesignerCanvas: React.FC<DesignerCanvasProps> = ({ template, selectedId, s
                 setPan?.({ x: mmPan.current.startPan.x + dx, y: mmPan.current.startPan.y + dy });
             }
         };
-        const handleMouseUp = (e: MouseEvent) => {
-            if (e.button === 1) mmPan.current = null;
-        };
+        const handleMouseUp = (e: MouseEvent) => { if (e.button === 1) mmPan.current = null; };
 
         const handleTouchStart = (e: TouchEvent) => {
             if (e.touches.length === 2) {
-                const dist = Math.hypot(
-                    e.touches[0].clientX - e.touches[1].clientX,
-                    e.touches[0].clientY - e.touches[1].clientY
-                );
-                lastDist.current = dist;
+                lastDist.current = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
             }
         };
 
@@ -458,10 +100,7 @@ const DesignerCanvas: React.FC<DesignerCanvasProps> = ({ template, selectedId, s
                 const ratio = newZoom / prevZoom;
                 const prevPan = panRef.current;
                 setZoom(newZoom);
-                setPan?.({
-                    x: mx + (prevPan.x - mx) * ratio,
-                    y: my + (prevPan.y - my) * ratio,
-                });
+                setPan?.({ x: mx + (prevPan.x - mx) * ratio, y: my + (prevPan.y - my) * ratio });
                 lastDist.current = dist;
             }
         };
@@ -487,7 +126,6 @@ const DesignerCanvas: React.FC<DesignerCanvasProps> = ({ template, selectedId, s
         };
     }, [setZoom, tool, setPan]);
 
-    // Track container size for ruler rendering
     useEffect(() => {
         const el = containerRef.current;
         if (!el) return;
@@ -497,9 +135,7 @@ const DesignerCanvas: React.FC<DesignerCanvasProps> = ({ template, selectedId, s
         return () => obs.disconnect();
     }, []);
 
-    const handleElementSelect = (id: string, e: React.MouseEvent) => {
-        setSelectedId(id);
-    };
+    const handleElementSelect = (id: string, e: React.MouseEvent) => { setSelectedId(id); };
 
     return (
         <div
@@ -511,13 +147,11 @@ const DesignerCanvas: React.FC<DesignerCanvasProps> = ({ template, selectedId, s
             {/* Rulers */}
             {containerSize.w > 0 && (() => {
                 const RULER_SIZE = 18;
-                const tickUnit = currentScale * zoom; // px per template unit at current zoom
-                // Origin: center of container + pan, minus half the scaled canvas size
+                const tickUnit = currentScale * zoom;
                 const canvasW = template.width * currentScale * zoom;
                 const canvasH = template.height * currentScale * zoom;
                 const originX = containerSize.w / 2 + pan.x - canvasW / 2;
                 const originY = containerSize.h / 2 + pan.y - canvasH / 2;
-                // Choose tick interval: aim for ~40-60px between labeled ticks
                 const rawInterval = 60 / tickUnit;
                 const niceIntervals = [0.5, 1, 2, 5, 10, 20, 50, 100];
                 const tickInterval = niceIntervals.find(n => n >= rawInterval) ?? 100;
@@ -525,22 +159,16 @@ const DesignerCanvas: React.FC<DesignerCanvasProps> = ({ template, selectedId, s
                 const hTicks: { pos: number; label: string }[] = [];
                 const startU = Math.floor(-originX / tickUnit / tickInterval) * tickInterval;
                 const endU = Math.ceil((containerSize.w - originX) / tickUnit / tickInterval) * tickInterval;
-                for (let u = startU; u <= endU; u += tickInterval) {
-                    hTicks.push({ pos: originX + u * tickUnit, label: String(u) });
-                }
+                for (let u = startU; u <= endU; u += tickInterval) hTicks.push({ pos: originX + u * tickUnit, label: String(u) });
 
                 const vTicks: { pos: number; label: string }[] = [];
                 const startV = Math.floor(-originY / tickUnit / tickInterval) * tickInterval;
                 const endV = Math.ceil((containerSize.h - originY) / tickUnit / tickInterval) * tickInterval;
-                for (let v = startV; v <= endV; v += tickInterval) {
-                    vTicks.push({ pos: originY + v * tickUnit, label: String(v) });
-                }
+                for (let v = startV; v <= endV; v += tickInterval) vTicks.push({ pos: originY + v * tickUnit, label: String(v) });
 
                 return (
                     <>
-                        {/* Horizontal ruler (top) */}
-                        <svg className="absolute top-0 left-0 pointer-events-none z-30"
-                            style={{ width: containerSize.w, height: RULER_SIZE }}>
+                        <svg className="absolute top-0 left-0 pointer-events-none z-30" style={{ width: containerSize.w, height: RULER_SIZE }}>
                             <rect width={containerSize.w} height={RULER_SIZE} fill="#f8fafc" />
                             <line x1={0} y1={RULER_SIZE} x2={containerSize.w} y2={RULER_SIZE} stroke="#cbd5e1" strokeWidth={1}/>
                             {hTicks.map((t, i) => (
@@ -549,13 +177,10 @@ const DesignerCanvas: React.FC<DesignerCanvasProps> = ({ template, selectedId, s
                                     <text x={t.pos + 2} y={RULER_SIZE - 10} fontSize={8} fill="#94a3b8" fontFamily="monospace">{t.label}</text>
                                 </g>
                             ))}
-                            {/* Corner square */}
                             <rect width={RULER_SIZE} height={RULER_SIZE} fill="#e2e8f0"/>
                             <text x={2} y={12} fontSize={7} fill="#94a3b8" fontFamily="monospace">{currentUnit}</text>
                         </svg>
-                        {/* Vertical ruler (left) */}
-                        <svg className="absolute top-0 left-0 pointer-events-none z-30"
-                            style={{ width: RULER_SIZE, height: containerSize.h }}>
+                        <svg className="absolute top-0 left-0 pointer-events-none z-30" style={{ width: RULER_SIZE, height: containerSize.h }}>
                             <rect width={RULER_SIZE} height={containerSize.h} fill="#f8fafc" />
                             <line x1={RULER_SIZE} y1={0} x2={RULER_SIZE} y2={containerSize.h} stroke="#cbd5e1" strokeWidth={1}/>
                             {vTicks.map((t, i) => (
@@ -565,7 +190,6 @@ const DesignerCanvas: React.FC<DesignerCanvasProps> = ({ template, selectedId, s
                                         transform={`rotate(-90, ${RULER_SIZE - 9}, 0)`} textAnchor="start">{t.label}</text>
                                 </g>
                             ))}
-                            {/* Corner square (cover) */}
                             <rect width={RULER_SIZE} height={RULER_SIZE} fill="#e2e8f0"/>
                         </svg>
                     </>
@@ -574,52 +198,25 @@ const DesignerCanvas: React.FC<DesignerCanvasProps> = ({ template, selectedId, s
 
             {/* Viewport Controls */}
             <div className="absolute bottom-6 left-6 flex flex-col gap-1 bg-white p-1 rounded-xl shadow-lg border border-slate-200 z-20 select-none">
-                {/* Tool toggle */}
                 {setTool && (
                     <div className="flex gap-1 mb-1 pb-1 border-b border-slate-100">
-                        <button
-                            title="Seleccionar (V)"
-                            onClick={() => setTool('SELECT')}
-                            className={`flex-1 p-1.5 rounded-lg transition-colors ${tool === 'SELECT' ? 'bg-indigo-600 text-white' : 'hover:bg-slate-100 text-slate-500'}`}
-                        ><MousePointer2 size={15}/></button>
-                        <button
-                            title="Mover (H / Espacio)"
-                            onClick={() => setTool('HAND')}
-                            className={`flex-1 p-1.5 rounded-lg transition-colors ${tool === 'HAND' ? 'bg-indigo-600 text-white' : 'hover:bg-slate-100 text-slate-500'}`}
-                        ><Hand size={15}/></button>
+                        <button title="Seleccionar (V)" onClick={() => setTool('SELECT')} className={`flex-1 p-1.5 rounded-lg transition-colors ${tool === 'SELECT' ? 'bg-indigo-600 text-white' : 'hover:bg-slate-100 text-slate-500'}`}><MousePointer2 size={15}/></button>
+                        <button title="Mover (H / Espacio)" onClick={() => setTool('HAND')} className={`flex-1 p-1.5 rounded-lg transition-colors ${tool === 'HAND' ? 'bg-indigo-600 text-white' : 'hover:bg-slate-100 text-slate-500'}`}><Hand size={15}/></button>
                     </div>
                 )}
-                {/* Zoom in */}
-                <button onClick={() => { const r = containerRef.current; const factor = 1.25; const prevZ = zoom; const newZ = Math.min(prevZ * factor, 8); setZoom(newZ); }} className="p-2 hover:bg-slate-100 rounded-lg text-slate-600" title="Zoom + (Ctrl+Scroll)"><ZoomIn size={18}/></button>
-                {/* Zoom % — click to type exact value */}
+                <button onClick={() => { const prevZ = zoom; const newZ = Math.min(prevZ * 1.25, 8); setZoom(newZ); }} className="p-2 hover:bg-slate-100 rounded-lg text-slate-600" title="Zoom + (Ctrl+Scroll)"><ZoomIn size={18}/></button>
                 <div className="relative group">
                     {editingZoomInput ? (
-                        <input
-                            type="number"
-                            autoFocus
-                            value={zoomInputVal}
-                            onChange={e => setZoomInputVal(e.target.value)}
-                            onBlur={() => {
-                                const pct = parseInt(zoomInputVal);
-                                if (!isNaN(pct) && pct >= 5 && pct <= 800) setZoom(pct / 100);
-                                setEditingZoomInput(false);
-                            }}
-                            onKeyDown={e => {
-                                if (e.key === 'Enter') e.currentTarget.blur();
-                                if (e.key === 'Escape') setEditingZoomInput(false);
-                            }}
-                            className="w-14 text-center text-[10px] font-bold py-1 border-y border-slate-100 outline-none bg-transparent"
-                        />
+                        <input type="number" autoFocus value={zoomInputVal} onChange={e => setZoomInputVal(e.target.value)}
+                            onBlur={() => { const pct = parseInt(zoomInputVal); if (!isNaN(pct) && pct >= 5 && pct <= 800) setZoom(pct / 100); setEditingZoomInput(false); }}
+                            onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') setEditingZoomInput(false); }}
+                            className="w-14 text-center text-[10px] font-bold py-1 border-y border-slate-100 outline-none bg-transparent"/>
                     ) : (
-                        <button
-                            title="Click para escribir zoom exacto"
-                            onClick={() => { setZoomInputVal(String(Math.round(zoom * 100))); setEditingZoomInput(true); }}
-                            className="text-[10px] font-bold text-slate-500 text-center py-1 px-2 border-y border-slate-100 hover:bg-slate-50 w-full transition-colors"
-                        >
+                        <button title="Click para escribir zoom exacto" onClick={() => { setZoomInputVal(String(Math.round(zoom * 100))); setEditingZoomInput(true); }}
+                            className="text-[10px] font-bold text-slate-500 text-center py-1 px-2 border-y border-slate-100 hover:bg-slate-50 w-full transition-colors">
                             {Math.round(zoom * 100)}%
                         </button>
                     )}
-                    {/* Quick zoom presets */}
                     <div className="absolute left-full ml-1 bottom-0 hidden group-hover:flex flex-col bg-white border border-slate-200 rounded-xl shadow-xl overflow-hidden z-50 w-16">
                         {[25, 50, 75, 100, 150, 200, 300, 400].map(pct => (
                             <button key={pct} onClick={() => setZoom(pct / 100)}
@@ -629,23 +226,16 @@ const DesignerCanvas: React.FC<DesignerCanvasProps> = ({ template, selectedId, s
                         ))}
                     </div>
                 </div>
-                {/* Zoom out */}
                 <button onClick={() => setZoom(z => Math.max(z / 1.25, 0.05))} className="p-2 hover:bg-slate-100 rounded-lg text-slate-600" title="Zoom - (Ctrl+Scroll)"><ZoomOut size={18}/></button>
-                {/* Fit page */}
-                <button
-                    title="Ajustar página"
-                    onClick={() => {
-                        if (!containerRef.current) return;
-                        const cw = containerRef.current.offsetWidth - 64;
-                        const ch = containerRef.current.offsetHeight - 64;
-                        const tw = template.width * currentScale;
-                        const th = template.height * currentScale;
-                        const fitZoom = Math.min(cw / tw, ch / th, 4);
-                        setZoom(Math.max(0.05, fitZoom));
-                        setPan?.({ x: 0, y: 0 });
-                    }}
-                    className="p-2 hover:bg-slate-100 rounded-lg text-slate-600 border-t border-slate-100 mt-0.5"
-                ><Maximize size={18}/></button>
+                <button title="Ajustar página" onClick={() => {
+                    if (!containerRef.current) return;
+                    const cw = containerRef.current.offsetWidth - 64;
+                    const ch = containerRef.current.offsetHeight - 64;
+                    const tw = template.width * currentScale;
+                    const th = template.height * currentScale;
+                    setZoom(Math.max(0.05, Math.min(cw / tw, ch / th, 4)));
+                    setPan?.({ x: 0, y: 0 });
+                }} className="p-2 hover:bg-slate-100 rounded-lg text-slate-600 border-t border-slate-100 mt-0.5"><Maximize size={18}/></button>
             </div>
 
             {/* Pan scrollbars */}
@@ -656,121 +246,99 @@ const DesignerCanvas: React.FC<DesignerCanvasProps> = ({ template, selectedId, s
                 const rangeV = Math.max(pageH, containerSize.h);
                 return (
                     <>
-                        {/* Horizontal scrollbar */}
                         <div className="absolute bottom-0 left-5 right-5 h-3 flex items-center z-20 pointer-events-none">
                             <div className="w-full pointer-events-auto opacity-0 hover:opacity-100 transition-opacity">
-                                <input type="range" min={-rangeH} max={rangeH} step={1}
-                                    value={pan.x}
+                                <input type="range" min={-rangeH} max={rangeH} step={1} value={pan.x}
                                     onChange={e => setPan?.({ x: Number(e.target.value), y: pan.y })}
-                                    className="w-full h-1 accent-indigo-500 cursor-pointer"
-                                    title="Desplazar horizontalmente"
-                                />
+                                    className="w-full h-1 accent-indigo-500 cursor-pointer" title="Desplazar horizontalmente"/>
                             </div>
                         </div>
-                        {/* Vertical scrollbar */}
                         <div className="absolute top-5 bottom-5 right-0 w-3 flex justify-center z-20 pointer-events-none">
                             <div className="h-full pointer-events-auto opacity-0 hover:opacity-100 transition-opacity flex items-center">
-                                <input type="range" min={-rangeV} max={rangeV} step={1}
-                                    value={pan.y}
+                                <input type="range" min={-rangeV} max={rangeV} step={1} value={pan.y}
                                     onChange={e => setPan?.({ x: pan.x, y: Number(e.target.value) })}
                                     className="h-full accent-indigo-500 cursor-pointer"
                                     style={{ writingMode: 'vertical-lr' as any, direction: 'rtl' as any, appearance: 'slider-vertical' as any, width: 12 }}
-                                    title="Desplazar verticalmente"
-                                />
+                                    title="Desplazar verticalmente"/>
                             </div>
                         </div>
                     </>
                 );
             })()}
 
-            {/* Outer wrapper: occupies visual (zoomed) space so parent overflow/centering works */}
-            <div
-                style={{
-                    width: `${template.width * currentScale * zoom}px`,
-                    height: `${template.height * currentScale * zoom}px`,
-                    transform: `translate(${pan.x}px, ${pan.y}px)`,
-                    flexShrink: 0,
-                    position: 'relative',
-                    cursor: tool === 'HAND' ? 'inherit' : undefined,
-                }}
+            {/* Canvas outer wrapper */}
+            <div style={{
+                width: `${template.width * currentScale * zoom}px`,
+                height: `${template.height * currentScale * zoom}px`,
+                transform: `translate(${pan.x}px, ${pan.y}px)`,
+                flexShrink: 0, position: 'relative',
+                cursor: tool === 'HAND' ? 'inherit' : undefined,
+            }}
                 onClick={(e) => { if (tool !== 'HAND') e.stopPropagation(); }}
                 onMouseDown={(e) => { if (tool !== 'HAND') e.stopPropagation(); }}
                 onTouchStart={(e) => { if (tool !== 'HAND') e.stopPropagation(); }}
             >
-            {/* Dimension label — outside the scaled inner div so no counter-scale needed */}
-            <div
-                className="absolute -top-7 left-0 bg-slate-800 text-white text-[10px] px-2 py-1 rounded font-bold shadow-sm opacity-50 hover:opacity-100 transition-opacity"
-                style={{ whiteSpace: 'nowrap' }}
-            >
-                {template.width}{currentUnit} x {template.height}{currentUnit}
-            </div>
-            {/* Inner page: scaled to zoom, origin top-left so it fills the outer wrapper */}
-            <div
-                className="bg-white shadow-2xl relative transition-transform duration-75 ease-out ring-1 ring-slate-900/5 overflow-hidden"
-                style={{
-                    width: `${template.width * currentScale}px`,
-                    height: `${template.height * currentScale}px`,
-                    transform: `scale(${zoom})`,
-                    transformOrigin: 'top left',
-                    backgroundColor: template.backgroundColor || '#ffffff',
-                }}
-            >
-                {/* Grid Overlay */}
-                {template.showGrid && (() => {
-                    const gs = (template.gridSize || (template.type === 'DOCUMENT' ? 1 : 5)) * currentScale;
-                    return (
-                        <svg className="absolute inset-0 pointer-events-none" style={{ width: template.width * currentScale, height: template.height * currentScale }}>
-                            <defs>
-                                <pattern id="designer-grid" width={gs} height={gs} patternUnits="userSpaceOnUse">
-                                    <path d={`M ${gs} 0 L 0 0 0 ${gs}`} fill="none" stroke="#e2e8f0" strokeWidth="0.5"/>
-                                </pattern>
-                            </defs>
-                            <rect width="100%" height="100%" fill="url(#designer-grid)" />
+                <div className="absolute -top-7 left-0 bg-slate-800 text-white text-[10px] px-2 py-1 rounded font-bold shadow-sm opacity-50 hover:opacity-100 transition-opacity" style={{ whiteSpace: 'nowrap' }}>
+                    {template.width}{currentUnit} x {template.height}{currentUnit}
+                </div>
+                <div className="bg-white shadow-2xl relative transition-transform duration-75 ease-out ring-1 ring-slate-900/5 overflow-hidden"
+                    style={{
+                        width: `${template.width * currentScale}px`,
+                        height: `${template.height * currentScale}px`,
+                        transform: `scale(${zoom})`,
+                        transformOrigin: 'top left',
+                        backgroundColor: template.backgroundColor || '#ffffff',
+                    }}
+                >
+                    {template.showGrid && (() => {
+                        const gs = (template.gridSize || (template.type === 'DOCUMENT' ? 1 : 5)) * currentScale;
+                        return (
+                            <svg className="absolute inset-0 pointer-events-none" style={{ width: template.width * currentScale, height: template.height * currentScale }}>
+                                <defs>
+                                    <pattern id="designer-grid" width={gs} height={gs} patternUnits="userSpaceOnUse">
+                                        <path d={`M ${gs} 0 L 0 0 0 ${gs}`} fill="none" stroke="#e2e8f0" strokeWidth="0.5"/>
+                                    </pattern>
+                                </defs>
+                                <rect width="100%" height="100%" fill="url(#designer-grid)" />
+                            </svg>
+                        );
+                    })()}
+
+                    {!template.showGrid && template.type === 'DOCUMENT' && (
+                        <div className="absolute inset-0 pointer-events-none opacity-10"
+                            style={{backgroundImage: `linear-gradient(#000 1px, transparent 1px), linear-gradient(90deg, #000 1px, transparent 1px)`, backgroundSize: `${currentScale}px ${currentScale}px`}}/>
+                    )}
+
+                    {template.elements.map(el => el.visible === false ? null : (
+                        <CanvasElement
+                            key={el.id}
+                            el={el}
+                            isSelected={selectedId === el.id}
+                            isMultiSelected={selectedIds.includes(el.id) && selectedId !== el.id}
+                            scale={currentScale}
+                            onPointerDown={onPointerDown}
+                            onSelect={handleElementSelect}
+                            tool={tool}
+                            isEditing={editingId === el.id}
+                            onStartEdit={onStartEdit}
+                            onCommitEdit={onCommitEdit}
+                            onContextMenu={onContextMenu}
+                            empresaConfig={empresaConfig}
+                        />
+                    ))}
+
+                    {snapGuides.length > 0 && (
+                        <svg className="absolute inset-0 pointer-events-none z-[200]"
+                            style={{ width: template.width * currentScale, height: template.height * currentScale, overflow: 'visible' }}>
+                            {snapGuides.map((g, i) => g.axis === 'x'
+                                ? <line key={i} x1={g.pos * currentScale} y1={-9999} x2={g.pos * currentScale} y2={9999} stroke="#6366f1" strokeWidth={1} strokeDasharray="4 3" opacity={0.8}/>
+                                : <line key={i} x1={-9999} y1={g.pos * currentScale} x2={9999} y2={g.pos * currentScale} stroke="#6366f1" strokeWidth={1} strokeDasharray="4 3" opacity={0.8}/>
+                            )}
                         </svg>
-                    );
-                })()}
+                    )}
 
-                {/* Legacy Visual Grid for Documents (fallback when showGrid not set) */}
-                {!template.showGrid && template.type === 'DOCUMENT' && (
-                    <div className="absolute inset-0 pointer-events-none opacity-10"
-                        style={{backgroundImage: `linear-gradient(#000 1px, transparent 1px), linear-gradient(90deg, #000 1px, transparent 1px)`, backgroundSize: `${currentScale}px ${currentScale}px`}}>
-                    </div>
-                )}
-
-                {template.elements.map(el => el.visible === false ? null : (
-                    <CanvasElement
-                        key={el.id}
-                        el={el}
-                        isSelected={selectedId === el.id}
-                        isMultiSelected={selectedIds.includes(el.id) && selectedId !== el.id}
-                        scale={currentScale}
-                        onPointerDown={onPointerDown}
-                        onSelect={handleElementSelect}
-                        tool={tool}
-                        isEditing={editingId === el.id}
-                        onStartEdit={onStartEdit}
-                        onCommitEdit={onCommitEdit}
-                        onContextMenu={onContextMenu}
-                        empresaConfig={empresaConfig}
-                    />
-                ))}
-
-                {/* Snap Guide Lines */}
-                {snapGuides.length > 0 && (
-                    <svg className="absolute inset-0 pointer-events-none z-[200]"
-                        style={{ width: template.width * currentScale, height: template.height * currentScale, overflow: 'visible' }}>
-                        {snapGuides.map((g, i) => g.axis === 'x'
-                            ? <line key={i} x1={g.pos * currentScale} y1={-9999} x2={g.pos * currentScale} y2={9999} stroke="#6366f1" strokeWidth={1} strokeDasharray="4 3" opacity={0.8}/>
-                            : <line key={i} x1={-9999} y1={g.pos * currentScale} x2={9999} y2={g.pos * currentScale} stroke="#6366f1" strokeWidth={1} strokeDasharray="4 3" opacity={0.8}/>
-                        )}
-                    </svg>
-                )}
-
-                {/* Lasso selection rect */}
-                {lasso && (
-                    <div
-                        className="absolute pointer-events-none z-[300]"
-                        style={{
+                    {lasso && (
+                        <div className="absolute pointer-events-none z-[300]" style={{
                             left: Math.min(lasso.x1, lasso.x2) * currentScale,
                             top:  Math.min(lasso.y1, lasso.y2) * currentScale,
                             width:  Math.abs(lasso.x2 - lasso.x1) * currentScale,
@@ -778,13 +346,10 @@ const DesignerCanvas: React.FC<DesignerCanvasProps> = ({ template, selectedId, s
                             border: '1.5px dashed #6366f1',
                             background: 'rgba(99,102,241,0.07)',
                             borderRadius: 2,
-                        }}
-                    />
-                )}
+                        }}/>
+                    )}
+                </div>
             </div>
-            {/* /inner-page */}
-            </div>
-            {/* /outer-wrapper */}
         </div>
     );
 };

@@ -1,158 +1,174 @@
 
 import React from 'react';
-// Fix: Use namespace import to bypass missing named export errors in certain environments
 import * as ReactRouterDOM from 'react-router-dom';
 const { HashRouter, Routes, Route, Navigate } = ReactRouterDOM as any;
 import { AuthProvider } from './context/AuthContext';
+import { ThemeProvider } from './context/ThemeContext';
 import OfflineBanner from './components/OfflineBanner';
 import CameraPermissionBanner from './components/CameraPermissionBanner';
 import ProtectedRoute from './components/ProtectedRoute';
 import Layout from './components/Layout';
+
+// Páginas existentes reutilizadas
 import Dashboard from './pages/Dashboard';
-import Inventory from './pages/Inventory';
-/* Fix: Default export issue will be resolved by updating POS.tsx */
 import POS from './pages/POS';
 import Clients from './pages/Clients';
 import Providers from './pages/Providers';
 import CashRegister from './pages/CashRegister';
-import Costs from './pages/Costs';
 import Login from './pages/Login';
 import AdminUsers from './pages/AdminUsers';
-import Packages from './pages/Packages';
 import AdminCashDashboard from './pages/AdminCashDashboard';
 import Reports from './pages/Reports';
 import LabelDesigner from './pages/LabelDesigner';
 import CompanyConfig from './pages/CompanyConfig';
 import Accounting from './pages/Accounting';
-import Repairs from './pages/Repairs';
-import Consignments from './pages/Consignments';
-import ReturnsWarranties from './pages/ReturnsWarranties';
-import RepairTracker from './pages/RepairTracker';
+
+// Páginas nuevas de farmacia
+import Medicamentos from './pages/Medicamentos';
+import Recetas from './pages/Recetas';
+import Sucursales from './pages/Sucursales';
+import Vencimientos from './pages/Vencimientos';
+import Transferencias from './pages/Transferencias';
+import EntregasPendientes from './pages/EntregasPendientes';
+import Lealtad from './pages/Lealtad';
+import OrdenesCompra from './pages/OrdenesCompra';
+
+// SaaS Super Admin
+import SuperAdmin from './pages/SuperAdmin';
+import SuperAdminLogin from './pages/SuperAdminLogin';
+import AIUsage from './pages/AIUsage';
 
 const App: React.FC = () => {
   return (
+    <ThemeProvider>
     <AuthProvider>
       <OfflineBanner />
       <CameraPermissionBanner />
       <HashRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <Routes>
           <Route path="/login" element={<Login />} />
-          <Route path="/repair/:id" element={<RepairTracker />} />
+          <Route path="/login/:tenantSlug" element={<Login />} />
+          <Route path="/superadmin/login" element={<SuperAdminLogin />} />
+          <Route path="/superadmin" element={<SuperAdmin />} />
 
-          {/* Rutas Protegidas Envueltas en Layout */}
+          {/* Dashboard */}
           <Route path="/" element={<ProtectedRoute><Layout><Dashboard /></Layout></ProtectedRoute>} />
-          
+
+          {/* Ventas */}
           <Route path="/pos" element={
             <ProtectedRoute requiredPermission="VER_POS">
               <Layout><POS /></Layout>
             </ProtectedRoute>
           } />
-          
           <Route path="/clients" element={
             <ProtectedRoute requiredPermission="VER_CLIENTES">
               <Layout><Clients /></Layout>
             </ProtectedRoute>
           } />
-
-          <Route path="/repairs" element={
-            <ProtectedRoute requiredPermission="VER_CAJA">
-              <Layout><Repairs /></Layout>
+          <Route path="/recetas" element={
+            <ProtectedRoute requiredPermission="VER_RECETAS" requiredFeature="modulo_recetas">
+              <Layout><Recetas /></Layout>
             </ProtectedRoute>
           } />
 
-          <Route path="/returns" element={
-            <ProtectedRoute requiredPermission="VER_CAJA">
-              <Layout><ReturnsWarranties /></Layout>
-            </ProtectedRoute>
-          } />
-
-          <Route path="/consignments" element={
+          {/* Inventario Farmacéutico */}
+          <Route path="/medicamentos" element={
             <ProtectedRoute requiredPermission="VER_INVENTARIO">
-              <Layout><Consignments /></Layout>
+              <Layout><Medicamentos /></Layout>
             </ProtectedRoute>
           } />
-          
-          <Route path="/packages" element={
-            <ProtectedRoute requiredPermission="GESTIONAR_INVENTARIO">
-              <Layout><Packages /></Layout>
+          <Route path="/vencimientos" element={
+            <ProtectedRoute requiredPermission="VER_INVENTARIO" requiredFeature="modulo_vencimientos">
+              <Layout><Vencimientos /></Layout>
             </ProtectedRoute>
           } />
-          
+          <Route path="/transferencias" element={
+            <ProtectedRoute requiredPermission="VER_INVENTARIO" requiredFeature="modulo_transferencias">
+              <Layout><Transferencias /></Layout>
+            </ProtectedRoute>
+          } />
+          <Route path="/ordenes-compra" element={
+            <ProtectedRoute requiredPermission="VER_INVENTARIO" requiredFeature="modulo_ordenes_compra">
+              <Layout><OrdenesCompra /></Layout>
+            </ProtectedRoute>
+          } />
+          <Route path="/cross-branch/deliveries" element={
+            <ProtectedRoute requiredPermission="VER_INVENTARIO" requiredFeature="modulo_entregas">
+              <Layout><EntregasPendientes /></Layout>
+            </ProtectedRoute>
+          } />
+          <Route path="/lealtad" element={
+            <ProtectedRoute requiredPermission="VER_LEALTAD" requiredFeature="modulo_lealtad">
+              <Layout><Lealtad /></Layout>
+            </ProtectedRoute>
+          } />
           <Route path="/providers" element={
-            <ProtectedRoute requiredPermission="VER_PROVEEDORES">
+            <ProtectedRoute requiredPermission="VER_PROVEEDORES" requiredFeature="modulo_proveedores">
               <Layout><Providers /></Layout>
             </ProtectedRoute>
           } />
-          
-          <Route path="/inventory" element={
-            <ProtectedRoute requiredPermission="VER_INVENTARIO">
-              <Layout><Inventory /></Layout>
-            </ProtectedRoute>
-          } />
-          
           <Route path="/label-designer" element={
-            <ProtectedRoute requiredPermission="DISEÑAR_ETIQUETAS">
+            <ProtectedRoute requiredPermission="DISEÑAR_ETIQUETAS" requiredFeature="modulo_etiquetas">
               <Layout><LabelDesigner /></Layout>
             </ProtectedRoute>
           } />
-          
+
+          {/* Finanzas */}
           <Route path="/cash" element={
             <ProtectedRoute requiredPermission="VER_CAJA">
               <Layout><CashRegister /></Layout>
             </ProtectedRoute>
           } />
-          
-          <Route path="/costs" element={
-            <ProtectedRoute requiredPermission="VER_COSTOS">
-              <Layout><Costs /></Layout>
+          <Route path="/accounting" element={
+            <ProtectedRoute requiredPermission="VER_CONTABILIDAD" requiredFeature="modulo_contabilidad">
+              <Layout><Accounting /></Layout>
             </ProtectedRoute>
           } />
-          
           <Route path="/reports" element={
             <ProtectedRoute requiredPermission="VER_REPORTES">
               <Layout><Reports /></Layout>
             </ProtectedRoute>
           } />
 
-          <Route path="/accounting" element={
-            <ProtectedRoute requiredPermission="VER_CONTABILIDAD">
-              <Layout><Accounting /></Layout>
+          {/* Administración */}
+          <Route path="/sucursales" element={
+            <ProtectedRoute requiredPermission="GESTIONAR_PANEL_CAJAS" requiredFeature="modulo_sucursales">
+              <Layout><Sucursales /></Layout>
             </ProtectedRoute>
           } />
-          
           <Route path="/admin/cash-dashboard" element={
-            <ProtectedRoute requiredPermission="GESTIONAR_PANEL_CAJAS">
+            <ProtectedRoute requiredPermission="GESTIONAR_PANEL_CAJAS" requiredFeature="modulo_panel_cajas">
               <Layout><AdminCashDashboard /></Layout>
             </ProtectedRoute>
           } />
-          
           <Route path="/admin/users" element={
             <ProtectedRoute requiredPermission="GESTIONAR_USUARIOS">
               <Layout><AdminUsers initialView="USERS" /></Layout>
             </ProtectedRoute>
           } />
-          
           <Route path="/admin/employees" element={
             <ProtectedRoute requiredPermission="GESTIONAR_USUARIOS">
               <Layout><AdminUsers initialView="EMPLOYEES" /></Layout>
             </ProtectedRoute>
           } />
-          
           <Route path="/admin/roles" element={
             <ProtectedRoute requiredPermission="GESTIONAR_ROLES">
               <Layout><AdminUsers initialView="ROLES" /></Layout>
             </ProtectedRoute>
           } />
-          
           <Route path="/admin/boxes" element={
-            <ProtectedRoute requiredPermission="GESTIONAR_ROLES">
+            <ProtectedRoute requiredPermission="GESTIONAR_PANEL_CAJAS">
               <Layout><AdminUsers initialView="CAJAS" /></Layout>
             </ProtectedRoute>
           } />
-          
           <Route path="/admin/config" element={
             <ProtectedRoute requiredPermission="CONFIGURAR_EMPRESA">
               <Layout><CompanyConfig /></Layout>
+            </ProtectedRoute>
+          } />
+          <Route path="/admin/ai" element={
+            <ProtectedRoute requiredPermission="CONFIGURAR_EMPRESA">
+              <Layout><AIUsage /></Layout>
             </ProtectedRoute>
           } />
 
@@ -160,6 +176,7 @@ const App: React.FC = () => {
         </Routes>
       </HashRouter>
     </AuthProvider>
+    </ThemeProvider>
   );
 };
 

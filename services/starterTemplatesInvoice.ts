@@ -1,0 +1,156 @@
+import { LabelTemplate } from '../types';
+import { thermalCols, a4Cols, invoiceSummaryRows, el } from './starterTemplateUtils';
+
+export const FACTURA_TERMICA: Omit<LabelTemplate, 'id'> = {
+  name:       'Factura Térmica 80mm',
+  type:       'DOCUMENT',
+  category:   'INVOICE',
+  dataSource: 'SALES',
+  isDefault:  false,
+  width:      8,
+  height:     23,
+  snapEnabled: false,
+  gridSize:   0.5,
+  showGrid:   false,
+  backgroundColor: '#ffffff',
+  elements: [
+    el('st_hbg',   'SHAPE',          0,   0,   8,   2.8, { shapeType: 'RECTANGLE',   fill: '#1e3a8a', stroke: 'transparent', strokeWidth: 0 }),
+    el('st_htri',  'SHAPE',          0,   0,   3.5, 2.8, { shapeType: 'TRIANGLE_TL', fill: '#3b82f6', stroke: 'transparent', strokeWidth: 0 }),
+    el('st_ch',    'COMPANY_HEADER', 3.3, 0,   4.7, 2.8, { fontSize: 8, color: '#ffffff', companyStyle: 'PLAIN', companyAlign: 'left', companyShowRTN: true, companyShowPhone: true, companyShowEmail: false }),
+    el('st_title', 'TEXT',           0.2, 1.0, 2.8, 1.0, { content: 'FACTURA', fontSize: 13, fontWeight: '900', color: '#ffffff', textAlign: 'left', letterSpacing: 2 }),
+    el('st_t2', 'TEXT', 0.2, 3.0, 7.6, 0.55, { content: 'No.: {{venta.codVenta}}', fontSize: 9 }),
+    el('st_t3', 'TEXT', 0.2, 3.6, 7.6, 0.55, { content: 'Fecha: {{venta.fecha}}', fontSize: 9 }),
+    el('st_t4', 'TEXT', 0.2, 4.2, 7.6, 0.5, { content: 'CAI: {{empresa.cai}}', fontSize: 7, color: '#555555' }),
+    el('st_t5', 'TEXT', 0.2, 4.75, 7.6, 0.5, { content: '{{empresa.rangoInicial}} - {{empresa.rangoFinal}}', fontSize: 7, color: '#555555' }),
+    el('st_t6', 'TEXT', 0.2, 5.4, 7.6, 0.55, { content: 'Cliente: {{cliente.nombre}}', fontSize: 9, fontWeight: 'bold' }),
+    el('st_t7', 'TEXT', 0.2, 6.0, 7.6, 0.5,  { content: 'RTN: {{cliente.identidad}}', fontSize: 8 }),
+    el('st_l2', 'SHAPE', 0, 6.65, 8, 0.05, { shapeType: 'LINE', stroke: '#000', strokeWidth: 1 }),
+    el('st_tb', 'INVOICE_TABLE', 0, 6.8, 8, 8.5, {
+      tableColumns: thermalCols, tableHeaderBg: '#1e3a8a', tableHeaderColor: '#ffffff',
+      tableRowHeight: 0.75, tableAlternateRows: true, tableAlternateBg: '#f8fafc', tableFontSize: 8,
+    }),
+    el('st_l3', 'SHAPE', 0, 15.4, 8, 0.05, { shapeType: 'LINE', stroke: '#000', strokeWidth: 1 }),
+    el('st_sb', 'SUMMARY_BOX', 3.5, 15.55, 4.5, 2.5, {
+      summaryRows: invoiceSummaryRows, summaryFontSize: 9,
+      summaryLabelColor: '#1e293b', summaryValueColor: '#1e293b',
+    }),
+    el('st_l4', 'SHAPE', 0, 18.15, 8, 0.05, { shapeType: 'LINE', stroke: '#000', strokeWidth: 1 }),
+    el('st_ft', 'TEXT', 0.2, 18.3, 7.6, 1.5, {
+      content: '{{empresa.mensajeFinal}}\nFecha límite emisión: {{empresa.fechaLimite}}',
+      textAlign: 'center', fontSize: 7, color: '#555555', isMultiline: true,
+    }),
+  ],
+};
+
+export const FACTURA_TERMICA_FISCAL: Omit<LabelTemplate, 'id'> = {
+  name:       'Factura Termica Fiscal 80mm',
+  type:       'DOCUMENT',
+  category:   'INVOICE',
+  dataSource: 'SALES',
+  isDefault:  false,
+  width:      8,
+  height:     29,
+  snapEnabled: false,
+  gridSize:   0.5,
+  showGrid:   false,
+  backgroundColor: '#ffffff',
+  elements: [
+    el('tf_head', 'TEXT', 0.15, 0.15, 7.7, 2.35, {
+      content: '{{empresa.nombreEmpresa}}\nRTN: {{empresa.rtn}}\n{{empresa.direccion}}\nTel: {{empresa.telefono}}\n{{empresa.correo}}',
+      textAlign: 'center', fontSize: 7, fontWeight: 'bold', fontFamily: "'Courier New', monospace", isMultiline: true, lineHeight: 1.18,
+    }),
+    el('tf_title', 'TEXT', 0.15, 2.45, 7.7, 0.45, {
+      content: 'FACTURA / COMPROBANTE FISCAL',
+      textAlign: 'center', fontSize: 7, fontWeight: 'bold', fontFamily: "'Courier New', monospace",
+    }),
+    el('tf_sep1', 'TEXT', 0.15, 2.95, 7.7, 0.35, {
+      content: '------------------------------------------',
+      textAlign: 'center', fontSize: 7, fontFamily: "'Courier New', monospace",
+    }),
+    el('tf_meta', 'TEXT', 0.15, 3.35, 7.7, 2.55, {
+      content: 'No.: {{venta.codVenta}}\nFecha: {{venta.fecha}}\nCajero: {{venta.nombreVendedor}}\nTipo venta: {{venta.tipoCompra}}\nCAI: {{empresa.cai}}\nRango autorizado:\n{{empresa.rangoInicial}} - {{empresa.rangoFinal}}\nFecha limite emision: {{empresa.fechaLimite}}',
+      textAlign: 'left', fontSize: 6.5, fontFamily: "'Courier New', monospace", isMultiline: true, lineHeight: 1.18,
+    }),
+    el('tf_client', 'TEXT', 0.15, 6.05, 7.7, 1.25, {
+      content: 'Cliente: {{cliente.nombre}}\nRTN/DNI: {{cliente.identidad}}\nDireccion: {{cliente.direccion}}',
+      textAlign: 'left', fontSize: 6.5, fontFamily: "'Courier New', monospace", isMultiline: true, lineHeight: 1.18,
+    }),
+    el('tf_items', 'RECEIPT_ITEMS', 0.15, 7.45, 7.7, 7.2, {
+      fontSize: 6.5, tableFontSize: 6.5, fontFamily: "'Courier New', monospace", lineHeight: 1.2, canGrow: true, receiptLineChars: 42,
+    }),
+    el('tf_sum', 'TEXT', 0.15, 14.9, 7.7, 3.2, {
+      content: '{{fiscal.resumenFiscal}}',
+      textAlign: 'left', fontSize: 6.5, fontFamily: "'Courier New', monospace", isMultiline: true, lineHeight: 1.18, canGrow: true,
+    }),
+    el('tf_words', 'TEXT', 0.15, 18.25, 7.7, 1.15, {
+      content: 'TOTAL EN LETRAS:\n{{fiscal.totalLetras}}',
+      textAlign: 'left', fontSize: 6.5, fontFamily: "'Courier New', monospace", fontWeight: 'bold', isMultiline: true, lineHeight: 1.18, canGrow: true,
+    }),
+    el('tf_pay', 'TEXT', 0.15, 19.55, 7.7, 1.15, {
+      content: 'Forma de pago: {{venta.tipoCompra}}\nItems: {{fiscal.numeroItems}}',
+      textAlign: 'left', fontSize: 6.5, fontFamily: "'Courier New', monospace", isMultiline: true, lineHeight: 1.18,
+    }),
+    el('tf_footer', 'TEXT', 0.15, 20.85, 7.7, 2.4, {
+      content: '{{empresa.mensajeFinal}}\nOriginal: Cliente\nCopia: Obligado Tributario Emisor\nLa factura es beneficio de todos, exijala.\nwww.sar.gob.hn',
+      textAlign: 'center', fontSize: 6, fontFamily: "'Courier New', monospace", isMultiline: true, lineHeight: 1.18,
+    }),
+  ],
+};
+
+export const FACTURA_A4: Omit<LabelTemplate, 'id'> = {
+  name:       'Factura A4',
+  type:       'DOCUMENT',
+  category:   'INVOICE',
+  dataSource: 'SALES',
+  isDefault:  false,
+  width:      21,
+  height:     29.7,
+  snapEnabled: false,
+  gridSize:   0.5,
+  showGrid:   false,
+  backgroundColor: '#ffffff',
+  elements: [
+    el('a4_hbg',   'SHAPE',          0,    0,   21,  4,   { shapeType: 'RECTANGLE',   fill: '#1e3a8a', stroke: 'transparent', strokeWidth: 0 }),
+    el('a4_htri',  'SHAPE',          0,    0,   9,   4,   { shapeType: 'TRIANGLE_TL', fill: '#3b82f6', stroke: 'transparent', strokeWidth: 0 }),
+    el('a4_ch',    'COMPANY_HEADER', 8.5,  0,   12,  4,   { fontSize: 11, color: '#ffffff', companyStyle: 'PLAIN', companyAlign: 'left', companyShowRTN: true, companyShowPhone: true, companyShowEmail: true }),
+    el('a4_title', 'TEXT',           14.5, 0.8,  6,  2.4, { content: 'FACTURA', fontSize: 26, fontWeight: '900', color: '#ffffff', textAlign: 'right', letterSpacing: 4, fontFamily: "'Montserrat', sans-serif" }),
+    el('a4_m1', 'TEXT', 1,    4.4, 5.5, 0.6, { content: 'No. Factura:',     fontSize: 9, color: '#64748b', fontWeight: 'bold' }),
+    el('a4_m2', 'TEXT', 6.5,  4.4, 7,   0.6, { content: '{{venta.codVenta}}', fontSize: 9 }),
+    el('a4_m3', 'TEXT', 1,    5.1, 5.5, 0.6, { content: 'Fecha Emisión:',   fontSize: 9, color: '#64748b', fontWeight: 'bold' }),
+    el('a4_m4', 'TEXT', 6.5,  5.1, 7,   0.6, { content: '{{venta.fecha}}',  fontSize: 9 }),
+    el('a4_m5', 'TEXT', 14,   4.4, 3.5, 0.6, { content: 'Tipo Venta:',      fontSize: 9, color: '#64748b', fontWeight: 'bold' }),
+    el('a4_m6', 'TEXT', 17.5, 4.4, 3.2, 0.6, { content: '{{venta.tipoCompra}}', fontSize: 9 }),
+    el('a4_m7', 'TEXT', 1,    5.8, 2.5, 0.6, { content: 'CAI:',             fontSize: 9, color: '#64748b', fontWeight: 'bold' }),
+    el('a4_m8', 'TEXT', 3.5,  5.8, 17,  0.6, { content: '{{empresa.cai}}',  fontSize: 9 }),
+    el('a4_m9', 'TEXT', 1,    6.5, 5.5, 0.6, { content: 'Rango Aut.:',      fontSize: 9, color: '#64748b', fontWeight: 'bold' }),
+    el('a4_ma', 'TEXT', 6.5,  6.5, 14,  0.6, { content: '{{empresa.rangoInicial}} - {{empresa.rangoFinal}}', fontSize: 9 }),
+    el('a4_ld', 'SHAPE', 1, 7.3, 19, 0.08, { shapeType: 'LINE', stroke: '#1e3a8a', strokeWidth: 2 }),
+    el('a4_cb', 'SHAPE', 1, 7.5, 11, 3.2, { shapeType: 'RECTANGLE', fill: '#f1f5f9', stroke: '#e2e8f0', strokeWidth: 1, borderRadius: 4 }),
+    el('a4_cl', 'TEXT', 1.4, 7.65, 10, 0.55, { content: 'FACTURAR A:', fontSize: 8, fontWeight: 'bold', color: '#1e3a8a' }),
+    el('a4_cn', 'TEXT', 1.4, 8.25, 10, 0.8,  { content: '{{cliente.nombre}}', fontSize: 13, fontWeight: 'bold', color: '#1e293b' }),
+    el('a4_ci', 'TEXT', 1.4, 9.1,  10, 0.6,  { content: 'RTN/DNI: {{cliente.identidad}}', fontSize: 9, color: '#64748b' }),
+    el('a4_ca', 'TEXT', 1.4, 9.7,  10, 0.6,  { content: '{{cliente.direccion}}', fontSize: 9, color: '#64748b' }),
+    el('a4_fl', 'TEXT', 12.5, 7.65, 4.5, 0.6, { content: 'FECHA EMISIÓN:',    fontSize: 8, fontWeight: 'bold', color: '#64748b' }),
+    el('a4_fv', 'TEXT', 17,   7.65, 3.7, 0.6, { content: '{{venta.fecha}}',   fontSize: 8 }),
+    el('a4_rl', 'TEXT', 12.5, 8.35, 4.5, 0.6, { content: 'R.T.N. EMISOR:',   fontSize: 8, fontWeight: 'bold', color: '#64748b' }),
+    el('a4_rv', 'TEXT', 17,   8.35, 3.7, 0.6, { content: '{{empresa.rtn}}',   fontSize: 8 }),
+    el('a4_vl', 'TEXT', 12.5, 9.05, 4.5, 0.6, { content: 'VENDEDOR:',         fontSize: 8, fontWeight: 'bold', color: '#64748b' }),
+    el('a4_vv', 'TEXT', 17,   9.05, 3.7, 0.6, { content: '{{venta.codVendedor}}', fontSize: 8 }),
+    el('a4_el', 'TEXT', 12.5, 9.75, 4.5, 0.6, { content: 'F. VENCIMIENTO:',  fontSize: 8, fontWeight: 'bold', color: '#64748b' }),
+    el('a4_ev', 'TEXT', 17,   9.75, 3.7, 0.6, { content: '{{empresa.fechaLimite}}', fontSize: 8 }),
+    el('a4_tb', 'INVOICE_TABLE', 1, 11.0, 19, 11, {
+      tableColumns: a4Cols, tableHeaderBg: '#1e3a8a', tableHeaderColor: '#ffffff',
+      tableRowHeight: 0.9, tableAlternateRows: true, tableAlternateBg: '#f8fafc', tableFontSize: 9,
+    }),
+    el('a4_ls', 'SHAPE', 1, 22.2, 19, 0.05, { shapeType: 'LINE', stroke: '#e2e8f0', strokeWidth: 1 }),
+    el('a4_sb', 'SUMMARY_BOX', 13, 22.4, 7, 3.2, {
+      summaryRows: invoiceSummaryRows, summaryFontSize: 10,
+      summaryLabelColor: '#1e293b', summaryValueColor: '#1e3a8a', summaryBg: '#f8fafc',
+    }),
+    el('a4_ls2', 'SHAPE', 1, 26.8, 19, 0.08, { shapeType: 'LINE', stroke: '#1e3a8a', strokeWidth: 2 }),
+    el('a4_ft', 'TEXT', 1, 27.0, 19, 1.2, {
+      content: '{{empresa.mensajeFinal}}\nFecha límite de emisión: {{empresa.fechaLimite}}',
+      textAlign: 'center', fontSize: 8, color: '#94a3b8', isMultiline: true,
+    }),
+  ],
+};

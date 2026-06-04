@@ -1,52 +1,48 @@
 const express = require('express');
 const router = express.Router();
-const { pool, handleDbError, updateArqueoBalance } = require('../config/db');
+const { pool, handleDbError } = require('../config/db');
 const { authenticateToken } = require('../middleware/auth');
 
-// --- AUDITORÍA DE MOVIMIENTOS ---
+// --- AUDITORÍA DE VENTAS ---
 router.get('/audit/transactions', authenticateToken, async (req, res) => {
     try {
         const { date, startDate, endDate } = req.query;
         const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
         const params = [];
-        let whereIngresos = '1=1';
-        let whereEgresos = '1=1';
+        let where = '1=1';
 
         if (startDate && endDate) {
             if (!DATE_RE.test(startDate) || !DATE_RE.test(endDate)) {
                 return res.status(400).json({ error: 'Formato de fecha inválido. Use YYYY-MM-DD' });
             }
-            whereIngresos = "i.fechaCreacion BETWEEN $1 AND $2";
-            whereEgresos = "e.fechaCreacion BETWEEN $1 AND $2";
+            where = 'v.fecha BETWEEN $1 AND $2';
             params.push(`${startDate} 00:00:00`, `${endDate} 23:59:59`);
         } else if (date) {
             if (!DATE_RE.test(date)) {
                 return res.status(400).json({ error: 'Formato de fecha inválido. Use YYYY-MM-DD' });
             }
-            whereIngresos = "TO_CHAR(i.fechaCreacion, 'YYYY-MM-DD') = $1";
-            whereEgresos = "TO_CHAR(e.fechaCreacion, 'YYYY-MM-DD') = $1";
+            where = "TO_CHAR(v.fecha, 'YYYY-MM-DD') = $1";
             params.push(date);
         }
 
-        const query = `
-            (SELECT 'INGRESO' as tipo, i.idIngreso as id, i.idCaja as "idCaja",
-                i.descripcion, i.monto, i.costo,
-                TO_CHAR(i.fechaCreacion, 'YYYY-MM-DD HH24:MI:SS') as fecha,
-                i.estado, 'Venta/Servicio' as categoria,
-                NULL::integer as id_socio_asignado, NULL::text as nombre_socio
-             FROM ingresos i WHERE ${whereIngresos})
-            UNION ALL
-            (SELECT 'EGRESO' as tipo, e.idegresos as id, e.idCaja as "idCaja",
-                e.descripcion, e.monto, 0 as costo,
-                TO_CHAR(e.fechaCreacion, 'YYYY-MM-DD HH24:MI:SS') as fecha,
-                e.estado, e.categoria,
-                e.id_socio_asignado, s.nombre as nombre_socio
-             FROM egresos e
-             LEFT JOIN socios s ON e.id_socio_asignado = s.id_socio
-             WHERE ${whereEgresos})
-            ORDER BY fecha DESC
-        `;
-        const result = await pool.query(query, params);
+        params.push(req.tenantId);
+        const tidx = params.length;
+        where += ` AND v.tenant_id = $${tidx}`;
+
+        const result = await pool.query(`
+            SELECT
+                v.codVenta      AS id,
+                v.total         AS monto,
+                v.estado,
+                v.tipoCompra    AS categoria,
+                v.idCaja        AS "idCaja",
+                TO_CHAR(v.fecha, 'YYYY-MM-DD HH24:MI:SS') AS fecha,
+                COALESCE(c.nombre || ' ' || c.apellido, 'Consumidor Final') AS cliente
+            FROM ventas v
+            LEFT JOIN clientes c ON v.identidadCliente = c.identidad AND c.tenant_id = $${tidx}
+            WHERE ${where}
+            ORDER BY v.fecha DESC
+        `, params);
         res.json(result.rows);
     } catch(e) { handleDbError(res, e); }
 });
@@ -58,166 +54,45 @@ router.get('/report/profitability', authenticateToken, async (req, res) => {
         if (!startDate || !endDate) return res.status(400).json({ error: 'startDate y endDate requeridos' });
 
         const start = `${startDate} 00:00:00`;
-        const end = `${endDate} 23:59:59`;
+        const end   = `${endDate} 23:59:59`;
 
-        const [ingRow, opexRow, invRow, otrosEgresosRow, deducRow, sociosRow] = await Promise.all([
+        const [ventasRow, costoRow] = await Promise.all([
             pool.query(
-                `SELECT COALESCE(SUM(monto),0) as ing, COALESCE(SUM(costo),0) as cst
-                 FROM ingresos WHERE fechaCreacion BETWEEN $1 AND $2`, [start, end]),
-            // FIX: Solo 'Gasto Operativo' explícito reduce la ganancia distribuible.
-            // Los costos de mercancía ya están capturados en ingresos.costo (COGS por venta).
-            // Las compras sin categoría o de producto NO se restan de la utilidad neta.
+                `SELECT COUNT(*) as num_facturas,
+                        COALESCE(SUM(total), 0)          AS ingresos,
+                        COALESCE(SUM(isv_calculado), 0)  AS isv_total
+                 FROM ventas
+                 WHERE fecha BETWEEN $1 AND $2 AND estado = 'Completada' AND tenant_id = $3`,
+                [start, end, req.tenantId]
+            ),
             pool.query(
-                `SELECT COALESCE(SUM(monto),0) as tot FROM egresos
-                 WHERE categoria = 'Gasto Operativo'
-                 AND id_socio_asignado IS NULL AND fechaCreacion BETWEEN $1 AND $2`, [start, end]),
-            pool.query(
-                `SELECT COALESCE(SUM(monto),0) as tot FROM egresos
-                 WHERE categoria = 'Compra de Producto' AND fechaCreacion BETWEEN $1 AND $2`, [start, end]),
-            // Otros egresos (sin categoria o categorias distintas a Gasto Operativo y Compra de Producto)
-            // — se muestran informativamente pero NO restan la utilidad distribuible
-            pool.query(
-                `SELECT COALESCE(SUM(monto),0) as tot FROM egresos
-                 WHERE (categoria IS NULL OR (categoria <> 'Gasto Operativo' AND categoria <> 'Compra de Producto'))
-                 AND id_socio_asignado IS NULL AND fechaCreacion BETWEEN $1 AND $2`, [start, end]),
-            pool.query(
-                `SELECT id_socio_asignado, COALESCE(SUM(monto),0) as total FROM egresos
-                 WHERE id_socio_asignado IS NOT NULL AND fechaCreacion BETWEEN $1 AND $2
-                 GROUP BY id_socio_asignado`, [start, end]),
-            pool.query(
-                `SELECT id_socio, nombre, porcentaje_participacion FROM socios WHERE estado = 'Activo'`)
+                `SELECT COALESCE(
+                    SUM(dv.cantidad_base_descontada * COALESCE(l.precio_compra_unitario, 0)), 0
+                 ) AS costos
+                 FROM detalleventa dv
+                 JOIN ventas v ON dv.idVenta = v.codVenta
+                 LEFT JOIN lotes_medicamento l ON dv.id_lote = l.id_lote
+                 WHERE v.fecha BETWEEN $1 AND $2
+                   AND v.estado = 'Completada'
+                   AND dv.tipoProducto = 'MEDICAMENTO'
+                   AND v.tenant_id = $3`,
+                [start, end, req.tenantId]
+            ),
         ]);
 
-        const ingresos = Number(ingRow.rows[0].ing);
-        const costos = Number(ingRow.rows[0].cst);
-        // utilBruta = Ventas totales - COGS (costo de cada venta ya registrado en ingresos.costo)
+        const ingresos  = Number(ventasRow.rows[0].ingresos);
+        const costos    = Number(costoRow.rows[0].costos);
         const utilBruta = ingresos - costos;
-        // Solo los gastos operativos explícitos reducen la utilidad distribuible entre socios
-        const gastosGral = Number(opexRow.rows[0].tot);
-        const utilNetaNegocio = utilBruta - gastosGral;
-        // Compras de mercadería e inversiones: informativas, no reducen la utilidad distribuible
-        const inversion = Number(invRow.rows[0].tot);
-        const otrosEgresos = Number(otrosEgresosRow.rows[0].tot);
-
-        const metrics = { ingresos, costos, utilBruta, gastosGral, inversion, otrosEgresos, utilNetaNegocio };
-
-        const distribucion = sociosRow.rows.map(s => {
-            const ded = Number(deducRow.rows.find(r => r.id_socio_asignado === s.id_socio)?.total || 0);
-            const gananciaBruta = utilNetaNegocio * (s.porcentaje_participacion / 100);
-            return {
-                socio: s.nombre,
-                porcentaje: s.porcentaje_participacion,
-                gananciaBruta,
-                deduccionPersonal: ded,
-                gananciaNeta: gananciaBruta - ded
-            };
-        });
-
-        res.json({ metrics, distribucion });
-    } catch(e) { handleDbError(res, e); }
-});
-
-// --- SOCIOS ---
-router.get('/socios', authenticateToken, async (req, res) => {
-    try {
-        const r = await pool.query(
-            'SELECT id_socio as "idSocio", nombre, porcentaje_participacion as "porcentajeParticipacion", estado FROM socios ORDER BY id_socio');
-        res.json(r.rows);
-    } catch(e) { handleDbError(res, e); }
-});
-
-router.post('/socios', authenticateToken, async (req, res) => {
-    try {
-        const { nombre, porcentaje_participacion, estado } = req.body;
-        const r = await pool.query(
-            `INSERT INTO socios (nombre, porcentaje_participacion, estado) VALUES ($1, $2, $3)
-             RETURNING id_socio as "idSocio", nombre, porcentaje_participacion as "porcentajeParticipacion", estado`,
-            [nombre, porcentaje_participacion, estado || 'Activo']);
-        res.status(201).json(r.rows[0]);
-    } catch(e) { handleDbError(res, e); }
-});
-
-router.put('/socios/:id', authenticateToken, async (req, res) => {
-    try {
-        const { nombre, porcentaje_participacion, estado } = req.body;
-        const r = await pool.query(
-            `UPDATE socios SET nombre=$1, porcentaje_participacion=$2, estado=$3 WHERE id_socio=$4
-             RETURNING id_socio as "idSocio", nombre, porcentaje_participacion as "porcentajeParticipacion", estado`,
-            [nombre, porcentaje_participacion, estado, req.params.id]);
-        if (!r.rows.length) return res.status(404).json({ error: 'Socio no encontrado' });
-        res.json(r.rows[0]);
-    } catch(e) { handleDbError(res, e); }
-});
-
-router.delete('/socios/:id', authenticateToken, async (req, res) => {
-    try {
-        const r = await pool.query('DELETE FROM socios WHERE id_socio=$1 RETURNING id_socio', [req.params.id]);
-        if (!r.rows.length) return res.status(404).json({ error: 'Socio no encontrado' });
-        res.json({ message: 'Socio eliminado' });
-    } catch(e) { handleDbError(res, e); }
-});
-
-// --- REPORTE OPEX ---
-router.get('/report/opex', authenticateToken, async (req, res) => {
-    try {
-        const { startDate, endDate } = req.query;
-        if (!startDate || !endDate) return res.status(400).json({ error: 'startDate y endDate requeridos' });
-
-        const start = `${startDate} 00:00:00`;
-        const end = `${endDate} 23:59:59`;
-
-        const [catRows, socioRows, detRows] = await Promise.all([
-            pool.query(
-                `SELECT COALESCE(categoria, 'Sin Categoría') as categoria,
-                 SUM(monto) as total, COUNT(*) as count
-                 FROM egresos
-                 WHERE fechaCreacion BETWEEN $1 AND $2
-                 GROUP BY COALESCE(categoria, 'Sin Categoría')
-                 ORDER BY total DESC`, [start, end]),
-            pool.query(
-                `SELECT s.nombre as socio, SUM(e.monto) as total
-                 FROM egresos e
-                 JOIN socios s ON e.id_socio_asignado = s.id_socio
-                 WHERE e.id_socio_asignado IS NOT NULL AND e.fechaCreacion BETWEEN $1 AND $2
-                 GROUP BY s.nombre ORDER BY total DESC`, [start, end]),
-            pool.query(
-                `SELECT e.descripcion, e.monto, COALESCE(e.categoria, 'Sin Categoría') as categoria,
-                 TO_CHAR(e.fechaCreacion, 'YYYY-MM-DD') as fecha,
-                 s.nombre as nombre_socio
-                 FROM egresos e
-                 LEFT JOIN socios s ON e.id_socio_asignado = s.id_socio
-                 WHERE e.fechaCreacion BETWEEN $1 AND $2
-                 ORDER BY e.fechaCreacion DESC`, [start, end])
-        ]);
 
         res.json({
-            porCategoria: catRows.rows.map(r => ({ categoria: r.categoria, total: Number(r.total), count: Number(r.count) })),
-            porSocio: socioRows.rows.map(r => ({ socio: r.socio, total: Number(r.total) })),
-            detalles: detRows.rows.map(r => ({ ...r, monto: Number(r.monto) }))
+            metrics: {
+                numFacturas: Number(ventasRow.rows[0].num_facturas),
+                ingresos,
+                costos,
+                utilBruta,
+                isvTotal: Number(ventasRow.rows[0].isv_total),
+            }
         });
-    } catch(e) { handleDbError(res, e); }
-});
-
-// --- EDITAR TRANSACCIÓN ---
-router.put('/audit/transactions/:tipo/:id', authenticateToken, async (req, res) => {
-    try {
-        const { tipo, id } = req.params;
-        const { descripcion, monto, costo, categoria, id_socio_asignado } = req.body;
-        let idCaja = null;
-        if (tipo === 'INGRESO') {
-            const r = await pool.query(
-                'UPDATE ingresos SET descripcion=$1, monto=$2, costo=$3 WHERE idIngreso=$4 RETURNING idCaja',
-                [descripcion, monto, costo, id]);
-            idCaja = r.rows[0]?.idcaja;
-        } else {
-            const socioId = id_socio_asignado === "" ? null : id_socio_asignado;
-            const r = await pool.query(
-                'UPDATE egresos SET descripcion=$1, monto=$2, categoria=$3, id_socio_asignado=$4 WHERE idegresos=$5 RETURNING idCaja',
-                [descripcion, monto, categoria, socioId, id]);
-            idCaja = r.rows[0]?.idcaja;
-        }
-        if (idCaja) await updateArqueoBalance(idCaja);
-        res.json({ message: 'Actualizado correctamente' });
     } catch(e) { handleDbError(res, e); }
 });
 

@@ -11,6 +11,7 @@ interface ProtectedRouteProps {
   children: React.ReactNode;
   allowedRoles?: string[];
   requiredPermission?: string;
+  requiredFeature?: string;
 }
 
 const ForceChangePassword: React.FC = () => {
@@ -105,8 +106,8 @@ const ForceChangePassword: React.FC = () => {
   );
 };
 
-const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, allowedRoles, requiredPermission }) => {
-  const { isAuthenticated, hasPermission, isInitializing, requiresPasswordChange } = useAuth();
+const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, allowedRoles, requiredPermission, requiredFeature }) => {
+  const { user, isAuthenticated, hasPermission, hasPlanFeature, isInitializing, requiresPasswordChange } = useAuth();
   const location = useLocation();
 
   // Esperar a que AuthContext termine de restaurar la sesión desde localStorage
@@ -130,13 +131,22 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, allowedRoles,
     return <ForceChangePassword />;
   }
 
+  // Validar feature del plan (módulo no disponible en el plan contratado)
+  if (requiredFeature && !hasPlanFeature(requiredFeature)) {
+    return <Navigate to="/" replace />;
+  }
+
   // Nueva validación por permiso específico
   if (requiredPermission && !hasPermission(requiredPermission)) {
     return <Navigate to="/" replace />;
   }
 
   // Validación Legacy por Rol
-  if (!requiredPermission && allowedRoles && !allowedRoles.some(r => hasPermission(r.toUpperCase()) || hasPermission())) {
+  if (
+    !requiredPermission &&
+    allowedRoles &&
+    !allowedRoles.some(r => r.toLowerCase() === (user?.rol || '').toLowerCase())
+  ) {
      return <Navigate to="/" replace />;
   }
 

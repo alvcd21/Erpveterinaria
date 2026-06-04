@@ -1,397 +1,87 @@
 
+// inventoryRoutes.js — Rutas de soporte: proveedores, ubicaciones
+// El catálogo de medicamentos está en medicamentosRoutes.js
 const express = require('express');
 const router = express.Router();
-const { pool, generateNextId, handleDbError } = require('../config/db');
+const { pool, generateNextId, handleDbError, withTenantContext } = require('../config/db');
 const { authenticateToken } = require('../middleware/auth');
 
-// --- PRODUCTOS UNIFICADOS (POS) ---
-router.get('/productos/unificados', authenticateToken, async (req, res) => {
-    try {
-        const query = `
-            SELECT 
-                codigo as id, 
-                'TELEFONO' as tipo, 
-                (marca || ' ' || modelo) as nombre, 
-                codigo, 
-                precioVenta as "precioVenta", 
-                precioCompra as "precioCompra",
-                1 as stock, 
-                imei1 as imei, 
-                idubicacion as ubicacion,
-                marca as marca,
-                NULL as categoria
-            FROM telefonos WHERE estado = 'Disponible'
-            UNION ALL
-            SELECT 
-                i.codInventario as id, 
-                'ACCESORIO' as tipo, 
-                a.descripcion as nombre, 
-                a.codAccesorio as codigo, 
-                i.precioVenta as "precioVenta", 
-                i.precioCompra as "precioCompra",
-                i.cantidad as stock, 
-                NULL as imei, 
-                i.idubicacion as ubicacion,
-                NULL as marca,
-                c.tipo as categoria
-            FROM inventario i
-            JOIN accesorios a ON i.codAccesorio = a.codAccesorio
-            LEFT JOIN categoria c ON a.codCategoria = c.codCategoria
-            WHERE i.cantidad > 0 AND (i.estado = 'Disponible' OR i.estado = 'Activo' OR i.estado = 'Registrado')
-        `;
-        const result = await pool.query(query);
-        res.json(result.rows);
-    } catch(e) { handleDbError(res, e); }
-});
+const ADMIN_ROLE_NAMES = new Set(['administrador', 'admin', 'superadmin', 'super admin']);
+const DESIGNER_PERMISSION = 'DISEÑAR_ETIQUETAS';
 
-// --- TELEFONOS ---
-router.get('/inventory/telefonos', authenticateToken, async (req, res) => {
-    try {
-        const r = await pool.query(`
-            SELECT 
-                t.codigo, t.imei1, t.imei2, t.marca, t.modelo, 
-                t.precioCompra as "precioCompra", 
-                t.precioVenta as "precioVenta", 
-                t.idubicacion, t.estado, t.fecha,
-                t.codProveedor as "codProveedor",
-                u.nombre as "nombreUbicacion"
-            FROM telefonos t
-            LEFT JOIN ubicacion u ON t.idubicacion = u.idUbicacion
-            ORDER BY t.fecha DESC
-        `);
-        res.json(r.rows);
-    } catch(e) { handleDbError(res, e); }
-});
-
-router.post('/inventory/telefonos', authenticateToken, async (req, res) => {
-    try {
-        const { imei1, imei2, marca, modelo, precioCompra, precioVenta, codProveedor, fecha, idubicacion } = req.body;
-        const safeImei2 = (imei2 && imei2.trim() !== '') ? imei2.trim() : imei1;
-        const codigo = await generateNextId('telefonos', 'codigo', 'TEL');
-        await pool.query(
-            `INSERT INTO telefonos (codigo, imei1, imei2, marca, modelo, precioCompra, precioVenta, codProveedor, fecha, idubicacion, estado)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, 'Disponible')`,
-            [codigo, imei1, safeImei2, marca, modelo, precioCompra, precioVenta, codProveedor, fecha, idubicacion]
-        );
-        res.status(201).json({ message: 'Teléfono registrado' });
-    } catch(e) { handleDbError(res, e); }
-});
-
-router.put('/inventory/telefonos/:id', authenticateToken, async (req, res) => {
-    try {
-        const { imei1, imei2, marca, modelo, precioCompra, precioVenta, codProveedor, fecha, idubicacion, estado } = req.body;
-        const safeImei2 = (imei2 && imei2.trim() !== '') ? imei2.trim() : imei1;
-        await pool.query(
-            `UPDATE telefonos SET imei1=$1, imei2=$2, marca=$3, modelo=$4, precioCompra=$5, precioVenta=$6, codProveedor=$7, fecha=$8, idubicacion=$9, estado=$10
-             WHERE codigo=$11`,
-            [imei1, safeImei2, marca, modelo, precioCompra, precioVenta, codProveedor, fecha, idubicacion, estado, req.params.id]
-        );
-        res.json({ message: 'Teléfono actualizado' });
-    } catch(e) { handleDbError(res, e); }
-});
-
-// NUEVO ENDPOINT: Actualizar solo el estado del teléfono
-router.put('/inventory/telefonos/:id/status', authenticateToken, async (req, res) => {
-    try {
-        const { estado } = req.body;
-        const ESTADOS_TELEFONO = ['Disponible', 'Vendido', 'Consignado', 'Garantia', 'Defectuoso', 'Dado de Baja', 'Reparacion'];
-        if (!ESTADOS_TELEFONO.includes(estado)) {
-            return res.status(400).json({ error: `Estado inválido. Valores permitidos: ${ESTADOS_TELEFONO.join(', ')}` });
-        }
-        await pool.query('UPDATE telefonos SET estado = $1 WHERE codigo = $2', [estado, req.params.id]);
-        res.json({ message: 'Estado actualizado' });
-    } catch(e) { handleDbError(res, e); }
-});
-
-router.delete('/inventory/telefonos/:id', authenticateToken, async (req, res) => {
-    try {
-        await pool.query("DELETE FROM telefonos WHERE codigo=$1", [req.params.id]);
-        res.json({ message: 'Teléfono eliminado' });
-    } catch(e) { handleDbError(res, e); }
-});
-
-// --- STOCK ACCESORIOS ---
-router.get('/inventory/stock', authenticateToken, async (req, res) => {
-    try {
-        const r = await pool.query(`
-            SELECT 
-                i.codInventario as "codInventario", 
-                i.codAccesorio as "codAccesorio", 
-                i.cantidad, 
-                i.precioVenta as "precioVenta", 
-                i.precioCompra as "precioCompra", 
-                i.estado, 
-                i.idubicacion,
-                i.codProveedor as "codProveedor",
-                a.descripcion as "descripcionAccesorio",
-                c.tipo as "categoriaAccesorio", 
-                u.nombre as "nombreUbicacion"
-            FROM inventario i
-            JOIN accesorios a ON i.codAccesorio = a.codAccesorio
-            LEFT JOIN categoria c ON a.codCategoria = c.codCategoria
-            LEFT JOIN ubicacion u ON i.idubicacion = u.idUbicacion
-            ORDER BY i.fecha DESC
-        `);
-        res.json(r.rows);
-    } catch(e) { handleDbError(res, e); }
-});
-
-router.post('/inventory/stock', authenticateToken, async (req, res) => {
-    try {
-        const { codAccesorio, cantidad, precioCompra, precioVenta, codProveedor, fecha, idubicacion, estado } = req.body;
-        const codInventario = await generateNextId('inventario', 'codInventario', 'INVT');
-        await pool.query(
-            `INSERT INTO inventario (codInventario, codAccesorio, cantidad, precioCompra, precioVenta, codProveedor, fecha, idubicacion, estado)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-            [codInventario, codAccesorio, cantidad, precioCompra, precioVenta, codProveedor, fecha, idubicacion, estado || 'Disponible']
-        );
-        res.status(201).json({ message: 'Stock agregado' });
-    } catch(e) { handleDbError(res, e); }
-});
-
-router.put('/inventory/stock/:id', authenticateToken, async (req, res) => {
-    try {
-        const { cantidad, precioCompra, precioVenta, codProveedor, idubicacion, estado, stockMinimo } = req.body;
-        await pool.query(
-            `UPDATE inventario SET cantidad=$1, precioCompra=$2, precioVenta=$3, codProveedor=$4, idubicacion=$5, estado=$6, stockMinimo=$7 WHERE codInventario=$8`,
-            [cantidad, precioCompra, precioVenta, codProveedor, idubicacion, estado, stockMinimo ?? null, req.params.id]
-        );
-        res.json({ message: 'Stock actualizado' });
-    } catch(e) { handleDbError(res, e); }
-});
-
-// GET /inventory/low-stock — accesorios con stock bajo el minimo
-router.get('/inventory/low-stock', authenticateToken, async (req, res) => {
-    try {
-        const r = await pool.query(`
-            SELECT
-                i.codInventario as "codInventario",
-                i.codAccesorio as "codAccesorio",
-                a.descripcion as nombre,
-                c.tipo as categoria,
-                i.cantidad,
-                i.stockMinimo as "stockMinimo",
-                u.nombre as ubicacion
-            FROM inventario i
-            JOIN accesorios a ON i.codAccesorio = a.codAccesorio
-            LEFT JOIN categoria c ON a.codCategoria = c.codCategoria
-            LEFT JOIN ubicacion u ON i.idubicacion = u.idUbicacion
-            WHERE i.stockMinimo IS NOT NULL
-              AND i.stockMinimo > 0
-              AND i.cantidad <= i.stockMinimo
-            ORDER BY (i.stockMinimo - i.cantidad) DESC
-        `);
-        res.json(r.rows);
-    } catch(e) { handleDbError(res, e); }
-});
-
-router.delete('/inventory/stock/:id', authenticateToken, async (req, res) => {
-    try {
-        await pool.query('DELETE FROM inventario WHERE codInventario=$1', [req.params.id]);
-        res.json({ message: 'Registro de stock eliminado' });
-    } catch(e) { handleDbError(res, e); }
-});
-
-// --- MAESTRO ACCESORIOS ---
-router.get('/inventory/accesorios-master', authenticateToken, async (req, res) => {
-    try {
-        const r = await pool.query(`
-            SELECT a.codAccesorio as "codAccesorio", a.codCategoria as "codCategoria", a.descripcion, c.tipo as "nombreCategoria"
-            FROM accesorios a
-            LEFT JOIN categoria c ON a.codCategoria = c.codCategoria
-        `);
-        res.json(r.rows);
-    } catch(e) { handleDbError(res, e); }
-});
-
-router.post('/inventory/accesorios-master', authenticateToken, async (req, res) => {
-    try {
-        const { codCategoria, descripcion } = req.body;
-        const id = await generateNextId('accesorios', 'codAccesorio', 'ACCS');
-        await pool.query('INSERT INTO accesorios VALUES ($1, $2, $3)', [id, codCategoria, descripcion]);
-        res.status(201).json({ message: 'Accesorio creado' });
-    } catch(e) { handleDbError(res, e); }
-});
-
-router.put('/inventory/accesorios-master/:id', authenticateToken, async (req, res) => {
-    try {
-        await pool.query('UPDATE accesorios SET descripcion=$1, codCategoria=$2 WHERE codAccesorio=$3', 
-            [req.body.descripcion, req.body.codCategoria, req.params.id]);
-        res.json({ message: 'Accesorio actualizado' });
-    } catch(e) { handleDbError(res, e); }
-});
-
-router.delete('/inventory/accesorios-master/:id', authenticateToken, async (req, res) => {
-    try {
-        await pool.query('DELETE FROM accesorios WHERE codAccesorio=$1', [req.params.id]);
-        res.json({ message: 'Accesorio eliminado' });
-    } catch(e) { handleDbError(res, e); }
-});
-
-// --- CATEGORIAS ---
-router.get('/inventory/categorias', authenticateToken, async (req, res) => {
-    try {
-        const r = await pool.query('SELECT codCategoria as "codCategoria", tipo FROM categoria');
-        res.json(r.rows);
-    } catch(e) { handleDbError(res, e); }
-});
-
-router.post('/inventory/categorias', authenticateToken, async (req, res) => {
-    try {
-        const id = await generateNextId('categoria', 'codCategoria', 'CATG');
-        await pool.query('INSERT INTO categoria VALUES ($1, $2)', [id, req.body.tipo]);
-        res.status(201).json({ message: 'Categoría creada' });
-    } catch(e) { handleDbError(res, e); }
-});
-
-router.put('/inventory/categorias/:id', authenticateToken, async (req, res) => {
-    try {
-        await pool.query('UPDATE categoria SET tipo=$1 WHERE codCategoria=$2', [req.body.tipo, req.params.id]);
-        res.json({ message: 'Categoría actualizada' });
-    } catch(e) { handleDbError(res, e); }
-});
-
-router.delete('/inventory/categorias/:id', authenticateToken, async (req, res) => {
-    try {
-        await pool.query('DELETE FROM categoria WHERE codCategoria=$1', [req.params.id]);
-        res.json({ message: 'Categoría eliminada' });
-    } catch(e) { handleDbError(res, e); }
-});
-
-// --- UBICACIONES ---
-router.get('/inventory/ubicaciones', authenticateToken, async (req, res) => {
-    try {
-        const r = await pool.query('SELECT idUbicacion as "idUbicacion", nombre, descripcion, estante, nivel, estado FROM ubicacion');
-        res.json(r.rows);
-    } catch(e) { handleDbError(res, e); }
-});
-
-router.post('/inventory/ubicaciones', authenticateToken, async (req, res) => {
-    try {
-        const { nombre, descripcion, estante, nivel, estado } = req.body;
-        const id = await generateNextId('ubicacion', 'idUbicacion', 'UBI');
-        await pool.query('INSERT INTO ubicacion VALUES ($1,$2,$3,$4,$5,$6)', [id, nombre, descripcion, estante, nivel, estado]);
-        res.status(201).json({ message: 'Ubicación creada' });
-    } catch(e) { handleDbError(res, e); }
-});
-
-router.put('/inventory/ubicaciones/:id', authenticateToken, async (req, res) => {
-    try {
-        const { nombre, descripcion, estante, nivel, estado } = req.body;
-        await pool.query('UPDATE ubicacion SET nombre=$1, descripcion=$2, estante=$3, nivel=$4, estado=$5 WHERE idUbicacion=$6', 
-            [nombre, descripcion, estante, nivel, estado, req.params.id]);
-        res.json({ message: 'Ubicación actualizada' });
-    } catch(e) { handleDbError(res, e); }
-});
-
-router.delete('/inventory/ubicaciones/:id', authenticateToken, async (req, res) => {
-    try {
-        await pool.query('DELETE FROM ubicacion WHERE idUbicacion=$1', [req.params.id]);
-        res.json({ message: 'Ubicación eliminada' });
-    } catch(e) { handleDbError(res, e); }
-});
+function requireSchemaDesignerAccess(req, res, next) {
+    const role = String(req.user?.rol || '').toLowerCase();
+    const permisos = Array.isArray(req.user?.permisos) ? req.user.permisos : [];
+    if (ADMIN_ROLE_NAMES.has(role) || permisos.includes(DESIGNER_PERMISSION)) return next();
+    return res.status(403).json({
+        error: 'Acceso denegado: se requiere permiso para diseñar etiquetas',
+        requiredPermission: DESIGNER_PERMISSION,
+    });
+}
 
 // --- PROVEEDORES ---
 router.get('/proveedores', authenticateToken, async (req, res) => {
     try {
-        const r = await pool.query('SELECT codProveedor as "codProveedor", nombre, telefono, direccion FROM proveedores');
+        const r = await pool.query(
+            `SELECT codProveedor AS "codProveedor", nombre, telefono, direccion, correo, rtn, contacto
+             FROM proveedores WHERE tenant_id = $1 ORDER BY nombre`,
+            [req.tenantId]
+        );
         res.json(r.rows);
     } catch(e) { handleDbError(res, e); }
 });
 
 router.post('/proveedores', authenticateToken, async (req, res) => {
     try {
-        const { nombre, telefono, direccion } = req.body;
-        const id = await generateNextId('proveedores', 'codProveedor', 'PROV');
-        await pool.query('INSERT INTO proveedores (codProveedor, nombre, telefono, direccion, fechaCreacion) VALUES ($1,$2,$3,$4,NOW())', 
-            [id, nombre, telefono, direccion]);
-        res.status(201).json({ message: 'Proveedor creado' });
+        const { nombre, telefono, direccion, correo, rtn, contacto } = req.body;
+        if (!nombre) return res.status(400).json({ error: 'nombre es requerido' });
+        const id = await withTenantContext(req.tenantId, async (client) => {
+            const newId = await generateNextId('proveedores', 'codProveedor', 'PROV', client);
+            await client.query(
+                `INSERT INTO proveedores (codProveedor, nombre, telefono, direccion, correo, rtn, contacto, fechaCreacion, tenant_id)
+                 VALUES ($1,$2,$3,$4,$5,$6,$7,NOW(),$8)`,
+                [newId, nombre, telefono || null, direccion || null, correo || null, rtn || null, contacto || null, req.tenantId]
+            );
+            return newId;
+        });
+        res.status(201).json({ message: 'Proveedor creado', codProveedor: id });
     } catch(e) { handleDbError(res, e); }
 });
 
 router.put('/proveedores/:id', authenticateToken, async (req, res) => {
     try {
-        const { nombre, telefono, direccion } = req.body;
-        await pool.query('UPDATE proveedores SET nombre=$1, telefono=$2, direccion=$3 WHERE codProveedor=$4', 
-            [nombre, telefono, direccion, req.params.id]);
+        const { nombre, telefono, direccion, correo, rtn, contacto } = req.body;
+        await pool.query(
+            `UPDATE proveedores SET nombre=$1, telefono=$2, direccion=$3, correo=$4, rtn=$5, contacto=$6
+             WHERE codProveedor=$7 AND tenant_id=$8`,
+            [nombre, telefono || null, direccion || null, correo || null, rtn || null, contacto || null, req.params.id, req.tenantId]
+        );
         res.json({ message: 'Proveedor actualizado' });
     } catch(e) { handleDbError(res, e); }
 });
 
 router.delete('/proveedores/:id', authenticateToken, async (req, res) => {
     try {
-        await pool.query('DELETE FROM proveedores WHERE codProveedor=$1', [req.params.id]);
+        await pool.query(
+            'DELETE FROM proveedores WHERE codProveedor=$1 AND tenant_id=$2',
+            [req.params.id, req.tenantId]
+        );
         res.json({ message: 'Proveedor eliminado' });
     } catch(e) { handleDbError(res, e); }
 });
 
-// --- PAQUETES ---
-router.get('/paquetes', authenticateToken, async (req, res) => {
-    try {
-        const r = await pool.query('SELECT idPaquete as "idPaquete", red, nombre, precio, costo, estado FROM paquetes');
-        res.json(r.rows);
-    } catch(e) { handleDbError(res, e); }
-});
 
-router.post('/paquetes', authenticateToken, async (req, res) => {
+// GET /api/schema — esquema para diseñador de etiquetas
+router.get('/schema', authenticateToken, requireSchemaDesignerAccess, async (req, res) => {
     try {
-        const { red, nombre, precio, costo, estado } = req.body;
-        const id = await generateNextId('paquetes', 'idPaquete', 'PAQ');
-        await pool.query('INSERT INTO paquetes (idPaquete, red, nombre, precio, costo, estado) VALUES ($1,$2,$3,$4,$5,$6)', 
-            [id, red, nombre, precio, costo, estado]);
-        res.status(201).json({ message: 'Paquete creado' });
-    } catch(e) { handleDbError(res, e); }
-});
-
-router.put('/paquetes/:id', authenticateToken, async (req, res) => {
-    try {
-        const { red, nombre, precio, costo, estado } = req.body;
-        await pool.query('UPDATE paquetes SET red=$1, nombre=$2, precio=$3, costo=$4, estado=$5 WHERE idPaquete=$6', 
-            [red, nombre, precio, costo, estado, req.params.id]);
-        res.json({ message: 'Paquete actualizado' });
-    } catch(e) { handleDbError(res, e); }
-});
-
-router.delete('/paquetes/:id', authenticateToken, async (req, res) => {
-    try {
-        await pool.query('DELETE FROM paquetes WHERE idPaquete=$1', [req.params.id]);
-        res.json({ message: 'Paquete eliminado' });
-    } catch(e) { handleDbError(res, e); }
-});
-
-// POST /inventory/purchase-order — genera orden de compra para items bajo stock minimo
-router.post('/inventory/purchase-order', authenticateToken, async (req, res) => {
-    try {
-        // Get low stock items
         const r = await pool.query(`
-            SELECT
-                i.codInventario,
-                i.codAccesorio,
-                a.descripcion as nombre,
-                c.tipo as categoria,
-                i.cantidad as stockActual,
-                i.stockMinimo,
-                (i.stockMinimo - i.cantidad + COALESCE(i.stockMinimo, 5)) as cantidadSugerida,
-                COALESCE(p.nombre, 'Sin proveedor asignado') as proveedor,
-                i.codProveedor
-            FROM inventario i
-            JOIN accesorios a ON i.codAccesorio = a.codAccesorio
-            LEFT JOIN categoria c ON a.codCategoria = c.codCategoria
-            LEFT JOIN proveedores p ON i.codProveedor = p.codProveedor
-            WHERE i.stockMinimo IS NOT NULL AND i.stockMinimo > 0
-              AND i.cantidad <= i.stockMinimo
-            ORDER BY c.tipo, a.descripcion
+            SELECT column_name AS field, data_type AS type, table_name AS "tableName"
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name IN ('medicamentos','clientes','ventas','detalleventa','lotes_medicamento')
+            ORDER BY table_name, ordinal_position
         `);
-
-        if (r.rows.length === 0) {
-            return res.json({ message: 'No hay productos bajo stock mínimo', items: [] });
-        }
-
-        res.json({
-            items: r.rows,
-            generatedAt: new Date().toISOString(),
-            totalItems: r.rows.length
-        });
+        res.json(r.rows);
     } catch(e) { handleDbError(res, e); }
 });
 

@@ -1,72 +1,63 @@
 import React, { useState, useEffect } from 'react';
 import { AccountingService } from '../services/api';
-import { Socio } from '../types';
 import {
-  Calculator, Users, TrendingUp, TrendingDown, DollarSign, Search, Edit2, Trash2,
-  PlusCircle, X, Download, Activity, ChevronLeft, ChevronRight, Calendar,
-  RefreshCw, BarChart2, Percent, Ticket
+  Calculator, TrendingUp, DollarSign, Search,
+  Download, Activity, ChevronLeft, ChevronRight,
+  RefreshCw, BarChart2, ShoppingCart, Package
 } from 'lucide-react';
-import Swal from 'sweetalert2';
 import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
-import * as ReactRouterDOM from 'react-router-dom';
-const { useNavigate } = ReactRouterDOM as any;
 
-type TabType = 'DASHBOARD' | 'SOCIOS' | 'OPEX' | 'AUDITORIA';
+type TabType = 'DASHBOARD' | 'AUDITORIA';
 type PeriodType = 'HOY' | 'SEMANA' | 'MES' | 'AÑO';
 
-interface AuditTransaction {
-  tipo: 'INGRESO' | 'EGRESO'; id: string; idCaja: string; descripcion: string;
-  monto: number; costo: number; fecha: string; estado: string;
-  categoria: string; id_socio_asignado: number | null; nombre_socio: string | null;
+interface VentaAudit {
+  id: string;
+  monto: number;
+  estado: string;
+  categoria: string;
+  idCaja: string;
+  fecha: string;
+  cliente: string;
 }
 
-function getPeriodDates(period: PeriodType, date: string): { startDate: string; endDate: string; label: string } {
+function getPeriodDates(period: PeriodType, date: string) {
   const d = new Date(date + 'T12:00:00');
   const fmt = (x: Date) => x.toISOString().split('T')[0];
   if (period === 'HOY') return { startDate: date, endDate: date, label: `Hoy ${date}` };
   if (period === 'SEMANA') {
-    const day = d.getDay();
-    const diff = day === 0 ? -6 : 1 - day;
+    const diff = d.getDay() === 0 ? -6 : 1 - d.getDay();
     const mon = new Date(d); mon.setDate(d.getDate() + diff);
     const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
-    return { startDate: fmt(mon), endDate: fmt(sun), label: `Semana ${fmt(mon)} al ${fmt(sun)}` };
+    return { startDate: fmt(mon), endDate: fmt(sun), label: `Semana ${fmt(mon)} – ${fmt(sun)}` };
   }
   if (period === 'MES') {
     const first = new Date(d.getFullYear(), d.getMonth(), 1);
-    const last = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+    const last  = new Date(d.getFullYear(), d.getMonth() + 1, 0);
     return { startDate: fmt(first), endDate: fmt(last), label: first.toLocaleString('es-HN', { month: 'long', year: 'numeric' }) };
   }
   return { startDate: `${d.getFullYear()}-01-01`, endDate: `${d.getFullYear()}-12-31`, label: `Año ${d.getFullYear()}` };
 }
 
-function advanceDate(period: PeriodType, date: string, direction: 1 | -1): string {
+function advanceDate(period: PeriodType, date: string, dir: 1 | -1): string {
   const d = new Date(date + 'T12:00:00');
-  if (period === 'HOY') d.setDate(d.getDate() + direction);
-  else if (period === 'SEMANA') d.setDate(d.getDate() + direction * 7);
-  else if (period === 'MES') d.setMonth(d.getMonth() + direction);
-  else d.setFullYear(d.getFullYear() + direction);
+  if (period === 'HOY') d.setDate(d.getDate() + dir);
+  else if (period === 'SEMANA') d.setDate(d.getDate() + dir * 7);
+  else if (period === 'MES') d.setMonth(d.getMonth() + dir);
+  else d.setFullYear(d.getFullYear() + dir);
   return d.toISOString().split('T')[0];
 }
 
-const fmt = (n: number) => `L. ${Number(n || 0).toLocaleString('es-HN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const fmtL = (n: number) => `L. ${Number(n || 0).toLocaleString('es-HN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 const Accounting: React.FC = () => {
-  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<TabType>('DASHBOARD');
-  const [period, setPeriod] = useState<PeriodType>('HOY');
+  const [period, setPeriod]       = useState<PeriodType>('MES');
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
-  const [loading, setLoading] = useState(false);
-  const [report, setReport] = useState<any>(null);
-  const [opex, setOpex] = useState<any>(null);
-  const [transactions, setTransactions] = useState<AuditTransaction[]>([]);
-  const [partners, setPartners] = useState<Socio[]>([]);
+  const [loading, setLoading]     = useState(false);
+  const [report, setReport]       = useState<any>(null);
+  const [ventas, setVentas]       = useState<VentaAudit[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
-  const [showSocioModal, setShowSocioModal] = useState(false);
-  const [editingSocio, setEditingSocio] = useState<Socio | null>(null);
-  const [socioForm, setSocioForm] = useState({ nombre: '', porcentaje_participacion: 0, estado: 'Activo' });
-  const [editingTx, setEditingTx] = useState<AuditTransaction | null>(null);
-  const [editForm, setEditForm] = useState({ descripcion: '', monto: '', costo: '', categoria: '', id_socio_asignado: '' });
 
   const { startDate, endDate, label } = getPeriodDates(period, selectedDate);
 
@@ -76,16 +67,12 @@ const Accounting: React.FC = () => {
     setLoading(true);
     const { startDate: sd, endDate: ed } = getPeriodDates(period, selectedDate);
     try {
-      const [pData, sData, oData, aData] = await Promise.all([
+      const [profData, auditData] = await Promise.all([
         AccountingService.getProfitabilityReport(sd, ed),
-        AccountingService.getSocios(),
-        AccountingService.getOpexReport(sd, ed),
         AccountingService.getAuditTransactions(sd, ed),
       ]);
-      setReport(pData);
-      setPartners(sData);
-      setOpex(oData);
-      setTransactions(aData || []);
+      setReport(profData);
+      setVentas(auditData || []);
     } catch (e) {
       console.error(e);
     } finally {
@@ -93,433 +80,263 @@ const Accounting: React.FC = () => {
     }
   };
 
-  const handleEditTx = (tx: AuditTransaction) => {
-    setEditingTx(tx);
-    setEditForm({
-      descripcion: tx.descripcion, monto: String(tx.monto), costo: String(tx.costo || 0),
-      categoria: tx.categoria || (tx.tipo === 'EGRESO' ? 'Gasto Operativo' : 'Venta/Servicio'),
-      id_socio_asignado: tx.id_socio_asignado ? String(tx.id_socio_asignado) : ''
-    });
-  };
-
-  const saveEditTx = async () => {
-    if (!editingTx) return;
-    try {
-      await AccountingService.updateAuditTransaction(editingTx.tipo, editingTx.id, {
-        ...editForm, monto: Number(editForm.monto), costo: Number(editForm.costo),
-        id_socio_asignado: editForm.id_socio_asignado || null
-      });
-      setEditingTx(null);
-      loadData();
-      Swal.fire('Actualizado', 'Transacción corregida.', 'success');
-    } catch (e: any) { Swal.fire('Error', e.message, 'error'); }
-  };
-
-  const handleEditInvoice = (descripcion: string) => {
-    const match = descripcion.match(/#(FACT-\d+)/);
-    if (match?.[1]) navigate('/pos', { state: { editSaleId: match[1] } });
-    else Swal.fire('Info', 'Sin factura válida.', 'info');
-  };
-
-  const openSocioModal = (s?: Socio) => {
-    setEditingSocio(s || null);
-    setSocioForm(s ? { nombre: s.nombre, porcentaje_participacion: s.porcentajeParticipacion, estado: s.estado } : { nombre: '', porcentaje_participacion: 0, estado: 'Activo' });
-    setShowSocioModal(true);
-  };
-
-  const saveSocio = async () => {
-    try {
-      if (editingSocio) await AccountingService.updateSocio(editingSocio.idSocio, socioForm);
-      else await AccountingService.createSocio(socioForm);
-      setShowSocioModal(false);
-      loadData();
-      Swal.fire('Guardado', 'Socio actualizado.', 'success');
-    } catch (e: any) { Swal.fire('Error', e.message, 'error'); }
-  };
-
-  const deleteSocio = async (id: number) => {
-    const r = await Swal.fire({ title: '¿Eliminar socio?', icon: 'warning', showCancelButton: true, confirmButtonText: 'Eliminar', confirmButtonColor: '#ef4444' });
-    if (!r.isConfirmed) return;
-    try {
-      await AccountingService.deleteSocio(id);
-      loadData();
-    } catch (e: any) { Swal.fire('Error', e.message, 'error'); }
-  };
-
   const exportPDF = () => {
     if (!report) return;
-    const doc = new jsPDF();
     const m = report.metrics;
-    doc.setFontSize(18); doc.text('REPORTE DE RENTABILIDAD', 14, 20);
-    doc.setFontSize(10); doc.text(`Periodo: ${label}`, 14, 28);
-    const mainData = [
-      ['Ventas Brutas (Ingresos)', fmt(m.ingresos)],
-      ['(-) Costo de Mercancía (COGS)', `- ${fmt(m.costos)}`],
-      ['= Utilidad Bruta', fmt(m.utilBruta)],
-      ['(-) Gastos Operativos', `- ${fmt(m.gastosGral)}`],
-      ['= UTILIDAD NETA DISTRIBUIBLE', fmt(m.utilNetaNegocio)],
-      ['', ''],
-      ['[INFO] Compra de Mercadería (no resta utilidad)', fmt(m.inversion)],
-      ['[INFO] Otros Egresos (no resta utilidad)', fmt(m.otrosEgresos || 0)],
-    ];
+    const doc = new jsPDF();
+    doc.setFontSize(18);
+    doc.text('REPORTE DE RENTABILIDAD FARMACIA', 14, 20);
+    doc.setFontSize(10);
+    doc.text(`Periodo: ${label}`, 14, 28);
     // @ts-ignore
-    doc.autoTable({ startY: 35, head: [['Concepto', 'Monto']], body: mainData, theme: 'grid' });
-    if (report.distribucion?.length) {
-      const distData = report.distribucion.map((d: any) => [d.socio, `${d.porcentaje}%`, fmt(d.gananciaBruta), fmt(d.deduccionPersonal), fmt(d.gananciaNeta)]);
-      // @ts-ignore
-      doc.autoTable({ startY: (doc as any).lastAutoTable.finalY + 10, head: [['Socio', '%', 'Ganancia Bruta', 'Deducción', 'Ganancia Neta']], body: distData, theme: 'striped' });
-    }
+    doc.autoTable({
+      startY: 35,
+      head: [['Concepto', 'Monto']],
+      body: [
+        ['Ventas Brutas', fmtL(m.ingresos)],
+        ['(-) Costo de Mercancía (COGS)', `- ${fmtL(m.costos)}`],
+        ['= Utilidad Bruta', fmtL(m.utilBruta)],
+        ['ISV Recaudado', fmtL(m.isvTotal)],
+        ['N° Facturas', String(m.numFacturas)],
+      ],
+      theme: 'grid',
+      headStyles: { fillColor: [79, 70, 229] },
+      columnStyles: { 1: { halign: 'right' } },
+    });
     const pageCount = (doc as any).internal.getNumberOfPages();
     for (let i = 1; i <= pageCount; i++) {
-      doc.setPage(i); doc.setFontSize(8);
+      doc.setPage(i);
+      doc.setFontSize(8);
       doc.text(`Generado: ${new Date().toLocaleString('es-HN')}`, 14, doc.internal.pageSize.height - 10);
     }
     doc.save(`Rentabilidad_${startDate}_${endDate}.pdf`);
   };
 
-  const filteredTransactions = transactions.filter(t =>
-    t.descripcion?.toLowerCase().includes(searchTerm.toLowerCase())
+  const filteredVentas = ventas.filter(v =>
+    v.cliente?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    v.id?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   const tabs: { id: TabType; label: string; icon: React.ReactNode }[] = [
     { id: 'DASHBOARD', label: 'Dashboard', icon: <BarChart2 size={14} /> },
-    { id: 'SOCIOS', label: 'Socios', icon: <Users size={14} /> },
-    { id: 'OPEX', label: 'OPEX', icon: <TrendingDown size={14} /> },
-    { id: 'AUDITORIA', label: 'Auditoría', icon: <Activity size={14} /> },
+    { id: 'AUDITORIA', label: 'Auditoría de Ventas', icon: <Activity size={14} /> },
   ];
 
   return (
     <div className="space-y-4 h-full flex flex-col pb-10">
-      {/* Header */}
-      <div className="bg-white p-4 rounded-2xl shadow-sm border flex flex-col md:flex-row justify-between items-center gap-3">
+      {/* ── Header ── */}
+      <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex flex-col md:flex-row justify-between items-center gap-3">
         <div className="flex items-center gap-3">
           <div className="p-3 bg-indigo-600 rounded-xl text-white"><Calculator size={22} /></div>
-          <div><h2 className="text-xl font-bold">Contabilidad Gerencial</h2><p className="text-xs text-slate-500">{label}</p></div>
+          <div>
+            <h2 className="text-xl font-bold text-slate-800">Contabilidad</h2>
+            <p className="text-xs text-slate-500">{label}</p>
+          </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {/* Tabs */}
           <div className="flex p-1 bg-slate-100 rounded-xl">
             {tabs.map(t => (
               <button key={t.id} onClick={() => setActiveTab(t.id)}
-                className={`flex items-center gap-1 px-3 py-1.5 rounded-lg font-bold text-xs ${activeTab === t.id ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500'}`}>
+                className={`flex items-center gap-1 px-3 py-1.5 rounded-lg font-bold text-xs transition-colors ${activeTab === t.id ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
                 {t.icon}{t.label}
               </button>
             ))}
           </div>
+          {/* Period selector */}
           <div className="flex items-center gap-1 bg-slate-100 rounded-xl p-1">
             {(['HOY', 'SEMANA', 'MES', 'AÑO'] as PeriodType[]).map(p => (
               <button key={p} onClick={() => setPeriod(p)}
-                className={`px-2 py-1 rounded-lg text-[11px] font-bold ${period === p ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500'}`}>{p}</button>
+                className={`px-2 py-1 rounded-lg text-[11px] font-bold transition-colors ${period === p ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500'}`}>{p}</button>
             ))}
           </div>
+          {/* Date navigation */}
           <div className="flex items-center gap-1">
-            <button onClick={() => setSelectedDate(advanceDate(period, selectedDate, -1))} className="p-2 rounded-lg bg-slate-100 hover:bg-slate-200"><ChevronLeft size={14} /></button>
-            <input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} className="bg-indigo-50 p-2 rounded-xl text-xs font-bold text-indigo-700 outline-none border border-indigo-100" />
-            <button onClick={() => setSelectedDate(advanceDate(period, selectedDate, 1))} className="p-2 rounded-lg bg-slate-100 hover:bg-slate-200"><ChevronRight size={14} /></button>
+            <button onClick={() => setSelectedDate(advanceDate(period, selectedDate, -1))} className="p-2 rounded-lg bg-slate-100 hover:bg-slate-200 transition-colors"><ChevronLeft size={14} /></button>
+            <input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)}
+              className="bg-indigo-50 p-2 rounded-xl text-xs font-bold text-indigo-700 outline-none border border-indigo-100" />
+            <button onClick={() => setSelectedDate(advanceDate(period, selectedDate, 1))} className="p-2 rounded-lg bg-slate-100 hover:bg-slate-200 transition-colors"><ChevronRight size={14} /></button>
           </div>
-          <button onClick={loadData} className="p-2 bg-slate-100 text-slate-600 rounded-xl"><RefreshCw size={14} /></button>
-          {activeTab === 'DASHBOARD' && <button onClick={exportPDF} className="flex items-center gap-1 px-3 py-2 bg-emerald-600 text-white rounded-xl font-bold text-xs"><Download size={13} />PDF</button>}
+          <button onClick={loadData} className="p-2 bg-slate-100 text-slate-600 rounded-xl hover:bg-slate-200 transition-colors"><RefreshCw size={14} /></button>
+          {activeTab === 'DASHBOARD' && (
+            <button onClick={exportPDF} className="flex items-center gap-1 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs transition-colors">
+              <Download size={13} />PDF
+            </button>
+          )}
         </div>
       </div>
 
-      {loading && <div className="text-center py-8 text-slate-400 text-sm">Cargando...</div>}
+      {loading && (
+        <div className="text-center py-10 text-slate-400 text-sm">
+          <RefreshCw size={20} className="animate-spin mx-auto mb-2" />Cargando...
+        </div>
+      )}
 
-      {/* DASHBOARD */}
-      {!loading && activeTab === 'DASHBOARD' && report && (
+      {/* ── DASHBOARD ── */}
+      {!loading && activeTab === 'DASHBOARD' && (
         <div className="space-y-4 overflow-y-auto flex-1 pr-1">
-          {/* Waterfall de rentabilidad */}
-          <div className="bg-white rounded-2xl border shadow-sm p-5">
-            <h3 className="text-xs font-black text-slate-500 uppercase mb-4">Estado de Resultados</h3>
-            <div className="space-y-2">
-              <div className="flex justify-between items-center py-2 border-b border-slate-100">
-                <span className="text-sm font-bold text-slate-700">Ventas Brutas (Ingresos)</span>
-                <span className="text-lg font-black text-slate-900">{fmt(report.metrics.ingresos)}</span>
-              </div>
-              <div className="flex justify-between items-center py-2 border-b border-slate-100">
-                <div>
-                  <span className="text-sm text-red-600 font-bold">(-) Costo de Mercancía</span>
-                  <p className="text-[10px] text-slate-400">Costo registrado por venta en ingresos</p>
-                </div>
-                <span className="text-base font-bold text-red-600">- {fmt(report.metrics.costos)}</span>
-              </div>
-              <div className="flex justify-between items-center py-2 bg-blue-50 rounded-xl px-3">
-                <span className="text-sm font-black text-blue-700">= Utilidad Bruta</span>
-                <span className="text-lg font-black text-blue-700">{fmt(report.metrics.utilBruta)}</span>
-              </div>
-              <div className="flex justify-between items-center py-2 border-b border-slate-100">
-                <div>
-                  <span className="text-sm text-red-600 font-bold">(-) Gastos Operativos</span>
-                  <p className="text-[10px] text-slate-400">Únicos que afectan la distribución entre socios</p>
-                </div>
-                <span className="text-base font-bold text-red-600">- {fmt(report.metrics.gastosGral)}</span>
-              </div>
-              <div className="flex justify-between items-center py-3 bg-emerald-50 rounded-xl px-3 border border-emerald-200">
-                <div>
-                  <span className="text-sm font-black text-emerald-800">= UTILIDAD NETA DISTRIBUIBLE</span>
-                  <p className="text-[10px] text-emerald-600">Base para distribución entre socios</p>
-                </div>
-                <span className="text-2xl font-black text-emerald-700">{fmt(report.metrics.utilNetaNegocio)}</span>
-              </div>
+          {!report ? (
+            <div className="bg-white rounded-2xl border border-slate-100 p-10 text-center text-slate-400">
+              <BarChart2 size={36} className="mx-auto mb-3 text-slate-200" />
+              <p className="text-sm">Sin datos para el período seleccionado.</p>
             </div>
-            {/* Egresos informativos (no afectan distribución) */}
-            {(report.metrics.inversion > 0 || report.metrics.otrosEgresos > 0) && (
-              <div className="mt-4 pt-4 border-t border-dashed border-slate-200">
-                <p className="text-[10px] font-black text-slate-400 uppercase mb-2">Egresos Informativos (no reducen utilidad distribuible)</p>
-                <div className="flex gap-4 flex-wrap">
-                  {report.metrics.inversion > 0 && (
-                    <div className="bg-purple-50 rounded-xl px-4 py-2">
-                      <p className="text-[10px] text-purple-500 font-bold uppercase">Compra de Mercadería</p>
-                      <p className="text-base font-black text-purple-700">{fmt(report.metrics.inversion)}</p>
+          ) : (
+            <>
+              {/* Estado de Resultados */}
+              <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
+                <h3 className="text-xs font-black text-slate-500 uppercase mb-4 flex items-center gap-2">
+                  <TrendingUp size={14} className="text-indigo-500" /> Estado de Resultados — Farmacia
+                </h3>
+                <div className="space-y-2">
+                  <div className="flex justify-between items-center py-3 border-b border-slate-100">
+                    <div>
+                      <span className="text-sm font-bold text-slate-700">Ventas Brutas</span>
+                      <p className="text-[10px] text-slate-400">{report.metrics.numFacturas} facturas completadas</p>
                     </div>
-                  )}
-                  {report.metrics.otrosEgresos > 0 && (
-                    <div className="bg-slate-50 rounded-xl px-4 py-2">
-                      <p className="text-[10px] text-slate-500 font-bold uppercase">Otros Egresos</p>
-                      <p className="text-base font-black text-slate-700">{fmt(report.metrics.otrosEgresos)}</p>
+                    <span className="text-lg font-black text-slate-900">{fmtL(report.metrics.ingresos)}</span>
+                  </div>
+                  <div className="flex justify-between items-center py-3 border-b border-slate-100">
+                    <div>
+                      <span className="text-sm font-bold text-red-600">(-) Costo de Mercancía (COGS)</span>
+                      <p className="text-[10px] text-slate-400">Costo de lotes descontados en ventas</p>
                     </div>
-                  )}
+                    <span className="text-base font-bold text-red-600">- {fmtL(report.metrics.costos)}</span>
+                  </div>
+                  <div className="flex justify-between items-center py-3 px-4 bg-indigo-50 rounded-xl border border-indigo-100">
+                    <span className="text-sm font-black text-indigo-800">= Utilidad Bruta</span>
+                    <span className={`text-xl font-black ${report.metrics.utilBruta >= 0 ? 'text-indigo-700' : 'text-red-600'}`}>
+                      {fmtL(report.metrics.utilBruta)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center py-3 border-b border-slate-100">
+                    <div>
+                      <span className="text-sm font-bold text-slate-600">ISV Recaudado</span>
+                      <p className="text-[10px] text-slate-400">Impuesto sobre ventas (15%/18%)</p>
+                    </div>
+                    <span className="text-base font-bold text-slate-600">{fmtL(report.metrics.isvTotal)}</span>
+                  </div>
                 </div>
               </div>
-            )}
-          </div>
 
-          {/* KPI Cards */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            {[
-              { label: 'Ventas Brutas', val: report.metrics.ingresos, icon: <TrendingUp size={16} />, color: 'text-slate-800', bg: 'bg-slate-900', textColor: 'text-white' },
-              { label: 'Gastos Operativos', val: report.metrics.gastosGral, icon: <TrendingDown size={16} />, color: 'text-red-600', bg: 'bg-red-50', textColor: 'text-red-700' },
-              { label: 'Utilidad Neta', val: report.metrics.utilNetaNegocio, icon: <DollarSign size={16} />, color: 'text-emerald-600', bg: 'bg-emerald-50', textColor: 'text-emerald-700' },
-              { label: '% Margen Neto', val: null, icon: <Percent size={16} />, color: 'text-indigo-600', bg: 'bg-indigo-50', textColor: 'text-indigo-700' },
-            ].map((card, i) => (
-              <div key={i} className={`${card.bg} border rounded-2xl p-4 shadow-sm`}>
-                <div className={`mb-1 ${card.color}`}>{card.icon}</div>
-                <p className="text-[10px] text-slate-400 font-bold uppercase">{card.label}</p>
-                <p className={`text-lg font-black ${card.textColor}`}>
-                  {card.val !== null ? fmt(card.val) : (report.metrics.ingresos > 0 ? `${((report.metrics.utilNetaNegocio / report.metrics.ingresos) * 100).toFixed(1)}%` : '0%')}
-                </p>
+              {/* KPI Cards */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                {[
+                  { label: 'Ventas Brutas', val: report.metrics.ingresos, icon: <ShoppingCart size={16} />, bg: 'bg-slate-900', text: 'text-white', sub: 'text-slate-300' },
+                  { label: 'COGS', val: report.metrics.costos, icon: <Package size={16} />, bg: 'bg-red-50', text: 'text-red-700', sub: 'text-red-400' },
+                  { label: 'Utilidad Bruta', val: report.metrics.utilBruta, icon: <DollarSign size={16} />, bg: 'bg-emerald-50', text: 'text-emerald-700', sub: 'text-emerald-400' },
+                  { label: 'ISV Recaudado', val: report.metrics.isvTotal, icon: <Calculator size={16} />, bg: 'bg-indigo-50', text: 'text-indigo-700', sub: 'text-indigo-400' },
+                ].map((card, i) => (
+                  <div key={i} className={`${card.bg} border border-transparent rounded-2xl p-4 shadow-sm`}>
+                    <div className={`mb-1 ${card.text}`}>{card.icon}</div>
+                    <p className={`text-[10px] font-bold uppercase ${card.sub}`}>{card.label}</p>
+                    <p className={`text-lg font-black ${card.text}`}>{fmtL(card.val)}</p>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
 
-          {/* Distribución de Ganancias */}
-          <div>
-            <h3 className="text-sm font-black text-slate-700 uppercase mb-3">Distribución de Ganancias entre Socios</h3>
-            {report.distribucion?.length === 0 && (
-              <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 text-sm text-amber-700">No hay socios activos registrados. Ve a la pestaña Socios para agregarlos.</div>
-            )}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {report.distribucion?.map((d: any, i: number) => (
-                <div key={i} className="bg-white border rounded-2xl p-5 shadow-sm hover:border-indigo-300 transition-all relative">
-                  <span className="absolute top-4 right-4 bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full text-[10px] font-black">{d.porcentaje}%</span>
-                  <h4 className="text-base font-bold mb-3">{d.socio}</h4>
-                  <div className="space-y-1.5 text-xs">
-                    <div className="flex justify-between text-slate-400 text-[10px]">
-                      <span>Base distribución</span><span>{fmt(report.metrics.utilNetaNegocio)}</span>
+              {/* Margen */}
+              {report.metrics.ingresos > 0 && (
+                <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
+                  <h3 className="text-xs font-black text-slate-500 uppercase mb-3">Indicadores de Rentabilidad</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="bg-slate-50 rounded-xl p-4 text-center">
+                      <p className="text-[10px] text-slate-400 font-bold uppercase mb-1">Margen Bruto</p>
+                      <p className="text-2xl font-black text-slate-800">
+                        {((report.metrics.utilBruta / report.metrics.ingresos) * 100).toFixed(1)}%
+                      </p>
                     </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-500">Participación ({d.porcentaje}%)</span>
-                      <span className="font-bold">{fmt(d.gananciaBruta)}</span>
+                    <div className="bg-slate-50 rounded-xl p-4 text-center">
+                      <p className="text-[10px] text-slate-400 font-bold uppercase mb-1">Ticket Promedio</p>
+                      <p className="text-2xl font-black text-slate-800">
+                        {report.metrics.numFacturas > 0 ? fmtL(report.metrics.ingresos / report.metrics.numFacturas) : 'L. 0.00'}
+                      </p>
                     </div>
-                    {d.deduccionPersonal > 0 && (
-                      <div className="flex justify-between text-red-600">
-                        <span>Deducción Personal</span>
-                        <span className="font-bold">- {fmt(d.deduccionPersonal)}</span>
-                      </div>
-                    )}
-                    <div className="border-t pt-2 flex justify-between items-center">
-                      <span className="font-black text-slate-700 text-xs uppercase">Ganancia Neta</span>
-                      <span className={`text-xl font-black ${d.gananciaNeta >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{fmt(d.gananciaNeta)}</span>
+                    <div className="bg-slate-50 rounded-xl p-4 text-center">
+                      <p className="text-[10px] text-slate-400 font-bold uppercase mb-1">Facturas</p>
+                      <p className="text-2xl font-black text-slate-800">{report.metrics.numFacturas}</p>
                     </div>
                   </div>
                 </div>
-              ))}
-            </div>
-          </div>
+              )}
+            </>
+          )}
         </div>
       )}
 
-      {/* SOCIOS */}
-      {!loading && activeTab === 'SOCIOS' && (
-        <div className="bg-white rounded-2xl border shadow-sm overflow-hidden flex flex-col flex-1">
-          <div className="p-4 bg-slate-50 border-b flex justify-between items-center">
-            <h3 className="font-bold text-sm">Gestion de Socios</h3>
-            <button onClick={() => openSocioModal()} className="flex items-center gap-1 px-3 py-2 bg-indigo-600 text-white rounded-xl text-xs font-bold">
-              <PlusCircle size={14} />Nuevo Socio
-            </button>
-          </div>
-          <div className="overflow-auto flex-1">
-            <table className="w-full text-xs text-left">
-              <thead className="bg-slate-50 text-slate-500 font-bold uppercase border-b sticky top-0">
-                <tr><th className="p-4">Nombre</th><th className="p-4">% Participacion</th><th className="p-4">Estado</th><th className="p-4 text-center">Acciones</th></tr>
-              </thead>
-              <tbody className="divide-y">
-                {partners.map(p => (
-                  <tr key={p.idSocio} className="hover:bg-slate-50">
-                    <td className="p-4 font-bold">{p.nombre}</td>
-                    <td className="p-4"><span className="bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-black">{p.porcentajeParticipacion}%</span></td>
-                    <td className="p-4"><span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${p.estado === 'Activo' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>{p.estado}</span></td>
-                    <td className="p-4">
-                      <div className="flex justify-center gap-2">
-                        <button onClick={() => openSocioModal(p)} className="p-1.5 text-blue-500 hover:bg-blue-50 rounded-lg"><Edit2 size={13} /></button>
-                        <button onClick={() => deleteSocio(p.idSocio)} className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg"><Trash2 size={13} /></button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* OPEX */}
-      {!loading && activeTab === 'OPEX' && opex && (
-        <div className="space-y-4 overflow-y-auto flex-1 pr-1">
-          <div className="grid grid-cols-2 gap-4">
-            <div className="bg-red-50 border border-red-100 rounded-2xl p-5">
-              <p className="text-red-400 text-[10px] font-black uppercase mb-1">Total Gastos</p>
-              <p className="text-2xl font-black text-red-600">{fmt(opex.porCategoria?.reduce((s: number, c: any) => s + c.total, 0) || 0)}</p>
-            </div>
-            <div className="bg-slate-50 border rounded-2xl p-5">
-              <p className="text-slate-400 text-[10px] font-black uppercase mb-1"># Transacciones</p>
-              <p className="text-2xl font-black text-slate-700">{opex.detalles?.length || 0}</p>
-            </div>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="bg-white border rounded-2xl overflow-hidden shadow-sm">
-              <div className="p-3 bg-slate-50 border-b"><p className="text-xs font-black uppercase text-slate-600">Por Categoria</p></div>
-              <table className="w-full text-xs">
-                <thead className="bg-slate-50 text-slate-400 font-bold border-b"><tr><th className="p-3 text-left">Categoria</th><th className="p-3 text-right">Total</th><th className="p-3 text-right">#</th></tr></thead>
-                <tbody className="divide-y">
-                  {opex.porCategoria?.map((c: any, i: number) => (
-                    <tr key={i} className="hover:bg-slate-50">
-                      <td className="p-3 font-medium">{c.categoria}</td>
-                      <td className="p-3 text-right font-bold text-red-600">{fmt(c.total)}</td>
-                      <td className="p-3 text-right text-slate-500">{c.count}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div className="bg-white border rounded-2xl overflow-hidden shadow-sm">
-              <div className="p-3 bg-slate-50 border-b"><p className="text-xs font-black uppercase text-slate-600">Deducciones por Socio</p></div>
-              <table className="w-full text-xs">
-                <thead className="bg-slate-50 text-slate-400 font-bold border-b"><tr><th className="p-3 text-left">Socio</th><th className="p-3 text-right">Total Deducido</th></tr></thead>
-                <tbody className="divide-y">
-                  {opex.porSocio?.length ? opex.porSocio.map((s: any, i: number) => (
-                    <tr key={i} className="hover:bg-slate-50">
-                      <td className="p-3 font-medium">{s.socio}</td>
-                      <td className="p-3 text-right font-bold text-orange-600">{fmt(s.total)}</td>
-                    </tr>
-                  )) : <tr><td colSpan={2} className="p-4 text-center text-slate-400">Sin deducciones</td></tr>}
-                </tbody>
-              </table>
-            </div>
-          </div>
-          <div className="bg-white border rounded-2xl overflow-hidden shadow-sm">
-            <div className="p-3 bg-slate-50 border-b"><p className="text-xs font-black uppercase text-slate-600">Detalle de Gastos</p></div>
-            <div className="overflow-auto max-h-72">
-              <table className="w-full text-xs">
-                <thead className="bg-slate-50 text-slate-400 font-bold border-b sticky top-0"><tr><th className="p-3 text-left">Descripcion</th><th className="p-3 text-left">Categoria</th><th className="p-3 text-left">Socio</th><th className="p-3 text-right">Monto</th><th className="p-3 text-left">Fecha</th></tr></thead>
-                <tbody className="divide-y">
-                  {opex.detalles?.map((d: any, i: number) => (
-                    <tr key={i} className="hover:bg-slate-50">
-                      <td className="p-3">{d.descripcion}</td>
-                      <td className="p-3 text-slate-500">{d.categoria}</td>
-                      <td className="p-3 text-slate-500">{d.nombre_socio || '-'}</td>
-                      <td className="p-3 text-right font-bold text-red-600">{fmt(d.monto)}</td>
-                      <td className="p-3 text-slate-400">{d.fecha}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* AUDITORIA */}
+      {/* ── AUDITORÍA ── */}
       {!loading && activeTab === 'AUDITORIA' && (
-        <div className="flex flex-col flex-1 bg-white rounded-2xl border shadow-sm overflow-hidden">
-          <div className="p-4 bg-slate-50 border-b flex justify-between items-center">
-            <div className="relative"><Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" /><input className="pl-9 pr-3 py-2 bg-white border rounded-lg text-xs outline-none" placeholder="Buscar..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} /></div>
-            <span className="text-xs text-slate-400">{filteredTransactions.length} registros</span>
+        <div className="flex flex-col flex-1 bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+          <div className="p-4 bg-slate-50 border-b border-slate-100 flex items-center justify-between gap-3">
+            <div className="relative">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                className="pl-9 pr-3 py-2 bg-white border border-slate-200 rounded-lg text-xs outline-none focus:border-indigo-400 transition"
+                placeholder="Buscar por factura o cliente..."
+                value={searchTerm}
+                onChange={e => setSearchTerm(e.target.value)}
+              />
+            </div>
+            <span className="text-xs text-slate-400 font-medium">{filteredVentas.length} registros</span>
           </div>
           <div className="flex-1 overflow-auto">
             <table className="w-full text-left text-xs">
-              <thead className="bg-slate-50 text-slate-500 font-bold uppercase border-b sticky top-0">
-                <tr><th className="p-4">Tipo</th><th className="p-4">Descripcion</th><th className="p-4 text-right">Monto</th><th className="p-4 text-right">Costo</th><th className="p-4 text-right">Ganancia</th><th className="p-4 text-center">Acciones</th></tr>
+              <thead className="bg-slate-50 text-slate-500 font-bold uppercase border-b border-slate-100 sticky top-0">
+                <tr>
+                  <th className="px-4 py-3">Factura</th>
+                  <th className="px-4 py-3">Cliente</th>
+                  <th className="px-4 py-3">Caja</th>
+                  <th className="px-4 py-3">Tipo Pago</th>
+                  <th className="px-4 py-3 text-right">Monto</th>
+                  <th className="px-4 py-3">Estado</th>
+                  <th className="px-4 py-3">Fecha</th>
+                </tr>
               </thead>
-              <tbody className="divide-y">
-                {filteredTransactions.map(tx => (
-                  <tr key={`${tx.tipo}-${tx.id}`} className="hover:bg-slate-50">
-                    <td className="p-4">
-                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${tx.tipo === 'INGRESO' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>{tx.tipo}</span>
+              <tbody className="divide-y divide-slate-50">
+                {filteredVentas.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="px-4 py-12 text-center text-slate-400">
+                      <Activity size={32} className="mx-auto mb-3 text-slate-200" />
+                      <p>Sin transacciones en el período seleccionado.</p>
                     </td>
-                    <td className="p-4 max-w-xs truncate">{tx.descripcion}</td>
-                    <td className={`p-4 text-right font-bold ${tx.tipo === 'INGRESO' ? 'text-emerald-600' : 'text-red-600'}`}>{fmt(tx.monto)}</td>
-                    <td className="p-4 text-right text-slate-500">{fmt(tx.costo)}</td>
-                    <td className="p-4 text-right font-bold text-indigo-600">{tx.tipo === 'INGRESO' ? fmt(tx.monto - tx.costo) : '-'}</td>
-                    <td className="p-4 text-center">
-                      <div className="flex justify-center gap-1">
-                        <button onClick={() => handleEditTx(tx)} className="p-1.5 text-blue-500 hover:bg-blue-50 rounded-lg"><Edit2 size={13} /></button>
-                        {tx.descripcion?.includes('Factura #') && <button onClick={() => handleEditInvoice(tx.descripcion)} className="p-1.5 text-indigo-600 hover:bg-indigo-50 rounded-lg"><Ticket size={13} /></button>}
-                      </div>
+                  </tr>
+                ) : filteredVentas.map(v => (
+                  <tr key={v.id} className={`hover:bg-slate-50 transition-colors ${v.estado === 'Anulada' ? 'opacity-50' : ''}`}>
+                    <td className="px-4 py-3 font-mono text-slate-600">{v.id}</td>
+                    <td className="px-4 py-3 text-slate-700 max-w-[180px] truncate">{v.cliente}</td>
+                    <td className="px-4 py-3 text-slate-500">{v.idCaja}</td>
+                    <td className="px-4 py-3">
+                      <span className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full text-[10px] font-medium">
+                        {v.categoria || 'Contado'}
+                      </span>
+                    </td>
+                    <td className={`px-4 py-3 text-right font-bold ${v.estado === 'Anulada' ? 'line-through text-slate-400' : 'text-slate-800'}`}>
+                      {fmtL(Number(v.monto))}
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                        v.estado === 'Completada' ? 'bg-emerald-100 text-emerald-700' :
+                        v.estado === 'Anulada'    ? 'bg-red-100 text-red-700' :
+                        'bg-slate-100 text-slate-600'
+                      }`}>
+                        {v.estado}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-slate-500">
+                      {v.fecha ? new Date(v.fecha).toLocaleDateString('es-HN') : '—'}
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-        </div>
-      )}
-
-      {/* Modal Socio */}
-      {showSocioModal && (
-        <div className="fixed inset-0 bg-slate-900/60 z-[70] flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl w-full max-w-sm shadow-2xl p-6">
-            <div className="flex justify-between items-center mb-5">
-              <h3 className="font-bold text-lg">{editingSocio ? 'Editar Socio' : 'Nuevo Socio'}</h3>
-              <button onClick={() => setShowSocioModal(false)}><X size={20} className="text-slate-400" /></button>
+          {filteredVentas.length > 0 && (
+            <div className="flex items-center justify-end gap-4 px-4 py-3 bg-slate-50 border-t border-slate-100 text-xs">
+              <span className="text-slate-500">Total facturado (completadas):</span>
+              <span className="font-bold text-slate-800 text-sm">
+                {fmtL(filteredVentas.filter(v => v.estado !== 'Anulada').reduce((a, v) => a + Number(v.monto), 0))}
+              </span>
             </div>
-            <div className="space-y-4">
-              <div><label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Nombre</label><input className="w-full p-3 bg-slate-50 border rounded-xl text-sm" value={socioForm.nombre} onChange={e => setSocioForm({ ...socioForm, nombre: e.target.value })} /></div>
-              <div><label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">% Participacion (0-100)</label><input type="number" min={0} max={100} className="w-full p-3 border rounded-xl font-bold text-sm" value={socioForm.porcentaje_participacion} onChange={e => setSocioForm({ ...socioForm, porcentaje_participacion: Number(e.target.value) })} /></div>
-              <div><label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Estado</label>
-                <select className="w-full p-3 bg-slate-50 border rounded-xl text-sm" value={socioForm.estado} onChange={e => setSocioForm({ ...socioForm, estado: e.target.value })}>
-                  <option>Activo</option><option>Inactivo</option>
-                </select>
-              </div>
-              <button onClick={saveSocio} className="w-full py-3 bg-indigo-600 text-white rounded-2xl font-black shadow-lg">GUARDAR</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Modal Editar Transaccion */}
-      {editingTx && (
-        <div className="fixed inset-0 bg-slate-900/60 z-[70] flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl w-full max-w-md shadow-2xl p-6">
-            <div className="flex justify-between items-center mb-5">
-              <h3 className="font-bold text-lg">Correccion Contable</h3>
-              <button onClick={() => setEditingTx(null)}><X size={20} className="text-slate-400" /></button>
-            </div>
-            <div className="space-y-4">
-              <div><label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Descripcion</label><input className="w-full p-3 bg-slate-50 border rounded-xl" value={editForm.descripcion} onChange={e => setEditForm({ ...editForm, descripcion: e.target.value })} /></div>
-              <div className="grid grid-cols-2 gap-3">
-                <div><label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Monto</label><input type="number" className="w-full p-3 border rounded-xl font-bold" value={editForm.monto} onChange={e => setEditForm({ ...editForm, monto: e.target.value })} /></div>
-                <div><label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Costo</label><input type="number" className="w-full p-3 border rounded-xl font-bold" value={editForm.costo} onChange={e => setEditForm({ ...editForm, costo: e.target.value })} /></div>
-              </div>
-              {editingTx.tipo === 'EGRESO' && (
-                <div><label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Socio Asignado</label>
-                  <select className="w-full p-3 bg-slate-50 border rounded-xl" value={editForm.id_socio_asignado} onChange={e => setEditForm({ ...editForm, id_socio_asignado: e.target.value })}>
-                    <option value="">-- Sin Socio --</option>
-                    {partners.map(p => <option key={p.idSocio} value={p.idSocio}>{p.nombre}</option>)}
-                  </select>
-                </div>
-              )}
-              <button onClick={saveEditTx} className="w-full py-3 bg-indigo-600 text-white rounded-2xl font-black shadow-lg">GUARDAR</button>
-            </div>
-          </div>
+          )}
         </div>
       )}
     </div>

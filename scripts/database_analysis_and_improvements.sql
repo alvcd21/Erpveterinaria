@@ -751,7 +751,8 @@ CREATE OR REPLACE FUNCTION sp_registrar_intento_login(
     p_usuario       VARCHAR(100),
     p_exitoso       BOOLEAN,
     p_ip            INET,
-    p_user_agent    TEXT DEFAULT NULL
+    p_user_agent    TEXT DEFAULT NULL,
+    p_tenant_id     UUID DEFAULT NULL
 ) RETURNS JSONB
 LANGUAGE plpgsql
 AS $$
@@ -769,7 +770,8 @@ BEGIN
             intentos_fallidos   = 0,
             bloqueado_hasta     = NULL,
             ultimo_login        = NOW()
-        WHERE usuario = p_usuario;
+        WHERE usuario = p_usuario
+          AND (p_tenant_id IS NULL OR tenant_id = p_tenant_id);
 
         RETURN jsonb_build_object('ok', true, 'bloqueado', false);
     ELSE
@@ -777,6 +779,7 @@ BEGIN
         UPDATE usuarios SET
             intentos_fallidos = intentos_fallidos + 1
         WHERE usuario = p_usuario
+          AND (p_tenant_id IS NULL OR tenant_id = p_tenant_id)
         RETURNING * INTO v_usr;
 
         IF NOT FOUND THEN
@@ -789,7 +792,8 @@ BEGIN
             UPDATE usuarios SET
                 bloqueado_hasta = NOW() + INTERVAL '15 minutes',
                 estado          = CASE WHEN intentos_fallidos >= 10 THEN 'Bloqueado' ELSE estado END
-            WHERE usuario = p_usuario;
+            WHERE usuario = p_usuario
+              AND (p_tenant_id IS NULL OR tenant_id = p_tenant_id);
 
             -- Crear notificación para admins
             INSERT INTO notificaciones(tipo, titulo, cuerpo, referencia_id, referencia_tabla)

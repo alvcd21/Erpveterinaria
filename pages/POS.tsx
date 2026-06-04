@@ -1,418 +1,728 @@
-
-import React, { useState, useEffect, useMemo } from 'react';
-import { InventoryService, ClientService, SalesService, ConfigService } from '../services/api';
-import { offlineDB } from '../services/offlineDB';
-import { useOfflineSync } from '../hooks/useOfflineSync';
-import { ProductoUnified, DetalleVenta, Cliente, VentaPayload } from '../types';
-import { Search, ShoppingCart, RefreshCw, User, X, Check, Plus, Minus, UserPlus, Zap, LayoutGrid, Tag, Save, Wallet, ScanLine } from 'lucide-react';
-import BarcodeScanner from '../components/BarcodeScanner';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { InventoryService, ClientService, SalesService, MedicamentosService, CashService, LoyaltyService } from '../services/api';
+import { printSaleInvoice, downloadSaleInvoicePDF } from '../services/DocumentService';
+import { ProductoFarmacia, Cliente, VentaPayload, PresentacionVenta, LoyaltyPreview } from '../types';
+import {
+  AlertTriangle, Lock, RefreshCw, ShoppingCart, Sparkles,
+  LayoutGrid, Clock, TrendingUp, Package,
+} from 'lucide-react';
 import Swal from 'sweetalert2';
 import { useAuth } from '../context/AuthContext';
-import { downloadSaleInvoicePDF } from '../services/DocumentService';
-import { useNavigate, useLocation } from 'react-router-dom';
 
+import {
+  CartItem, HeldCart, PaymentMethod, DiscountType,
+  PresentacionModalState, CrossBranchModalState, CartTotals,
+} from '../components/POS/types';
+import ProductCatalog    from '../components/POS/ProductCatalog';
+import CartPanel         from '../components/POS/CartPanel';
+import CheckoutPanel     from '../components/POS/CheckoutPanel';
+import PresentacionModal from '../components/POS/PresentacionModal';
+import CrossBranchModal  from '../components/POS/CrossBranchModal';
+import AIAssistantPanel  from '../components/POS/AIAssistantPanel';
+import QuickClientModal  from '../components/POS/QuickClientModal';
+import HoldPanel         from '../components/POS/HoldPanel';
 
-const POS: React.FC = (): React.ReactElement => {
-  const navigate = useNavigate();
-  const location = useLocation();
+// ── Session stats (local counter, resets on page reload) ─────────────────────
+const sessionStart = new Date();
+
+function formatDuration(from: Date): string {
+  const mins = Math.floor((Date.now() - from.getTime()) / 60000);
+  if (mins < 60) return `${mins} min`;
+  return `${Math.floor(mins / 60)}h ${mins % 60}m`;
+}
+
+const POS: React.FC = () => {
   const { user } = useAuth();
 
-  const [products, setProducts] = useState<ProductoUnified[]>([]);
-  const [clients, setClients] = useState<Cliente[]>([]);
-  const [cart, setCart] = useState<DetalleVenta[]>([]);
-  const [companyConfig, setCompanyConfig] = useState<any>(null);
-  
-  const [isLoading, setIsLoading] = useState(false);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [selectedType, setSelectedType] = useState<'ALL' | 'TELEFONO' | 'ACCESORIO'>('ALL');
-  const [selectedBrand, setSelectedBrand] = useState<string>('ALL');
-  const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
-  const [mobileTab, setMobileTab] = useState<'CATALOG' | 'CART'>('CATALOG');
-  const [showScanner, setShowScanner] = useState(false);
+  const [products, setProducts]       = useState<ProductoFarmacia[]>([]);
+  const [clients, setClients]         = useState<Cliente[]>([]);
+  const [cart, setCart]               = useState<CartItem[]>([]);
+  const [activeArqueo, setActiveArqueo] = useState<any>(null);
 
+  const [isLoading, setIsLoading]         = useState(false);
+  const [isCheckingOut, setIsCheckingOut] = useState(false);
+  const checkoutLockRef = useRef(false);
+
+  const [searchTerm, setSearchTerm]           = useState('');
+  const [selectedCategory, setSelectedCategory] = useState<string>('Todos');
+  const [mobileTab, setMobileTab]             = useState<'CATALOG' | 'CART' | 'CHECKOUT'>('CATALOG');
+  const [showAIAssistant, setShowAIAssistant] = useState(false);
+  const [showQuickClient, setShowQuickClient] = useState(false);
+  const [showHoldPanel, setShowHoldPanel]     = useState(false);
+
+  // Cart controls
   const [selectedClientId, setSelectedClientId] = useState<string>('');
-  const [paymentType, setPaymentType] = useState<'Contado' | 'Credito' | 'KrediYa'>('Contado');
-  const [discount, setDiscount] = useState<number>(0);
-  const [primaAmount, setPrimaAmount] = useState<number>(0);
-  
-  const [isEditing, setIsEditing] = useState(false);
-  const [editingSaleId, setEditingSaleId] = useState<string | null>(null);
+  const [paymentType, setPaymentType]           = useState<'Contado' | 'Credito'>('Contado');
+  const [paymentMethod, setPaymentMethod]       = useState<PaymentMethod>('Efectivo');
+  const [discount, setDiscount]                 = useState<number>(0);
+  const [discountType, setDiscountType]         = useState<DiscountType>('L');
+  const [cashReceived, setCashReceived]         = useState<number>(0);
+  const [mixtoEfectivo, setMixtoEfectivo]       = useState<number>(0);
+  const [thirdAgeMode, setThirdAgeMode]         = useState(false);
+  const [heldCarts, setHeldCarts]               = useState<HeldCart[]>([]);
+  const [sessionSales, setSessionSales]         = useState(0);
+  const [tick, setTick]                         = useState(0); // for duration display
 
-  useEffect(() => { loadInitialData(); }, []);
+  const [modal, setModal]           = useState<PresentacionModalState>({ product: {} as ProductoFarmacia, visible: false, selectedId: null });
+  const [crossModal, setCrossModal] = useState<CrossBranchModalState>({ visible: false, product: null, branches: [], loading: false });
+  const [pendingCrossBranch, setPendingCrossBranch] = useState<{ id_sucursal: number; nombre: string } | null>(null);
 
+  // Loyalty state
+  const [loyaltyPreview, setLoyaltyPreview]           = useState<LoyaltyPreview | null>(null);
+  const [loyaltyRedemptionPts, setLoyaltyRedemptionPts] = useState(0);
+  const [loyaltyRedemptionLps, setLoyaltyRedemptionLps] = useState(0);
+
+  const hasAssignedCashRegister = !!user?.idCaja && user.idCaja !== 'Sin Caja';
+
+  // Tick every minute to update session duration
   useEffect(() => {
-    const state = location.state as any;
-    if (state?.editSaleId) {
-      loadSaleToEdit(state.editSaleId);
-    } else if (state?.customItem) {
-      const { descripcion, precio } = state.customItem;
-      setCart(prev => [...prev, {
-        codDetalleVenta: `MAN-${Date.now()}`,
-        cantidad: 1,
-        precioVenta: Number(precio),
-        descripcionProducto: descripcion,
-        tipoProducto: 'SERVICIO'
-      }]);
-      navigate(location.pathname, { replace: true, state: {} });
-      setMobileTab('CART');
-    }
-  }, [location.state]);
+    const id = setInterval(() => setTick(t => t + 1), 60000);
+    return () => clearInterval(id);
+  }, []);
 
-  const loadInitialData = async () => {
+  // ── Keyboard shortcuts ────────────────────────────────────────────────────
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement).tagName;
+      const inInput = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+
+      if (e.key === 'F2') { e.preventDefault(); setMobileTab('CATALOG'); }
+      if (e.key === 'F4') { e.preventDefault(); setShowQuickClient(true); }
+      if (e.key === 'F8') { e.preventDefault(); if (!isCheckingOut) handleCheckout(); }
+      if (e.key === 'Escape' && !inInput) { setSearchTerm(''); }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isCheckingOut]);
+
+  // ── Data loading ──────────────────────────────────────────────────────────
+  const loadInitialData = useCallback(async (options?: { selectDefaultClient?: boolean }) => {
     setIsLoading(true);
     try {
-      const [prodData, clientData, configData] = await Promise.all([
+      const [prodData, clientData, cashSession] = await Promise.all([
         InventoryService.getUnifiedProducts(),
         ClientService.getAll(),
-        ConfigService.get()
+        CashService.getActiveArqueo().catch(() => null),
       ]);
       setProducts(prodData || []);
+      setActiveArqueo(cashSession || null);
       const clientList = clientData || [];
       setClients(clientList);
-      const cf = clientList.find((c: any) =>
+      const cf = clientList.find((c: Cliente) =>
         (c.nombre + ' ' + (c.apellido || '')).toLowerCase().includes('consumidor')
       );
-      if (cf) setSelectedClientId(cf.identidad);
-      setCompanyConfig(configData);
-    } catch (err) { console.error(err); } finally { setIsLoading(false); }
-  };
-
-  useOfflineSync(loadInitialData);
-
-  const loadSaleToEdit = async (saleId: string) => {
-    try {
-      setIsLoading(true);
-      const [details, header] = await Promise.all([
-        SalesService.getDetallesVenta(saleId),
-        SalesService.getVenta(saleId)
-      ]);
-
-      if (header) {
-        setIsEditing(true);
-        setEditingSaleId(saleId);
-        setSelectedClientId(header.identidadCliente);
-        setPaymentType(header.tipoCompra);
-        setDiscount(Number(header.descuento) || 0);
-        setPrimaAmount(Number(header.montoPrima) || 0);
-        setCart(details.map(d => ({
-          ...d,
-          cantidad: Number(d.cantidad),
-          precioVenta: Number(d.precioVenta)
-        })));
-      }
-    } catch (e) {
-      Swal.fire('Error', 'No se pudo cargar la factura para editar', 'error');
-    } finally { setIsLoading(false); }
-  };
-
-  const handleBarcodeScan = (code: string) => {
-    setShowScanner(false);
-    const normalizedCode = code.trim();
-    // Match by IMEI, codigo, or id
-    const found = products.find(p =>
-      p.imei === normalizedCode ||
-      p.codigo === normalizedCode ||
-      p.id === normalizedCode
-    );
-    if (found) {
-      addToCart(found);
-      setMobileTab('CART');
-      Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: `${found.nombre} agregado`, showConfirmButton: false, timer: 1500 });
-    } else {
-      // Prefill search so user can see what was scanned
-      setSearchTerm(normalizedCode);
-      Swal.fire({ toast: true, position: 'top-end', icon: 'warning', title: 'Producto no encontrado', text: `Código: ${normalizedCode}`, showConfirmButton: false, timer: 2500 });
+      if (options?.selectDefaultClient !== false && cf) setSelectedClientId(cf.identidad);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsLoading(false);
     }
-  };
+  }, []);
 
-  const addToCart = (product: ProductoUnified) => {
+  useEffect(() => { loadInitialData(); }, [loadInitialData]);
+
+  // ── Cart totals ───────────────────────────────────────────────────────────
+  const totals = useMemo((): CartTotals => {
+    let exento = 0, gravado15 = 0, gravado18 = 0;
+    for (const item of cart) {
+      const price = thirdAgeMode && item.precioTerceraEdad ? item.precioTerceraEdad : item.precioVenta;
+      const line  = item.cantidad * price;
+      if (item.tipoIsv === 'exento') exento    += line;
+      else if (item.tipoIsv === '15') gravado15 += line;
+      else if (item.tipoIsv === '18') gravado18 += line;
+    }
+    const bruto = exento + gravado15 + gravado18;
+    let desc = 0;
+    if (discountType === 'L') desc = Math.max(0, Math.min(discount, bruto));
+    else desc = Math.max(0, Math.min((bruto * discount) / 100, bruto));
+    // Add loyalty redemption on top of manual discount
+    desc = Math.min(desc + loyaltyRedemptionLps, bruto);
+
+    const ratio = bruto > 0 ? (bruto - desc) / bruto : 1;
+    const isv   = (gravado15 * ratio * 15 / 115) + (gravado18 * ratio * 18 / 118);
+    return { exento, gravado: gravado15 + gravado18, bruto, descuento: desc, isv: Math.round(isv * 100) / 100, total: bruto - desc };
+  }, [cart, discount, discountType, thirdAgeMode, loyaltyRedemptionLps]);
+
+  // ── Loyalty preview ───────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!selectedClientId || cart.length === 0) {
+      setLoyaltyPreview(null);
+      return;
+    }
+    // Fetch with pre-loyalty-discount total so max redemption is computed correctly
+    const baseTotal = totals.total + loyaltyRedemptionLps;
+    if (baseTotal <= 0) return;
+    const timer = setTimeout(async () => {
+      try {
+        const r = await LoyaltyService.preview(selectedClientId, baseTotal, user?.id_sucursal);
+        setLoyaltyPreview(r.activo ? r : null);
+      } catch { /* silent — loyalty is optional */ }
+    }, 500);
+    return () => clearTimeout(timer);
+  // Intentionally omit loyaltyRedemptionLps: re-fetch only on cart/client/discount changes
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedClientId, totals.bruto, discount, discountType, thirdAgeMode]);
+
+  const handleLoyaltyRedemption = useCallback((lps: number, pts: number) => {
+    setLoyaltyRedemptionLps(lps);
+    setLoyaltyRedemptionPts(pts);
+  }, []);
+
+  // ── Cart handlers ─────────────────────────────────────────────────────────
+  const addPresentacionToCart = useCallback((
+    product: ProductoFarmacia,
+    presentacion: PresentacionVenta,
+    crossId?: number,
+    crossNombre?: string,
+  ) => {
+    const baseKey = `${product.codigo}-${presentacion.id_presentacion}`;
+    const key = crossId ? `${baseKey}-s${crossId}` : baseKey;
     setCart(prev => {
-      const existing = prev.find(item => 
-        (product.tipo === 'TELEFONO' && item.idTelefono === product.id) ||
-        (product.tipo === 'ACCESORIO' && item.idInventario === product.id)
-      );
-
+      const existing = prev.find(i => i.key === key);
       if (existing) {
-        if (product.tipo === 'TELEFONO') {
-          Swal.fire({ toast: true, position: 'top-end', icon: 'error', title: 'IMEI ya en carrito', showConfirmButton: false, timer: 1500 });
+        if (!crossId && existing.cantidad >= product.stock) {
+          Swal.fire({ toast: true, position: 'top-end', icon: 'warning', title: 'Sin más stock disponible', showConfirmButton: false, timer: 1500 });
           return prev;
         }
-        if (existing.cantidad + 1 > product.stock) {
-          Swal.fire({ toast: true, position: 'top-end', icon: 'warning', title: 'Sin más stock', showConfirmButton: false, timer: 1500 });
-          return prev;
-        }
-        return prev.map(item => item === existing ? { ...item, cantidad: item.cantidad + 1 } : item);
+        return prev.map(i => i.key === key ? { ...i, cantidad: i.cantidad + 1 } : i);
       }
-
       return [...prev, {
-        codDetalleVenta: `T-${Date.now()}`,
-        idTelefono: product.tipo === 'TELEFONO' ? product.id : undefined,
-        idInventario: product.tipo === 'ACCESORIO' ? product.id : undefined,
+        key,
+        id_medicamento: product.codigo,
+        id_presentacion: presentacion.id_presentacion,
+        nombre: `${product.nombreGenerico}${product.concentracion ? ' ' + product.concentracion : ''} — ${presentacion.nombre}`,
         cantidad: 1,
-        precioVenta: Number(product.precioVenta),
-        descripcionProducto: product.tipo === 'TELEFONO'
-          ? `${product.marca ? product.marca + ' ' : ''}${product.nombre}${product.imei ? ' - IMEI: ' + product.imei : ''}`.trim()
-          : `${product.categoria ? product.categoria + ' ' : ''}${product.nombre} [${product.id}]`,
-        tipoProducto: product.tipo
+        precioVenta: Number(presentacion.precio_venta),
+        precioTerceraEdad: presentacion.precio_tercera_edad ? Number(presentacion.precio_tercera_edad) : undefined,
+        tipoIsv: product.tipoIsv,
+        requiereReceta: product.requiereReceta,
+        esControlado: product.esControlado,
+        stock: crossId ? 9999 : product.stock,
+        id_sucursal_origen: crossId,
+        sucursal_nombre_origen: crossNombre,
       }];
     });
-  };
+  }, []);
 
-  const removeFromCart = (id: string) => {
-    setCart(prev => prev.filter(item => item.codDetalleVenta !== id));
-  };
+  const removeFromCart   = useCallback((key: string) => setCart(prev => prev.filter(i => i.key !== key)), []);
 
-  const updateQty = (id: string, delta: number) => {
+  const updateQty = useCallback((key: string, delta: number) => {
     setCart(prev => prev.map(item => {
-      if (item.codDetalleVenta === id) {
-        if (item.tipoProducto === 'TELEFONO') return item;
-        const newQty = item.cantidad + delta;
-        const product = products.find(p => p.id === item.idInventario);
-        if (delta > 0 && product && newQty > product.stock) {
-            Swal.fire({ toast: true, position: 'top-end', icon: 'warning', title: 'Límite de stock', showConfirmButton: false, timer: 1000 });
-            return item;
-        }
-        return newQty > 0 ? { ...item, cantidad: newQty } : item;
+      if (item.key !== key) return item;
+      const next = item.cantidad + delta;
+      if (next < 1) return item;
+      if (delta > 0 && !item.id_sucursal_origen && next > item.stock) {
+        Swal.fire({ toast: true, position: 'top-end', icon: 'warning', title: 'Límite de stock alcanzado', showConfirmButton: false, timer: 1200 });
+        return item;
       }
-      return item;
+      return { ...item, cantidad: next };
     }));
-  };
+  }, []);
 
-  const updatePrice = (id: string, newPrice: number) => {
-    setCart(prev => prev.map(item => 
-      item.codDetalleVenta === id ? { ...item, precioVenta: Math.max(0, newPrice) } : item
-    ));
-  };
+  const updateQtyDirect = useCallback((key: string, qty: number) => {
+    setCart(prev => prev.map(item => {
+      if (item.key !== key) return item;
+      if (!item.id_sucursal_origen && qty > item.stock) {
+        Swal.fire({ toast: true, position: 'top-end', icon: 'warning', title: 'Cantidad supera el stock', showConfirmButton: false, timer: 1200 });
+        return item;
+      }
+      return { ...item, cantidad: qty };
+    }));
+  }, []);
 
-  const totals = useMemo(() => {
-    const bruto = cart.reduce((acc, i) => acc + (i.cantidad * i.precioVenta), 0);
-    const conDescuento = Math.max(0, bruto - discount);
-    const isvRate = (companyConfig?.isv || 15) / 100;
-    const subtotal = conDescuento / (1 + isvRate);
-    const isv = conDescuento - subtotal;
-    const financiado = paymentType === 'KrediYa' ? Math.max(0, conDescuento - primaAmount) : 0;
-    return { bruto, subtotal, isv, total: conDescuento, financiado };
-  }, [cart, discount, companyConfig, paymentType, primaAmount]);
+  // ── Barcode search ────────────────────────────────────────────────────────
+  const handleBarcodeSearch = useCallback((code: string) => {
+    const p = products.find(pr => pr.codigo === code);
+    if (!p) {
+      Swal.fire({ toast: true, position: 'top-end', icon: 'warning', title: `Código "${code}" no encontrado`, showConfirmButton: false, timer: 1800 });
+      return;
+    }
+    handleProductClick(p);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [products]);
 
-  const handleCheckout = async () => {
+  // ── Product/modal handlers ────────────────────────────────────────────────
+  const openCrossModal = useCallback(async (product: ProductoFarmacia) => {
+    setCrossModal({ visible: true, product, branches: [], loading: true });
+    try {
+      const branches = await MedicamentosService.getDisponibilidadSucursales(product.codigo);
+      setCrossModal(m => ({ ...m, branches: branches || [], loading: false }));
+    } catch {
+      setCrossModal(m => ({ ...m, loading: false }));
+    }
+  }, []);
+
+  const handleProductClick = useCallback((product: ProductoFarmacia) => {
+    if (product.stock === 0) { openCrossModal(product); return; }
+    const pres = product.presentaciones || [];
+    if (pres.length === 0) {
+      Swal.fire({ toast: true, position: 'top-end', icon: 'error', title: 'Sin presentaciones configuradas', showConfirmButton: false, timer: 1800 });
+      return;
+    }
+    if (pres.length === 1) { addPresentacionToCart(product, pres[0]); setMobileTab('CART'); return; }
+    setModal({ product, visible: true, selectedId: pres[0].id_presentacion });
+  }, [addPresentacionToCart, openCrossModal]);
+
+  const handleBillFromBranch = useCallback((product: ProductoFarmacia, branch: any) => {
+    const pres = product.presentaciones || [];
+    setCrossModal(m => ({ ...m, visible: false }));
+    if (pres.length === 0) {
+      Swal.fire({ toast: true, position: 'top-end', icon: 'warning', title: 'Sin presentaciones configuradas', showConfirmButton: false, timer: 1800 });
+      return;
+    }
+    if (pres.length === 1) { addPresentacionToCart(product, pres[0], branch.id_sucursal, branch.sucursal_nombre); setMobileTab('CART'); return; }
+    setPendingCrossBranch({ id_sucursal: branch.id_sucursal, nombre: branch.sucursal_nombre });
+    setModal({ product, visible: true, selectedId: pres[0].id_presentacion });
+  }, [addPresentacionToCart]);
+
+  const confirmModal = useCallback(() => {
+    const pres = modal.product.presentaciones?.find(p => p.id_presentacion === modal.selectedId);
+    if (!pres) return;
+    addPresentacionToCart(modal.product, pres, pendingCrossBranch?.id_sucursal, pendingCrossBranch?.nombre);
+    setPendingCrossBranch(null);
+    setModal(m => ({ ...m, visible: false }));
+    setMobileTab('CART');
+  }, [modal, addPresentacionToCart, pendingCrossBranch]);
+
+  // ── Hold / restore ────────────────────────────────────────────────────────
+  const holdCart = useCallback(() => {
     if (cart.length === 0) return;
-    if (!selectedClientId) return Swal.fire('Cliente Requerido', 'Seleccione un cliente.', 'warning');
-    
-    if (paymentType === 'KrediYa' && primaAmount <= 0) {
-        return Swal.fire('Prima Requerida', 'Las ventas KrediYa requieren un monto de prima.', 'warning');
+    if (heldCarts.length >= 5) {
+      Swal.fire({ toast: true, position: 'top-end', icon: 'warning', title: 'Máximo 5 ventas en espera', showConfirmButton: false, timer: 1800 });
+      return;
+    }
+    const cliente = clients.find(c => c.identidad === selectedClientId);
+    setHeldCarts(prev => [...prev, {
+      id: `hold-${Date.now()}`,
+      clienteNombre: cliente ? `${cliente.nombre} ${cliente.apellido}` : '',
+      items: [...cart],
+      discount,
+      discountType,
+      paymentType,
+      savedAt: new Date(),
+    }]);
+    setCart([]);
+    setDiscount(0);
+    setDiscountType('L');
+    setCashReceived(0);
+    setMixtoEfectivo(0);
+    Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Venta apartada', showConfirmButton: false, timer: 1200 });
+  }, [cart, clients, selectedClientId, discount, discountType, paymentType, heldCarts.length]);
+
+  const restoreCart = useCallback((id: string) => {
+    const held = heldCarts.find(h => h.id === id);
+    if (!held) return;
+    if (cart.length > 0) {
+      Swal.fire({
+        title: '¿Reemplazar carrito actual?',
+        text: 'El carrito actual se perderá.',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: 'Sí, restaurar',
+        cancelButtonText: 'Cancelar',
+        confirmButtonColor: '#4f46e5',
+      }).then(r => {
+        if (!r.isConfirmed) return;
+        setCart(held.items);
+        setDiscount(held.discount);
+        setDiscountType(held.discountType);
+        setPaymentType(held.paymentType);
+        setHeldCarts(prev => prev.filter(h => h.id !== id));
+      });
+    } else {
+      setCart(held.items);
+      setDiscount(held.discount);
+      setDiscountType(held.discountType);
+      setPaymentType(held.paymentType);
+      setHeldCarts(prev => prev.filter(h => h.id !== id));
+    }
+  }, [cart.length, heldCarts]);
+
+  // ── Quick client created ──────────────────────────────────────────────────
+  const handleClientCreated = useCallback((newClient: Cliente) => {
+    setClients(prev => {
+      const exists = prev.find(c => c.identidad === newClient.identidad);
+      return exists ? prev : [newClient, ...prev];
+    });
+    setSelectedClientId(newClient.identidad);
+  }, []);
+
+  // ── Reset ─────────────────────────────────────────────────────────────────
+  const resetPOS = useCallback(() => {
+    setCart([]);
+    setSelectedClientId('');
+    setSearchTerm('');
+    setSelectedCategory('Todos');
+    setMobileTab('CATALOG');
+    setDiscount(0);
+    setDiscountType('L');
+    setPaymentType('Contado');
+    setPaymentMethod('Efectivo');
+    setCashReceived(0);
+    setMixtoEfectivo(0);
+    setThirdAgeMode(false);
+    setPendingCrossBranch(null);
+    setModal({ product: {} as ProductoFarmacia, visible: false, selectedId: null });
+    setCrossModal({ visible: false, product: null, branches: [], loading: false });
+    setShowAIAssistant(false);
+    setShowQuickClient(false);
+    setShowHoldPanel(false);
+    setLoyaltyPreview(null);
+    setLoyaltyRedemptionPts(0);
+    setLoyaltyRedemptionLps(0);
+    loadInitialData({ selectDefaultClient: false });
+  }, [loadInitialData]);
+
+  // ── Checkout ──────────────────────────────────────────────────────────────
+  const handleCheckout = async () => {
+    if (checkoutLockRef.current) return;
+    if (!hasAssignedCashRegister) {
+      Swal.fire('Caja no asignada', 'Tu usuario no tiene una caja asignada.', 'warning');
+      return;
+    }
+    if (!activeArqueo) {
+      Swal.fire('Turno de caja cerrado', 'Debes abrir caja antes de procesar ventas.', 'warning');
+      return;
+    }
+    if (cart.length === 0) return;
+    if (!selectedClientId) {
+      Swal.fire('Cliente Requerido', 'Seleccione un cliente para procesar la venta.', 'warning');
+      return;
+    }
+
+    // Validate mixed payment
+    if (paymentType === 'Contado' && paymentMethod === 'Mixto' && mixtoEfectivo > totals.total) {
+      Swal.fire('Pago mixto inválido', 'El monto en efectivo no puede superar el total.', 'warning');
+      return;
+    }
+
+    const hasRx = cart.some(i => i.requiereReceta || i.esControlado);
+    if (hasRx) {
+      const result = await Swal.fire({
+        title: 'Medicamentos con receta',
+        text: 'El carrito contiene medicamentos que requieren receta médica o son controlados. ¿Confirma que cuenta con la receta correspondiente?',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: 'Sí, proceder',
+        cancelButtonText: 'Cancelar',
+        confirmButtonColor: '#4f46e5',
+      });
+      if (!result.isConfirmed) return;
     }
 
     try {
-      setIsLoading(true);
+      checkoutLockRef.current = true;
+      setIsCheckingOut(true);
+      const clientMutationId = `sale-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
       const payload: VentaPayload = {
         identidadCliente: selectedClientId,
         tipoCompra: paymentType,
         total: totals.total,
         isv: totals.isv,
-        descuento: discount,
-        montoPrima: paymentType === 'KrediYa' ? primaAmount : 0,
-        montoFinanciado: totals.financiado,
-        detalles: cart
+        descuento: totals.descuento,
+        clientMutationId,
+        detalles: cart.map(item => ({
+          id_medicamento: item.id_medicamento,
+          id_presentacion: item.id_presentacion,
+          cantidad: item.cantidad,
+          precioVenta: thirdAgeMode && item.precioTerceraEdad ? item.precioTerceraEdad : item.precioVenta,
+          descripcionProducto: item.nombre,
+          tipoProducto: 'MEDICAMENTO' as const,
+          tipoIsv: item.tipoIsv,
+          ...(item.id_sucursal_origen ? { id_sucursal_origen: item.id_sucursal_origen } : {}),
+        } as any)),
       };
 
-      let saleId = "";
-      if (isEditing && editingSaleId) {
-        await SalesService.updateVenta(editingSaleId, payload);
-        saleId = editingSaleId;
-        Swal.fire('Actualizado', 'Venta modificada con éxito', 'success');
-      } else {
-        const response = await SalesService.createVenta(payload);
-        if (!response?.codVenta) {
-          resetPOS();
-          return;
-        }
-        saleId = response.codVenta;
-        const isOfflineSale = !!(response as any)._offline;
+      const crossBranchItems = cart.filter(i => i.id_sucursal_origen);
+      // Capture loyalty snapshot before resetPOS clears state
+      const snapClientId    = selectedClientId;
+      const snapLoyaltyPts  = loyaltyRedemptionPts;
+      const snapBasePurchase = totals.total + loyaltyRedemptionLps; // pre-loyalty total
+      const loyaltyActive   = loyaltyPreview?.activo === true;
 
-        // Venta offline: crear ingreso sintético en cache para que aparezca en Caja
-        if (isOfflineSale && user?.idCaja) {
-          offlineDB.patchCacheByPrefix(`cache:/ingresos`, 'POST', null, {
-            idIngreso: `LOCAL_ING_${Date.now()}`,
-            idCaja: user.idCaja,
-            descripcion: `Venta (pendiente sincronización)`,
-            monto: payload.total,
-            costo: payload.total - payload.isv,
-            subtipo_movimiento: 'Venta',
-            estado: 'activo',
-            fechaCreacion: new Date().toISOString(),
-            _offline: true
-          }, 'idIngreso').catch(() => {});
-        }
+      const response = await SalesService.createVenta(payload);
+      const codVenta = response?.codVenta || '';
+      setSessionSales(s => s + 1);
+      resetPOS();
 
-        const title = isOfflineSale ? 'Venta guardada offline' : '¡Venta Exitosa!';
-        const text  = isOfflineSale
-          ? `Factura #${saleId} guardada. Se sincronizará al reconectarse.`
-          : `Factura #${saleId} generada.`;
-
-        // Descargar PDF del diseñador automáticamente y luego notificar
-        downloadSaleInvoicePDF(saleId).then(result => {
-          if (!result.success) {
-            Swal.fire('Sin plantilla', result.message, 'warning');
-          } else {
-            Swal.fire({ title, text, icon: 'success', confirmButtonColor: '#1e3a8a' });
+      // Non-blocking loyalty earn/redeem (best-effort — admin can adjust manually if it fails)
+      if (loyaltyActive && snapClientId && codVenta) {
+        (async () => {
+          if (snapLoyaltyPts > 0) {
+            try { await LoyaltyService.redeem(snapClientId, codVenta, snapLoyaltyPts, user?.id_sucursal); } catch {}
           }
-          resetPOS();
-        }).catch(() => {
-          Swal.fire({ title, text, icon: 'success', confirmButtonColor: '#1e3a8a' });
-          resetPOS();
-        });
-        return; // resetPOS se llama dentro del .then()
+          try { await LoyaltyService.earn(snapClientId, codVenta, snapBasePurchase, user?.id_sucursal); } catch {}
+        })();
       }
 
-      resetPOS();
+      const crossHtml = crossBranchItems.length > 0
+        ? `<div class="mt-3 p-3 bg-orange-50 rounded-lg text-left text-xs text-orange-800">
+             <strong>El cliente debe retirar en:</strong>
+             <ul class="mt-1 space-y-0.5">${crossBranchItems.map(i =>
+               `<li>• ${i.nombre.split(' — ')[0]} → <strong>${i.sucursal_nombre_origen || 'sucursal origen'}</strong></li>`
+             ).join('')}</ul>
+           </div>`
+        : '';
+
+      const { value: action } = await Swal.fire({
+        title: 'Venta Procesada',
+        html: `<p class="text-slate-600">Factura <strong>#${codVenta}</strong> generada.</p>${crossHtml}`,
+        icon: 'success',
+        confirmButtonColor: '#4f46e5',
+        confirmButtonText: 'Imprimir factura',
+        showDenyButton: true,
+        denyButtonText: 'Descargar PDF',
+        denyButtonColor: '#0ea5e9',
+        showCancelButton: true,
+        cancelButtonText: 'Cerrar',
+        cancelButtonColor: '#64748b',
+      });
+
+      if (action === true) {
+        const result = await printSaleInvoice(codVenta);
+        if (!result.success) Swal.fire('Sin plantilla', result.message, 'warning');
+      } else if (action === false) {
+        const result = await downloadSaleInvoicePDF(codVenta);
+        if (!result.success) Swal.fire('Sin plantilla', result.message, 'warning');
+      }
     } catch (e: any) {
-      Swal.fire('Error', e.message, 'error');
-    } finally { setIsLoading(false); }
+      Swal.fire('Error', e.message || 'No se pudo procesar la venta.', 'error');
+    } finally {
+      setIsCheckingOut(false);
+      checkoutLockRef.current = false;
+    }
   };
 
-  const resetPOS = () => {
-    setCart([]);
-    setDiscount(0);
-    setPrimaAmount(0);
-    setSelectedClientId('');
-    setIsEditing(false);
-    setEditingSaleId(null);
-    setPaymentType('Contado');
-    navigate('/pos', { state: {} });
-    loadInitialData();
-  };
+  const cartCount = cart.reduce((a, b) => a + b.cantidad, 0);
 
-  const brands = useMemo(() => ['ALL', ...new Set(products.filter(p => p.tipo === 'TELEFONO').map(p => p.marca!))].sort(), [products]);
-  const categories = useMemo(() => ['ALL', ...new Set(products.filter(p => p.tipo === 'ACCESORIO').map(p => p.categoria!))].sort(), [products]);
+  const handleCrossSearch = useCallback(async (term: string) => {
+    try {
+      const all = await InventoryService.getUnifiedProducts({ q: term, include_zero_stock: '1' });
+      if (!all || all.length === 0) {
+        Swal.fire({ toast: true, position: 'top-end', icon: 'warning', title: 'Medicamento no encontrado en ninguna sucursal', showConfirmButton: false, timer: 2200 });
+        return;
+      }
+      const productWithStock = all.find((p: ProductoFarmacia) => Number(p.stock || 0) > 0) || all[0];
+      openCrossModal(productWithStock as ProductoFarmacia);
+    } catch {
+      Swal.fire({ toast: true, position: 'top-end', icon: 'error', title: 'Error al buscar en otras sucursales', showConfirmButton: false, timer: 1800 });
+    }
+  }, [openCrossModal]);
 
-  const filteredProducts = products.filter(p => {
-    const term = searchTerm.toLowerCase();
-    const matchSearch = p.nombre.toLowerCase().includes(term) || p.imei?.includes(searchTerm) || p.codigo.toLowerCase().includes(term) || p.id.toLowerCase().includes(term);
-    const matchType = selectedType === 'ALL' || p.tipo === selectedType;
-    const matchBrand = selectedType !== 'TELEFONO' || selectedBrand === 'ALL' || p.marca === selectedBrand;
-    const matchCat = selectedType !== 'ACCESORIO' || selectedCategory === 'ALL' || p.categoria === selectedCategory;
-    return matchSearch && matchType && matchBrand && matchCat;
-  });
+  const handleViewAIProduct = useCallback((codigo: string) => {
+    setSearchTerm(codigo);
+    setSelectedCategory('Todos');
+    setMobileTab('CATALOG');
+  }, []);
 
-  const isvConfig = companyConfig?.isv || 15;
+  // ── Locked states ─────────────────────────────────────────────────────────
+  if (!isLoading && !hasAssignedCashRegister) {
+    return (
+      <div className="flex h-[calc(100vh-100px)] items-center justify-center bg-slate-50 p-6">
+        <div className="w-full max-w-md rounded-3xl border border-amber-100 bg-white p-8 text-center shadow-xl">
+          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-amber-100">
+            <Lock className="text-amber-600" size={30} />
+          </div>
+          <h2 className="text-2xl font-bold text-slate-800">Caja no asignada</h2>
+          <p className="mt-3 text-sm leading-relaxed text-slate-500">
+            No puedes facturar porque tu usuario no tiene una caja activa asignada.
+          </p>
+          <div className="mt-6 rounded-2xl border border-amber-100 bg-amber-50 p-4 text-sm text-amber-800">
+            Un administrador debe ir a Administración &gt; Usuarios y asignarte una caja.
+          </div>
+          <button onClick={() => loadInitialData()} className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-slate-900 py-3 font-bold text-white transition-colors hover:bg-slate-800">
+            <RefreshCw size={16} /> Verificar de nuevo
+          </button>
+        </div>
+      </div>
+    );
+  }
 
+  if (!isLoading && hasAssignedCashRegister && !activeArqueo) {
+    return (
+      <div className="flex h-[calc(100vh-100px)] items-center justify-center bg-slate-50 p-6">
+        <div className="w-full max-w-md rounded-3xl border border-indigo-100 bg-white p-8 text-center shadow-xl">
+          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-indigo-100">
+            <AlertTriangle className="text-indigo-600" size={30} />
+          </div>
+          <h2 className="text-2xl font-bold text-slate-800">Turno de caja cerrado</h2>
+          <p className="mt-3 text-sm leading-relaxed text-slate-500">
+            Para procesar ventas debes abrir caja primero. Caja asignada: <strong>{user?.idCaja}</strong>.
+          </p>
+          <button onClick={() => loadInitialData()} className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 py-3 font-bold text-white transition-colors hover:bg-indigo-700">
+            <RefreshCw size={16} /> Ya abrí caja, verificar
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Main POS ───────────────────────────────────────────────────────────────
   return (
-    <div className="flex flex-col h-[calc(100vh-100px)] gap-6 overflow-hidden">
-      <div className="lg:hidden flex bg-white rounded-xl p-1 border border-slate-200 shadow-sm shrink-0">
-         <button onClick={() => setMobileTab('CATALOG')} className={`flex-1 py-2 text-xs font-bold rounded-lg flex items-center justify-center gap-2 ${mobileTab === 'CATALOG' ? 'bg-indigo-600 text-white shadow' : 'text-slate-500'}`}><LayoutGrid size={16} /> Catálogo</button>
-         <button onClick={() => setMobileTab('CART')} className={`flex-1 py-2 text-xs font-bold rounded-lg flex items-center justify-center gap-2 ${mobileTab === 'CART' ? 'bg-indigo-600 text-white shadow' : 'text-slate-500'}`}><ShoppingCart size={16} /> Carrito ({cart.reduce((a,b)=>a+b.cantidad,0)})</button>
-      </div>
-      <div className="flex flex-col lg:flex-row gap-6 flex-1 min-h-0">
-        <div className={`flex-col bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden flex-1 ${mobileTab === 'CATALOG' ? 'flex' : 'hidden lg:flex'}`}>
-          <div className="p-4 border-b border-slate-100 space-y-4">
-            <div className="flex gap-3">
-               <div className="relative flex-1"><Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} /><input type="text" placeholder="Buscar Producto, IMEI o Código..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-12 pr-4 py-2.5 bg-slate-50 border-none rounded-xl focus:ring-2 focus:ring-indigo-500/30 outline-none text-sm font-medium" /></div>
-               <button onClick={() => setShowScanner(true)} className="bg-indigo-600 hover:bg-indigo-700 text-white p-2.5 rounded-xl transition-all active:scale-95 shadow-md shadow-indigo-600/20" title="Escanear código de barras"><ScanLine size={20}/></button>
-               <button onClick={loadInitialData} className="bg-slate-100 hover:bg-indigo-50 text-slate-500 hover:text-indigo-600 p-2.5 rounded-xl transition-all active:scale-95"><RefreshCw size={20} className={isLoading ? 'animate-spin' : ''}/></button>
-            </div>
-            <div className="flex flex-col gap-2">
-               <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
-                  <button onClick={() => {setSelectedType('ALL'); setSelectedBrand('ALL'); setSelectedCategory('ALL');}} className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${selectedType === 'ALL' ? 'bg-slate-800 text-white shadow-md' : 'bg-slate-100 text-slate-400'}`}>TODOS</button>
-                  <button onClick={() => setSelectedType('TELEFONO')} className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${selectedType === 'TELEFONO' ? 'bg-blue-600 text-white shadow-md' : 'bg-slate-100 text-slate-400'}`}>TELÉFONOS</button>
-                  <button onClick={() => setSelectedType('ACCESORIO')} className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${selectedType === 'ACCESORIO' ? 'bg-orange-600 text-white shadow-md' : 'bg-slate-100 text-slate-400'}`}>ACCESORIOS</button>
-               </div>
-               {selectedType === 'TELEFONO' && (
-                   <div className="flex gap-1.5 overflow-x-auto no-scrollbar py-1">
-                       {brands.map(b => (
-                           <button key={b} onClick={() => setSelectedBrand(b)} className={`px-3 py-1 rounded-md text-[9px] font-bold uppercase border ${selectedBrand === b ? 'bg-blue-50 border-blue-500 text-blue-700' : 'bg-white border-slate-200 text-slate-400'}`}>{b === 'ALL' ? 'Marcas' : b}</button>
-                       ))}
-                   </div>
-               )}
-               {selectedType === 'ACCESORIO' && (
-                   <div className="flex gap-1.5 overflow-x-auto no-scrollbar py-1">
-                       {categories.map(c => (
-                           <button key={c} onClick={() => setSelectedCategory(c)} className={`px-3 py-1 rounded-md text-[9px] font-bold uppercase border ${selectedCategory === c ? 'bg-orange-50 border-orange-500 text-orange-700' : 'bg-white border-slate-200 text-slate-400'}`}>{c === 'ALL' ? 'Categorías' : c}</button>
-                       ))}
-                   </div>
-               )}
-            </div>
-          </div>
-          <div className="flex-1 overflow-y-auto p-2 sm:p-3 bg-slate-50/50 custom-scrollbar">
-            <div className="grid grid-cols-2 md:grid-cols-3 2xl:grid-cols-4 gap-2">
-              {filteredProducts.map(p => (
-                <button
-                  key={p.id}
-                  onClick={() => addToCart(p)}
-                  disabled={p.stock === 0}
-                  className={`flex flex-col items-start p-2 bg-white rounded-xl border transition-all text-left active:scale-95 shadow-sm min-w-0 ${p.stock === 0 ? 'opacity-50 grayscale' : 'border-slate-200/60 hover:border-indigo-500 hover:shadow-md'}`}
-                >
-                  {/* Badges tipo + stock */}
-                  <div className="w-full flex justify-between items-center gap-1 mb-1.5 min-w-0">
-                    <span className="shrink-0 text-[7px] font-black px-1 py-0.5 rounded uppercase bg-slate-100 text-slate-500 leading-none">
-                      {p.tipo === 'TELEFONO' ? 'TEL' : p.tipo === 'ACCESORIO' ? 'ACC' : 'SRV'}
-                    </span>
-                    <span className={`text-[8px] font-black px-1 py-0.5 rounded leading-none truncate ${p.stock > 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600'}`}>
-                      {p.stock > 99 ? '99+' : p.stock}u
-                    </span>
-                  </div>
-                  {/* Nombre del producto */}
-                  <h4 className="w-full font-bold text-slate-800 text-[10px] line-clamp-2 leading-snug mb-1 min-w-0">
-                    {p.tipo === 'TELEFONO'
-                      ? `${p.marca ? p.marca + ' ' : ''}${p.nombre}`.trim()
-                      : `${p.categoria ? p.categoria + ' - ' : ''}${p.nombre}`}
-                  </h4>
-                  {/* Código secundario */}
-                  {p.tipo === 'TELEFONO' && p.imei && (
-                    <p className="w-full text-[8px] text-slate-400 truncate leading-none mb-1">IMEI: {p.imei}</p>
-                  )}
-                  {p.tipo === 'ACCESORIO' && (
-                    <p className="w-full text-[8px] text-slate-400 truncate leading-none mb-1">#{p.id}</p>
-                  )}
-                  {/* Precio */}
-                  <div className="mt-auto w-full pt-1.5 border-t border-slate-100 font-black text-indigo-600 text-[10px] truncate">
-                    L. {Number(p.precioVenta).toLocaleString()}
-                  </div>
-                </button>
-              ))}
-            </div>
-          </div>
+    <div className="flex flex-col h-[calc(100vh-80px)] gap-0 overflow-hidden -mx-4 md:-mx-8 -mt-4 md:-mt-8">
+
+      {/* ── Session header strip ── */}
+      <div className="bg-slate-900 text-white px-4 md:px-6 py-2 shrink-0 flex items-center gap-3 md:gap-6 flex-wrap">
+        <div className="flex items-center gap-2 text-[11px]">
+          <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+          <span className="font-bold text-slate-300">{user?.nombreEmpleado || user?.usuario}</span>
+          <span className="text-slate-600">·</span>
+          <span className="text-slate-400">{user?.idCaja}</span>
         </div>
-        <div className={`w-full lg:w-[400px] flex-col bg-white rounded-3xl shadow-xl border border-slate-200 h-full ${mobileTab === 'CART' ? 'flex' : 'hidden lg:flex'}`}>
-          <div className={`p-5 border-b space-y-4 shrink-0 bg-[#1e293b] text-white rounded-t-3xl`}>
-            <div className="flex justify-between items-center"><h3 className="font-black text-sm uppercase tracking-wider flex items-center gap-2"><Zap className={isEditing ? 'text-amber-400' : 'text-indigo-400'} size={18} /> {isEditing ? `EDITANDO #${editingSaleId}` : 'VENTA ACTUAL'}</h3>{isEditing && <button onClick={resetPOS} className="text-[10px] font-black uppercase bg-red-500/20 text-red-400 px-2 py-1 rounded">Cancelar</button>}</div>
-            <div className="grid grid-cols-3 gap-1">
-               {['Contado', 'KrediYa', 'Credito'].map(type => (
-                   <button key={type} onClick={() => setPaymentType(type as any)} className={`py-2 text-[8px] md:text-[10px] font-black uppercase tracking-widest rounded-xl transition-all border-2 ${paymentType === type ? 'bg-indigo-600 border-indigo-600 text-white shadow-lg' : 'bg-transparent border-slate-700 text-slate-500'}`}>{type}</button>
-               ))}
-            </div>
-            <div className="relative"><User size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500"/><select value={selectedClientId} onChange={(e) => setSelectedClientId(e.target.value)} className="w-full pl-9 pr-10 py-2.5 bg-slate-800 border-none rounded-xl text-xs font-bold text-white focus:ring-2 focus:ring-indigo-500 transition-all appearance-none">{clients.map(c => <option key={c.identidad} value={c.identidad}>{c.nombre} {c.apellido}</option>)}</select><button onClick={() => navigate('/clients')} className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 bg-indigo-600 text-white rounded-lg"><UserPlus size={14}/></button></div>
-          </div>
-          <div className="flex-1 overflow-y-auto p-3 space-y-2 custom-scrollbar bg-slate-50/30">
-            {cart.length === 0 ? (<div className="h-full flex flex-col items-center justify-center text-slate-300 opacity-30"><ShoppingCart size={64} strokeWidth={1} className="mb-2" /><p className="font-black text-xs uppercase">Carrito Vacío</p></div>) : (cart.map((item) => (
-                <div key={item.codDetalleVenta} className="flex flex-col bg-white p-3 rounded-2xl border border-slate-100 shadow-sm animate-fade-in group"><div className="flex justify-between items-start mb-2"><div className="flex-1 min-w-0 pr-2"><h5 className="text-[11px] font-bold text-slate-800 leading-tight truncate">{item.descripcionProducto}</h5></div><button onClick={() => removeFromCart(item.codDetalleVenta!)} className="text-slate-300 hover:text-red-500 p-1"><X size={14}/></button></div><div className="flex justify-between items-center pt-2 border-t border-slate-50"><div className="flex items-center bg-slate-100 p-1 rounded-lg"><button disabled={item.tipoProducto === 'TELEFONO'} onClick={() => updateQty(item.codDetalleVenta!, -1)} className="w-6 h-6 flex items-center justify-center bg-white rounded-md text-slate-600 hover:text-indigo-600 disabled:opacity-30 shadow-sm"><Minus size={10}/></button><span className="text-[11px] font-black w-7 text-center">{item.cantidad}</span><button disabled={item.tipoProducto === 'TELEFONO'} onClick={() => updateQty(item.codDetalleVenta!, 1)} className="w-6 h-6 flex items-center justify-center bg-white rounded-md text-slate-600 hover:text-indigo-600 disabled:opacity-30 shadow-sm"><Plus size={10}/></button></div><div className="flex flex-col items-end"><input type="number" value={item.precioVenta} onChange={(e) => updatePrice(item.codDetalleVenta!, Number(e.target.value))} className="w-20 text-right bg-slate-50 border border-slate-200 rounded px-1.5 py-0.5 text-[11px] font-black text-indigo-600 outline-none focus:ring-1 focus:ring-indigo-500" onFocus={(e) => e.target.select()}/><span className="font-black text-slate-400 text-[9px] mt-0.5">Sub: L. {(item.cantidad * item.precioVenta).toLocaleString()}</span></div></div></div>
-              ))
+        <div className="flex items-center gap-1.5 text-[11px] text-slate-400">
+          <Clock size={11} />
+          <span>{formatDuration(sessionStart)}</span>
+        </div>
+        <div className="flex items-center gap-1.5 text-[11px] text-slate-400">
+          <TrendingUp size={11} />
+          <span>{sessionSales} venta{sessionSales !== 1 ? 's' : ''} este turno</span>
+        </div>
+        <div className="flex items-center gap-1.5 text-[11px] text-slate-400">
+          <Package size={11} />
+          <span>{products.length} productos</span>
+        </div>
+        {/* Shortcut hints — hidden on mobile */}
+        <div className="ml-auto hidden md:flex items-center gap-3 text-[10px] text-slate-600">
+          <span><kbd className="bg-slate-800 px-1.5 py-0.5 rounded text-[9px]">F2</kbd> Buscar</span>
+          <span><kbd className="bg-slate-800 px-1.5 py-0.5 rounded text-[9px]">F4</kbd> Nuevo cliente</span>
+          <span><kbd className="bg-slate-800 px-1.5 py-0.5 rounded text-[9px]">F8</kbd> Cobrar</span>
+          <span><kbd className="bg-slate-800 px-1.5 py-0.5 rounded text-[9px]">Esc</kbd> Limpiar</span>
+        </div>
+        {/* AI button */}
+        <button
+          onClick={() => setShowAIAssistant(true)}
+          className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all shrink-0"
+        >
+          <Sparkles size={13} /> IA
+        </button>
+      </div>
+
+      {/* ── Mobile tab bar ── */}
+      <div className="lg:hidden flex bg-white border-b border-slate-200 shrink-0">
+        {[
+          { id: 'CATALOG'  as const, label: 'Catálogo', badge: null },
+          { id: 'CART'     as const, label: 'Carrito',  badge: cartCount > 0 ? cartCount : null },
+          { id: 'CHECKOUT' as const, label: 'Cobrar',   badge: null },
+        ].map(({ id, label, badge }) => (
+          <button
+            key={id}
+            onClick={() => setMobileTab(id)}
+            className={`flex-1 py-2.5 text-xs font-bold flex items-center justify-center gap-1.5 transition-colors border-b-2 ${
+              mobileTab === id
+                ? 'text-indigo-600 border-indigo-600'
+                : 'text-slate-400 border-transparent hover:text-slate-600'
+            }`}
+          >
+            {id === 'CATALOG'  && <LayoutGrid size={13} />}
+            {id === 'CART'     && <ShoppingCart size={13} />}
+            {id === 'CHECKOUT' && <Package size={13} />}
+            {label}
+            {badge !== null && (
+              <span className="bg-indigo-600 text-white w-4 h-4 rounded-full text-[9px] flex items-center justify-center">{badge}</span>
             )}
-          </div>
-          <div className="p-5 bg-white border-t border-slate-100 rounded-b-3xl">
-            <div className="space-y-1.5 mb-4">
-              <div className="flex justify-between text-slate-400 text-[10px] font-bold uppercase tracking-wider"><span>Subtotal</span><span>L. {totals.subtotal.toFixed(2)}</span></div>
-              {paymentType === 'KrediYa' && (
-                  <div className="animate-fade-in space-y-2 pt-1 bg-emerald-50 p-2 rounded-xl border border-emerald-100 mb-2">
-                      <div className="flex justify-between items-center"><div className="flex items-center gap-2"><Wallet size={12} className="text-emerald-600"/><span className="text-[10px] font-black text-emerald-600 uppercase">Pago Prima</span></div><input type="number" value={primaAmount} onChange={(e) => setPrimaAmount(Math.max(0, Number(e.target.value)))} className="w-24 text-right py-1 px-2 border border-emerald-200 rounded-lg bg-white text-[12px] font-black text-emerald-700 outline-none" onFocus={e => e.target.select()} /></div>
-                      <div className="flex justify-between text-slate-500 text-[10px] font-black uppercase px-1"><span>A Financiar:</span><span className="text-slate-800 font-bold">L. {totals.financiado.toFixed(2)}</span></div>
-                  </div>
-              )}
-              <div className="flex justify-between items-center py-1 border-y border-slate-50"><div className="flex items-center gap-2"><Tag size={12} className="text-red-500"/><span className="text-[10px] font-black text-red-500 uppercase">Descuento</span></div><input type="number" value={discount} onChange={(e) => setDiscount(Math.max(0, Number(e.target.value)))} className="w-20 text-right py-1 px-2 border border-slate-100 rounded-lg bg-slate-50 text-[11px] font-black text-slate-800 outline-none" onFocus={e => e.target.select()} /></div>
-              <div className="flex justify-between text-slate-400 text-[10px] font-bold uppercase tracking-wider"><span>ISV ({isvConfig}%)</span><span>L. {totals.isv.toFixed(2)}</span></div>
-              <div className="flex justify-between items-end pt-3"><span className="font-black text-xs text-slate-800 uppercase tracking-widest">Total Neto</span><span className="font-black text-2xl text-indigo-600 tracking-tighter">L. {totals.total.toFixed(2)}</span></div>
-            </div>
-            <button className={`w-full flex items-center justify-center gap-3 px-4 py-4 rounded-2xl text-white font-black transition-all shadow-xl disabled:bg-slate-200 disabled:shadow-none text-xs tracking-[0.2em] active:scale-95 ${isEditing ? 'bg-amber-600 shadow-amber-600/20' : (paymentType === 'KrediYa' ? 'bg-emerald-600 shadow-emerald-600/20' : 'bg-indigo-600 shadow-indigo-600/20 hover:bg-indigo-700')}`} disabled={cart.length === 0 || isLoading} onClick={handleCheckout}>{isLoading ? <RefreshCw className="animate-spin" size={18}/> : <Check size={18} strokeWidth={3}/>} {isEditing ? 'ACTUALIZAR VENTA' : 'FACTURAR'}</button>
-          </div>
+          </button>
+        ))}
+      </div>
+
+      {/* ── Main panels ── */}
+      <div className="flex flex-1 min-h-0 overflow-hidden gap-0">
+
+        {/* Catalog panel */}
+        <div className={`${mobileTab === 'CATALOG' ? 'flex' : 'hidden'} lg:flex flex-1 min-h-0 min-w-0 p-3 md:p-4 bg-slate-50`}>
+          <ProductCatalog
+            products={products}
+            isLoading={isLoading}
+            searchTerm={searchTerm}
+            selectedCategory={selectedCategory}
+            onSearchChange={setSearchTerm}
+            onCategoryChange={setSelectedCategory}
+            onProductClick={handleProductClick}
+            onReload={loadInitialData}
+            onBarcodeSearch={handleBarcodeSearch}
+            onCrossSearch={handleCrossSearch}
+          />
+        </div>
+
+        {/* Cart panel */}
+        <div className={`${mobileTab === 'CART' ? 'flex' : 'hidden'} lg:flex flex-col min-h-0 p-3 md:p-4 bg-slate-50 w-full lg:w-auto`}>
+          <CartPanel
+            cart={cart}
+            thirdAgeMode={thirdAgeMode}
+            totals={totals}
+            heldCount={heldCarts.length}
+            onUpdateQty={updateQty}
+            onUpdateQtyDirect={updateQtyDirect}
+            onRemove={removeFromCart}
+            onClearCart={() => { setCart([]); setDiscount(0); setDiscountType('L'); setCashReceived(0); setMixtoEfectivo(0); }}
+            onHoldCart={holdCart}
+            onShowHeld={() => setShowHoldPanel(true)}
+          />
+        </div>
+
+        {/* Checkout panel */}
+        <div className={`${mobileTab === 'CHECKOUT' ? 'flex' : 'hidden'} lg:flex flex-col min-h-0 p-3 md:p-4 bg-slate-50 w-full lg:w-auto`}>
+          <CheckoutPanel
+            cartLength={cart.length}
+            clients={clients}
+            selectedClientId={selectedClientId}
+            paymentType={paymentType}
+            paymentMethod={paymentMethod}
+            discount={discount}
+            discountType={discountType}
+            cashReceived={cashReceived}
+            mixtoEfectivo={mixtoEfectivo}
+            thirdAgeMode={thirdAgeMode}
+            totals={totals}
+            isCheckingOut={isCheckingOut}
+            onClientChange={setSelectedClientId}
+            onPaymentTypeChange={setPaymentType}
+            onPaymentMethodChange={setPaymentMethod}
+            onDiscountChange={setDiscount}
+            onDiscountTypeChange={setDiscountType}
+            onCashReceivedChange={setCashReceived}
+            onMixtoEfectivoChange={setMixtoEfectivo}
+            onThirdAgeModeChange={setThirdAgeMode}
+            onCheckout={handleCheckout}
+            onNewClient={() => setShowQuickClient(true)}
+            loyaltyPreview={loyaltyPreview}
+            loyaltyRedemptionLps={loyaltyRedemptionLps}
+            onLoyaltyRedemptionChange={handleLoyaltyRedemption}
+          />
         </div>
       </div>
-      {showScanner && (
-        <BarcodeScanner
-          onScan={handleBarcodeScan}
-          onClose={() => setShowScanner(false)}
-          title="Escanear Producto"
-          hint="Apunta al código de barras o IMEI del producto"
-        />
-      )}
+
+      {/* ── Modals ── */}
+      <PresentacionModal
+        modal={modal}
+        pendingCrossBranch={pendingCrossBranch}
+        onClose={() => { setModal(m => ({ ...m, visible: false })); setPendingCrossBranch(null); }}
+        onSelectPres={id => setModal(m => ({ ...m, selectedId: id }))}
+        onConfirm={confirmModal}
+      />
+      <CrossBranchModal
+        modal={crossModal}
+        onClose={() => setCrossModal(m => ({ ...m, visible: false }))}
+        onBillFromBranch={handleBillFromBranch}
+      />
+      <AIAssistantPanel
+        visible={showAIAssistant}
+        onClose={() => setShowAIAssistant(false)}
+        onViewProduct={handleViewAIProduct}
+        idSucursal={user?.id_sucursal}
+      />
+      <QuickClientModal
+        visible={showQuickClient}
+        onClose={() => setShowQuickClient(false)}
+        onCreated={handleClientCreated}
+      />
+      <HoldPanel
+        visible={showHoldPanel}
+        heldCarts={heldCarts}
+        onClose={() => setShowHoldPanel(false)}
+        onRestore={restoreCart}
+        onDiscard={id => setHeldCarts(prev => prev.filter(h => h.id !== id))}
+      />
     </div>
   );
 };

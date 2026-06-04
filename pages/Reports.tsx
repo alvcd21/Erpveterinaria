@@ -8,8 +8,8 @@ import {
   LineChart, Line, Legend, Cell
 } from 'recharts';
 import {
-  FileText, Download, Filter, TrendingUp, TrendingDown, Package, Users, Smartphone,
-  RefreshCw, DollarSign, ShoppingCart, UserCheck, Award
+  FileText, Download, Filter, TrendingUp, Package, Users,
+  RefreshCw, DollarSign, ShoppingCart, Award, UserCheck
 } from 'lucide-react';
 
 const COLORS = ['#4f46e5', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'];
@@ -39,7 +39,6 @@ const Reports: React.FC = () => {
   const [salesTrend, setSalesTrend] = useState<any[]>([]);
   const [topProducts, setTopProducts] = useState<any[]>([]);
   const [inventoryVal, setInventoryVal] = useState<any[]>([]);
-  const [recharges, setRecharges] = useState<any[]>([]);
   const [topClients, setTopClients] = useState<any[]>([]);
   const [dailySales, setDailySales] = useState<any[]>([]);
   const [sellers, setSellers] = useState<any[]>([]);
@@ -67,9 +66,6 @@ const Reports: React.FC = () => {
         ]);
         setInventoryVal(inv);
         setTopProducts(top);
-      } else if (activeTab === 'RECHARGES') {
-        const rec = await ReportsService.getRechargesProfit(year);
-        setRecharges(rec);
       } else if (activeTab === 'CLIENTS') {
         const [clients, sell] = await Promise.all([
           ReportsService.getTopClients(start, end),
@@ -104,16 +100,6 @@ const Reports: React.FC = () => {
   };
 
   const monthName = new Date(year, month - 1).toLocaleString('es-HN', { month: 'long', year: 'numeric' });
-
-  // Reagrupar recargas por mes para el gráfico (un punto por mes, barras por red)
-  const rechargesChartData = (() => {
-    const map: Record<string, any> = {};
-    recharges.forEach(r => {
-      if (!map[r.mes]) map[r.mes] = { mes: r.mes, num_mes: r.num_mes };
-      map[r.mes][r.red] = Number(r.ganancia);
-    });
-    return Object.values(map).sort((a, b) => a.num_mes - b.num_mes);
-  })();
 
   return (
     <div className="space-y-5 pb-10">
@@ -150,7 +136,7 @@ const Reports: React.FC = () => {
             { label: 'Facturas', val: fmtN(kpi.numFacturas), icon: <ShoppingCart size={18} />, color: 'bg-indigo-600', raw: true },
             { label: 'Ventas Brutas', val: fmt(kpi.totalVentas), icon: <DollarSign size={18} />, color: 'bg-emerald-600', raw: false },
             { label: 'Utilidad Neta', val: fmt(kpi.utilidadNeta), icon: <TrendingUp size={18} />, color: kpi.utilidadNeta >= 0 ? 'bg-emerald-500' : 'bg-red-500', raw: false },
-            { label: 'Recargas', val: `${fmtN(kpi.numRecargas)} ops`, icon: <Smartphone size={18} />, color: 'bg-amber-500', raw: true },
+            { label: 'Utilidad Bruta', val: fmt(kpi.utilidadBruta), icon: <TrendingUp size={18} />, color: kpi.utilidadBruta >= 0 ? 'bg-amber-500' : 'bg-red-500', raw: false },
           ].map((c, i) => (
             <div key={i} className="bg-white border rounded-2xl p-4 shadow-sm flex items-center gap-3">
               <div className={`${c.color} text-white p-2.5 rounded-xl shrink-0`}>{c.icon}</div>
@@ -168,8 +154,7 @@ const Reports: React.FC = () => {
         {[
           { id: 'SALES', label: 'Ventas', icon: <TrendingUp size={16} /> },
           { id: 'INVENTORY', label: 'Inventario', icon: <Package size={16} /> },
-          { id: 'RECHARGES', label: 'Recargas', icon: <Smartphone size={16} /> },
-          { id: 'CLIENTS', label: 'Clientes', icon: <Users size={16} /> },
+{ id: 'CLIENTS', label: 'Clientes', icon: <Users size={16} /> },
         ].map(tab => (
           <button key={tab.id} onClick={() => setActiveTab(tab.id)}
             className={`px-5 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2 transition-all whitespace-nowrap ${activeTab === tab.id ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30' : 'bg-white text-slate-500 hover:bg-slate-50 border border-slate-200'}`}>
@@ -281,46 +266,6 @@ const Reports: React.FC = () => {
                   ))}
                 </tbody>
               </table>
-            }
-          </div>
-        </div>
-      )}
-
-      {/* RECARGAS */}
-      {!loading && activeTab === 'RECHARGES' && (
-        <div className="space-y-5">
-          {kpi && (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {[
-                { label: 'Operaciones', val: fmtN(kpi.numRecargas) },
-                { label: 'Ingreso Recargas', val: fmt(kpi.ingresoRecargas) },
-                { label: 'Ganancia Recargas', val: fmt(kpi.gananciaRecargas) },
-              ].map((c, i) => (
-                <div key={i} className="bg-white border rounded-2xl p-4 shadow-sm">
-                  <p className="text-[10px] text-slate-400 font-bold uppercase mb-1">{c.label}</p>
-                  <p className="text-xl font-black text-slate-800">{c.val}</p>
-                </div>
-              ))}
-            </div>
-          )}
-          <div className="bg-white p-6 rounded-2xl shadow-sm border">
-            <h3 className="font-bold text-slate-800 mb-5">Ganancia por Recargas — {year}</h3>
-            {rechargesChartData.length === 0
-              ? <p className="text-center text-slate-400 py-8 text-sm">Sin recargas registradas en {year}</p>
-              : <div className="h-72">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={rechargesChartData}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                    <XAxis dataKey="mes" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 12 }} />
-                    <YAxis axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 12 }} tickFormatter={v => `L.${(v / 1000).toFixed(0)}k`} />
-                    <Tooltip formatter={(v: any) => fmt(v)} contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 20px rgb(0 0 0 / 0.08)' }} />
-                    <Legend />
-                    <Bar dataKey="TIGO" fill="#10b981" name="TIGO (L.)" radius={[4, 4, 0, 0]} barSize={28} />
-                    <Bar dataKey="CLARO" fill="#f59e0b" name="CLARO (L.)" radius={[4, 4, 0, 0]} barSize={28} />
-                    <Bar dataKey="OTRA" fill="#6366f1" name="Otras (L.)" radius={[4, 4, 0, 0]} barSize={28} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
             }
           </div>
         </div>

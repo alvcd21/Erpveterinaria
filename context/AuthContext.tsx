@@ -1,6 +1,7 @@
-
 import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import { UserSession, LoginCredentials, AuthResponse } from '../types';
+import { clearClientSession, getStoredUser, setAccessToken, setStoredUser } from '../services/authSession';
+import { offlineDB } from '../services/offlineDB';
 
 interface AuthContextType {
   user: UserSession | null;
@@ -8,15 +9,15 @@ interface AuthContextType {
   isAuthenticated: boolean;
   isInitializing: boolean;
   requiresPasswordChange: boolean;
-  login: (credentials: LoginCredentials) => Promise<void>;
+  login: (credentials: LoginCredentials | string, password?: string, tenantSlug?: string) => Promise<void>;
   logout: () => void;
   hasPermission: (requiredPermission?: string) => boolean;
+  hasPlanFeature: (featureKey: string) => boolean;
   clearPasswordChangeFlag: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// Decodifica el payload del JWT sin verificar firma (solo cliente)
 function decodeJWTPayload(token: string): { exp?: number; [key: string]: any } | null {
   try {
     const base64Url = token.split('.')[1];
@@ -27,17 +28,8 @@ function decodeJWTPayload(token: string): { exp?: number; [key: string]: any } |
   }
 }
 
-function isTokenExpired(token: string): boolean {
-  const payload = decodeJWTPayload(token);
-  if (!payload?.exp) return true;
-  // Considera expirado si queda menos de 60s
-  return Date.now() >= (payload.exp - 60) * 1000;
-}
-
 const KEYS = {
-  token: 'sc_token',
-  refresh: 'sc_refresh',
-  user: 'sc_user',
+  tenantSlug: 'last_tenant_slug',
 };
 
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
@@ -46,40 +38,50 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [isInitializing, setIsInitializing] = useState(true);
   const [requiresPasswordChange, setRequiresPasswordChange] = useState(false);
 
-  const clearSession = () => {
+  const clearSession = useCallback(() => {
+    const tenantId = user?.tenantId;
     setUser(null);
     setToken(null);
-    localStorage.removeItem(KEYS.token);
-    localStorage.removeItem(KEYS.refresh);
-    localStorage.removeItem(KEYS.user);
-  };
+    clearClientSession();
+    if (tenantId) offlineDB.clearTenantData(tenantId).catch(() => {});
+  }, [user?.tenantId]);
 
-  const applySession = (accessToken: string, userData: UserSession, refreshToken?: string) => {
+  const applySession = useCallback((accessToken: string, userData: UserSession) => {
+    let nextUser = userData;
+    if (!nextUser.tenantId || !nextUser.tenantSlug) {
+      try {
+        const payload = decodeJWTPayload(accessToken);
+        if (payload?.tenantId) nextUser = { ...nextUser, tenantId: payload.tenantId };
+        if (payload?.tenantSlug) nextUser = { ...nextUser, tenantSlug: payload.tenantSlug };
+        if (payload?.isSuperAdmin) nextUser = { ...nextUser, isSuperAdmin: payload.isSuperAdmin };
+      } catch {
+        // ignore decode errors; server remains source of truth
+      }
+    }
+
     setToken(accessToken);
-    setUser(userData);
-    setRequiresPasswordChange(!!(userData as any).requiresPasswordChange);
-    localStorage.setItem(KEYS.token, accessToken);
-    localStorage.setItem(KEYS.user, JSON.stringify(userData));
-    if (refreshToken) localStorage.setItem(KEYS.refresh, refreshToken);
-  };
+    setUser(nextUser);
+    setAccessToken(accessToken);
+    setStoredUser(nextUser);
+    setRequiresPasswordChange(!!(nextUser as any).requiresPasswordChange);
+    if (nextUser.tenantSlug) localStorage.setItem(KEYS.tenantSlug, nextUser.tenantSlug);
+  }, []);
 
   const clearPasswordChangeFlag = () => {
     setRequiresPasswordChange(false);
     if (user) {
       const updated = { ...user, requiresPasswordChange: false };
       setUser(updated as any);
-      localStorage.setItem(KEYS.user, JSON.stringify(updated));
+      setStoredUser(updated as any);
     }
   };
 
   const silentRefresh = useCallback(async (): Promise<boolean> => {
-    const storedRefresh = localStorage.getItem(KEYS.refresh);
-    if (!storedRefresh || isTokenExpired(storedRefresh)) return false;
     try {
       const res = await fetch('/api/auth/refresh', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ refreshToken: storedRefresh }),
+        credentials: 'include',
       });
       if (!res.ok) return false;
       const data = await res.json();
@@ -88,9 +90,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     } catch {
       return false;
     }
-  }, []);
+  }, [applySession]);
 
-  // Sincronizar estado cuando api.ts renueva el token por intercepción de 401
   useEffect(() => {
     const handler = (e: Event) => {
       const { token: newToken, user: newUser } = (e as CustomEvent).detail;
@@ -98,86 +99,82 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
     window.addEventListener('smartcloud:token-refreshed', handler);
     return () => window.removeEventListener('smartcloud:token-refreshed', handler);
-  }, []);
+  }, [applySession]);
 
-  // Renovar token proactivamente cada 15 minutos si queda menos de 60 minutos
   useEffect(() => {
     const interval = setInterval(async () => {
-      const storedToken = localStorage.getItem(KEYS.token);
-      if (!storedToken) return;
-      const payload = decodeJWTPayload(storedToken);
+      if (!token) return;
+      const payload = decodeJWTPayload(token);
       if (!payload?.exp) return;
       const minutesLeft = (payload.exp * 1000 - Date.now()) / 60000;
-      if (minutesLeft < 60) {
-        await silentRefresh();
-      }
-    }, 15 * 60 * 1000); // cada 15 minutos
+      if (minutesLeft < 60) await silentRefresh();
+    }, 15 * 60 * 1000);
     return () => clearInterval(interval);
-  }, [silentRefresh]);
+  }, [silentRefresh, token]);
 
-  // Restaurar sesión al montar — espera a resolver antes de renderizar rutas protegidas
   useEffect(() => {
-    // Migrar keys viejas si existen
-    const oldToken = localStorage.getItem('smartcloud_token');
-    const oldUser = localStorage.getItem('smartcloud_user');
-    if (oldToken && !localStorage.getItem(KEYS.token)) {
-      localStorage.setItem(KEYS.token, oldToken);
-      if (oldUser) localStorage.setItem(KEYS.user, oldUser);
-      localStorage.removeItem('smartcloud_token');
-      localStorage.removeItem('smartcloud_user');
-    }
-
     const restore = async () => {
-      const storedToken = localStorage.getItem(KEYS.token);
-      const storedUser = localStorage.getItem(KEYS.user);
-
-      if (storedToken && storedUser) {
-        if (!isTokenExpired(storedToken)) {
-          // Token de acceso aún válido
-          const parsedUser = JSON.parse(storedUser);
-          setToken(storedToken);
-          setUser(parsedUser);
-          setRequiresPasswordChange(!!(parsedUser as any).requiresPasswordChange);
-        } else {
-          // Token expirado → intentar refresh silencioso
-          const ok = await silentRefresh();
-          if (!ok) clearSession();
-        }
-      }
+      const storedUser = getStoredUser();
+      const ok = await silentRefresh();
+      if (!ok && storedUser) clearSession();
       setIsInitializing(false);
     };
     restore();
   }, [silentRefresh]);
 
-  const login = async (credentials: LoginCredentials) => {
+  const login = async (
+    credentialsOrUsuario: LoginCredentials | string,
+    password?: string,
+    tenantSlug?: string
+  ) => {
+    const body = typeof credentialsOrUsuario === 'string'
+      ? { usuario: credentialsOrUsuario, password, tenantSlug }
+      : { ...credentialsOrUsuario };
+    const cleanBody = Object.fromEntries(Object.entries(body).filter(([, v]) => v !== undefined));
+
     const response = await fetch('/api/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(credentials),
+      credentials: 'include',
+      body: JSON.stringify(cleanBody),
     });
 
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(errorData.error || 'Error de autenticación');
+      throw new Error(errorData.error || 'Error de autenticacion');
     }
 
-    const data: AuthResponse & { refreshToken?: string } = await response.json();
-    applySession(data.token, data.user, data.refreshToken);
+    const data: AuthResponse = await response.json();
+    applySession(data.token, data.user);
   };
 
   const logout = () => {
+    fetch('/api/auth/logout', { method: 'POST', credentials: 'include' }).catch(() => {});
     clearSession();
   };
 
   const hasPermission = (requiredPermission?: string) => {
     if (!user) return false;
-    if (user.rol === 'Administrador' || user.rol === 'Admin') return true;
+    if (user.isSuperAdmin) return true;
+    const rolLower = user.rol?.toLowerCase();
+    if (rolLower === 'administrador' || rolLower === 'admin' || rolLower === 'superadmin') return true;
     if (!requiredPermission) return true;
     return user.permisos?.includes(requiredPermission) || false;
   };
 
+  const hasPlanFeature = useCallback((featureKey: string): boolean => {
+    if (!user) return false;
+    if (user.isSuperAdmin) return true;
+    const rolLower = user.rol?.toLowerCase();
+    // Admins del tenant acceden a todo lo disponible en el plan
+    if (rolLower === 'administrador' || rolLower === 'admin' || rolLower === 'superadmin') {
+      return user.planFeatures?.includes(featureKey) ?? true;
+    }
+    return user.planFeatures?.includes(featureKey) ?? false;
+  }, [user]);
+
   return (
-    <AuthContext.Provider value={{ user, token, isAuthenticated: !!user, isInitializing, requiresPasswordChange, login, logout, hasPermission, clearPasswordChangeFlag }}>
+    <AuthContext.Provider value={{ user, token, isAuthenticated: !!user, isInitializing, requiresPasswordChange, login, logout, hasPermission, hasPlanFeature, clearPasswordChangeFlag }}>
       {children}
     </AuthContext.Provider>
   );

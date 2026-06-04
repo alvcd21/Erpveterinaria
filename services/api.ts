@@ -1,29 +1,39 @@
 
 import {
-  Telefono,
-  Inventario,
-  Accesorio,
-  Categoria,
-  Ubicacion,
   Proveedor,
   Cliente,
   Venta,
   VentaPayload,
   DetalleVenta,
   Arqueo,
-  Ingreso,
-  Egreso,
-  Saldo,
-  Costo,
   LabelTemplate,
-  Socio,
-  Reparacion,
-  Consignacion,
-  Garantia
+  Tenant,
+  TenantStats,
+  CreateTenantPayload,
+  AIMedicationAnalysisResult,
+  AIMedicationImagePayload,
+  AISymptomRecommendationPayload,
+  AISymptomRecommendationResult,
+  EstadoEntrega,
+  EntregaSucursal,
+  LoyaltyConfig,
+  LoyaltyAccount,
+  LoyaltyTransaction,
+  LoyaltyPreview,
+  LoyaltyAccountList,
+  LoyaltyStats,
 } from '../types';
 import { offlineDB } from './offlineDB';
+import { getAccessToken, getCurrentSucursalId, getCurrentTenantId, setAccessToken, setStoredUser } from './authSession';
 
-const API_URL = '/api';
+const API_URL = (() => {
+  const envUrl = (import.meta as any).env?.VITE_API_URL;
+  if (envUrl) return String(envUrl).replace(/\/$/, '');
+  if (typeof window !== 'undefined' && window.location.hostname === 'localhost' && window.location.port === '5173') {
+    return 'http://localhost:3000/api';
+  }
+  return '/api';
+})();
 
 // Error especial para operaciones encoladas offline (mantenido por compatibilidad)
 export class OfflineQueuedError extends Error {
@@ -32,30 +42,40 @@ export class OfflineQueuedError extends Error {
 
 // Mapa de colecciones: prefijo de endpoint → campo ID + clave de cache
 const ENTITY_MAP: { prefix: string; idField: string; cacheKey?: string }[] = [
-  { prefix: '/inventory/telefonos',          idField: 'idTelefono' },
-  { prefix: '/inventory/stock',              idField: 'idInventario' },
-  { prefix: '/inventory/accesorios-master',  idField: 'id' },
-  { prefix: '/inventory/categorias',         idField: 'id' },
-  { prefix: '/inventory/ubicaciones',        idField: 'id' },
-  { prefix: '/accounting/socios',            idField: 'id' },
-  { prefix: '/ventas',                       idField: 'codVenta', cacheKey: '/ventas/historial' },
+{ prefix: '/ventas',                       idField: 'codVenta', cacheKey: '/ventas/historial' },
   { prefix: '/clientes',                     idField: 'identidad' },
-  { prefix: '/reparaciones',                 idField: 'id' },
-  { prefix: '/garantias',                    idField: 'id' },
-  { prefix: '/consignaciones',               idField: 'id' },
   { prefix: '/proveedores',                  idField: 'id' },
-  { prefix: '/paquetes',                     idField: 'id' },
-  { prefix: '/costos',                       idField: 'id' },
-  { prefix: '/ingresos',                     idField: 'id' },
-  { prefix: '/egresos',                      idField: 'id' },
   { prefix: '/empleados',                    idField: 'id' },
   { prefix: '/users',                        idField: 'id' },
   { prefix: '/roles',                        idField: 'id' },
   { prefix: '/cajas',                        idField: 'id' },
   { prefix: '/labels',                       idField: 'id' },
+  { prefix: '/medicamentos',                 idField: 'codigo' },
+  { prefix: '/recetas',                      idField: 'codigo' },
+  { prefix: '/ordenes-compra',               idField: 'codigo' },
+  { prefix: '/transferencias',               idField: 'codigo' },
+  { prefix: '/sucursales',                   idField: 'id_sucursal' },
 ];
 
 interface EndpointInfo { collection: string; urlId: string | null; idField: string; cacheKey: string; }
+
+async function readJsonResponse(response: Response, endpoint: string): Promise<any> {
+  const contentType = response.headers.get('content-type') || '';
+  if (contentType.includes('application/json')) return response.json();
+
+  const text = await response.text();
+  const looksLikeHtml = text.trimStart().startsWith('<!DOCTYPE') || text.trimStart().startsWith('<html');
+  if (looksLikeHtml) {
+    console.error('[API Error]', endpoint, 'La ruta devolvio HTML en vez de JSON. Revise que el backend este reiniciado y que el proxy apunte a /api.');
+    throw new Error('El servidor devolvio una pagina HTML en vez de datos JSON. Reinicie el backend y recargue la aplicacion.');
+  }
+
+  try {
+    return text ? JSON.parse(text) : {};
+  } catch {
+    throw new Error(text || 'Respuesta invalida del servidor.');
+  }
+}
 
 function parseEndpoint(endpoint: string, method: string): EndpointInfo | null {
   const sorted = [...ENTITY_MAP].sort((a, b) => b.prefix.length - a.prefix.length);
@@ -71,9 +91,16 @@ function parseEndpoint(endpoint: string, method: string): EndpointInfo | null {
   return null;
 }
 
+// Returns a tenant-scoped prefix for IndexedDB cache keys so data from
+// different tenants on the same browser never collides.
+function getCacheTenantPrefix(): string {
+  const tenantId = getCurrentTenantId();
+  return tenantId ? `t:${tenantId}:` : '';
+}
+
 // request helper function — offline-aware
-async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-  const token = localStorage.getItem('sc_token');
+export async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+  const token = getAccessToken();
   const method = (options.method || 'GET').toUpperCase();
   const isRead = method === 'GET';
   const headers = {
@@ -86,7 +113,8 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
   if (!navigator.onLine) {
     if (!isRead) {
       const parsedBody = options.body ? JSON.parse(options.body as string) : null;
-      await offlineDB.addToQueue(method, `${API_URL}${endpoint}`, parsedBody);
+      const queueTenantId = getCurrentTenantId();
+      await offlineDB.addToQueue(method, `${API_URL}${endpoint}`, parsedBody, queueTenantId);
 
       // Escritura optimista: parchear el cache local para que la UI vea el cambio inmediatamente
       const epInfo = parseEndpoint(endpoint, method);
@@ -94,6 +122,7 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
 
       if (epInfo) {
         const tempId = `LOCAL_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+        const tp = getCacheTenantPrefix();
 
         if (method === 'POST') {
           // Para ventas, el caller espera { codVenta }
@@ -103,12 +132,12 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
             tempResult = { ...parsedBody, [epInfo.idField]: tempId, _offline: true };
           }
           // patchCacheByPrefix cubre tanto cache:/ingresos como cache:/ingresos?idCaja=x&fecha=y
-          await offlineDB.patchCacheByPrefix(`cache:${epInfo.cacheKey}`, 'POST', null, tempResult, epInfo.idField);
+          await offlineDB.patchCacheByPrefix(`cache:${tp}${epInfo.cacheKey}`, 'POST', null, tempResult, epInfo.idField);
         } else if (method === 'PUT' || method === 'PATCH') {
-          await offlineDB.patchCacheByPrefix(`cache:${epInfo.cacheKey}`, 'PUT', epInfo.urlId, parsedBody, epInfo.idField);
+          await offlineDB.patchCacheByPrefix(`cache:${tp}${epInfo.cacheKey}`, 'PUT', epInfo.urlId, parsedBody, epInfo.idField);
           tempResult = parsedBody || {};
         } else if (method === 'DELETE') {
-          await offlineDB.patchCacheByPrefix(`cache:${epInfo.cacheKey}`, 'DELETE', epInfo.urlId, null, epInfo.idField);
+          await offlineDB.patchCacheByPrefix(`cache:${tp}${epInfo.cacheKey}`, 'DELETE', epInfo.urlId, null, epInfo.idField);
           tempResult = {};
         }
       }
@@ -117,7 +146,7 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
       return tempResult as T;
     }
     // GET offline → cache directo, sin fetch
-    const cachedOffline = await offlineDB.getCachedData<T>(`cache:${endpoint}`);
+    const cachedOffline = await offlineDB.getCachedData<T>(`cache:${getCacheTenantPrefix()}${endpoint}`);
     if (cachedOffline !== null) {
       window.dispatchEvent(new CustomEvent('smartcloud:cache-fallback', { detail: { endpoint } }));
       return cachedOffline;
@@ -126,50 +155,48 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
   }
 
   try {
-    const response = await fetch(`${API_URL}${endpoint}`, { ...options, headers });
+    const response = await fetch(`${API_URL}${endpoint}`, { ...options, headers, credentials: 'include' });
     if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
+      const errorData = await readJsonResponse(response, endpoint).catch(() => ({}));
       // Si el token expiró, intentar refresh silencioso y reintentar una vez
       if (response.status === 401 && errorData.code === 'TOKEN_EXPIRED') {
-        const storedRefresh = localStorage.getItem('sc_refresh');
-        if (storedRefresh) {
-          try {
-            const refreshRes = await fetch('/api/auth/refresh', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ refreshToken: storedRefresh }),
-            });
-            if (refreshRes.ok) {
-              const refreshData = await refreshRes.json();
-              localStorage.setItem('sc_token', refreshData.token);
-              localStorage.setItem('sc_user', JSON.stringify(refreshData.user));
-              window.dispatchEvent(new CustomEvent('smartcloud:token-refreshed', { detail: refreshData }));
-              // Reintentar con el nuevo token
-              const retryHeaders = { ...headers, 'Authorization': `Bearer ${refreshData.token}` };
-              const retryResponse = await fetch(`${API_URL}${endpoint}`, { ...options, headers: retryHeaders });
-              if (retryResponse.ok) return retryResponse.json() as T;
-            }
-          } catch { /* si falla el refresh, continuar al throw original */ }
-        }
+        try {
+          const refreshRes = await fetch('/api/auth/refresh', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+          });
+          if (refreshRes.ok) {
+            const refreshData = await refreshRes.json();
+            setAccessToken(refreshData.token);
+            setStoredUser(refreshData.user);
+            window.dispatchEvent(new CustomEvent('smartcloud:token-refreshed', { detail: refreshData }));
+            // Reintentar con el nuevo token
+            const retryHeaders = { ...headers, 'Authorization': `Bearer ${refreshData.token}` };
+            const retryResponse = await fetch(`${API_URL}${endpoint}`, { ...options, headers: retryHeaders, credentials: 'include' });
+            if (retryResponse.ok) return readJsonResponse(retryResponse, endpoint) as Promise<T>;
+          }
+        } catch { /* si falla el refresh, continuar al throw original */ }
       }
       // No exponer detalles internos de errores 5xx al cliente
       if (response.status >= 500) {
-        console.error('[API Error]', endpoint, errorData);
-        throw new Error('Error interno del servidor. Por favor contacte al administrador.');
+        const dbMsg = errorData?.error || errorData?.message || '';
+        console.error('[API Error]', endpoint, dbMsg || errorData);
+        throw new Error(dbMsg || 'Error interno del servidor. Por favor contacte al administrador.');
       }
       throw new Error(errorData.error || `Error ${response.status}`);
     }
-    const data = await response.json();
-    // Cachear respuestas GET en IndexedDB para uso offline
+    const data = await readJsonResponse(response, endpoint);
+    // Cachear respuestas GET en IndexedDB para uso offline (tenant-scoped key)
     if (isRead) {
-      offlineDB.cacheData(`cache:${endpoint}`, data).catch(() => {});
+      offlineDB.cacheData(`cache:${getCacheTenantPrefix()}${endpoint}`, data).catch(() => {});
     }
     return data;
   } catch (err) {
     if (err instanceof OfflineQueuedError) throw err;
     // Fallback a cache IndexedDB para GETs (ej: red inestable, timeout)
     if (isRead) {
-      const cached = await offlineDB.getCachedData<T>(`cache:${endpoint}`);
+      const cached = await offlineDB.getCachedData<T>(`cache:${getCacheTenantPrefix()}${endpoint}`);
       if (cached !== null) {
         window.dispatchEvent(new CustomEvent('smartcloud:cache-fallback', { detail: { endpoint } }));
         return cached;
@@ -180,35 +207,12 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
 }
 
 export const InventoryService = {
-  getUnifiedProducts: () => request<any[]>('/productos/unificados'),
-  getTelefonos: () => request<Telefono[]>('/inventory/telefonos'),
-  createTelefono: (data: Partial<Telefono>) => request('/inventory/telefonos', { method: 'POST', body: JSON.stringify(data) }),
-  updateTelefono: (id: string, data: Partial<Telefono>) => request(`/inventory/telefonos/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  updateTelefonoStatus: (id: string, estado: string) => request(`/inventory/telefonos/${id}/status`, { method: 'PUT', body: JSON.stringify({ estado }) }),
-  deleteTelefono: (id: string) => request(`/inventory/telefonos/${id}`, { method: 'DELETE' }),
-  
-  getStockAccesorios: () => request<Inventario[]>('/inventory/stock'),
-  createStock: (data: Partial<Inventario>) => request('/inventory/stock', { method: 'POST', body: JSON.stringify(data) }),
-  updateStock: (id: string, data: Partial<Inventario>) => request(`/inventory/stock/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  deleteStock: (id: string) => request(`/inventory/stock/${id}`, { method: 'DELETE' }),
-
-  getAccesoriosMaster: () => request<Accesorio[]>('/inventory/accesorios-master'),
-  createAccesorioMaster: (data: Partial<Accesorio>) => request('/inventory/accesorios-master', { method: 'POST', body: JSON.stringify(data) }),
-  updateAccesorioMaster: (id: string, data: Partial<Accesorio>) => request(`/inventory/accesorios-master/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  deleteAccesorioMaster: (id: string) => request(`/inventory/accesorios-master/${id}`, { method: 'DELETE' }),
-  
-  getCategorias: () => request<Categoria[]>('/inventory/categorias'),
-  createCategoria: (data: Partial<Categoria>) => request('/inventory/categorias', { method: 'POST', body: JSON.stringify(data) }),
-  updateCategoria: (id: string, data: Partial<Categoria>) => request(`/inventory/categorias/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  deleteCategoria: (id: string) => request(`/inventory/categorias/${id}`, { method: 'DELETE' }),
-  
-  getUbicaciones: () => request<Ubicacion[]>('/inventory/ubicaciones'),
-  createUbicacion: (data: Partial<Ubicacion>) => request('/inventory/ubicaciones', { method: 'POST', body: JSON.stringify(data) }),
-  updateUbicacion: (id: string, data: Partial<Ubicacion>) => request(`/inventory/ubicaciones/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  deleteUbicacion: (id: string) => request(`/inventory/ubicaciones/${id}`, { method: 'DELETE' }),
-  
-  generatePurchaseOrder: () => request<any>('/inventory/purchase-order', { method: 'POST' }),
-  getLowStock: () => request<any[]>('/inventory/low-stock'),
+  getUnifiedProducts: (params?: { q?: string; id_sucursal?: number; include_zero_stock?: '1' }) => {
+    const paramsWithSucursal = { id_sucursal: getCurrentSucursalId(), ...(params || {}) };
+    const query = new URLSearchParams(Object.entries(paramsWithSucursal).filter(([, v]) => v !== undefined && v !== null && v !== '').map(([k, v]) => [k, String(v)])).toString();
+    const qs = query ? `?${query}` : '';
+    return request<any[]>(`/productos/unificados${qs}`);
+  },
 
   getProveedores: () => request<Proveedor[]>('/proveedores'),
   createProveedor: (data: Partial<Proveedor>) => request('/proveedores', { method: 'POST', body: JSON.stringify(data) }),
@@ -230,78 +234,37 @@ export const SalesService = {
   updateVenta: (id: string, data: VentaPayload) => request<{codVenta: string}>(`/ventas/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   getDetallesVenta: (id: string) => request<DetalleVenta[]>(`/ventas/${id}/detalles`),
   anularVenta: (id: string) => request(`/ventas/${id}/anular`, { method: 'PUT' }),
-  confirmKrediYaDeposit: (id: string) => request(`/ventas/${id}/deposito-krediya`, { method: 'PUT' }),
 };
 
-export const RepairService = {
-  getAll: () => request<Reparacion[]>('/reparaciones'),
-  create: (data: Partial<Reparacion>) => request('/reparaciones', { method: 'POST', body: JSON.stringify(data) }),
-  update: (id: number, data: Partial<Reparacion>) => request(`/reparaciones/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  updateStatus: (id: number, estado: string) => request(`/reparaciones/${id}/estado`, { method: 'PUT', body: JSON.stringify({ estado }) }),
-  payTechnician: (id: number) => request(`/reparaciones/${id}/pago-tecnico`, { method: 'PUT' }),
-  billRepair: (id: number) => request(`/reparaciones/${id}/facturar`, { method: 'POST' }),
-  delete: (id: number) => request(`/reparaciones/${id}`, { method: 'DELETE' }),
-};
-
-export const WarrantyService = {
-  getAll: () => request<Garantia[]>('/garantias'),
-  create: (data: Partial<Garantia>) => request('/garantias', { method: 'POST', body: JSON.stringify(data) }),
-  update: (id: number, data: Partial<Garantia>) => request(`/garantias/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  delete: (id: number) => request(`/garantias/${id}`, { method: 'DELETE' }),
-  // Fix: Added estadoRetorno to the exchange data object type definition
-  exchange: (idGarantia: number, data: { idNuevoProducto: string, tipoNuevo: string, diferenciaEfectivo: number, utilidadDiferencia: number, descripcionGastoIngreso: string, estadoRetorno: string }) => 
-    request(`/garantias/${idGarantia}/exchange`, { method: 'POST', body: JSON.stringify(data) }),
-};
-
-export const ConsignService = {
-  getAll: () => request<Consignacion[]>('/consignaciones'),
-  create: (data: Partial<Consignacion> | Partial<Consignacion>[]) => request('/consignaciones', { method: 'POST', body: JSON.stringify(data) }),
-  update: (id: number, data: Partial<Consignacion>) => request(`/consignaciones/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  delete: (id: number) => request(`/consignaciones/${id}`, { method: 'DELETE' }),
-  liquidate: (id: number) => request(`/consignaciones/${id}/liquidar`, { method: 'PUT' }),
-  returnToStock: (id: number) => request(`/consignaciones/${id}/retorno`, { method: 'PUT' }),
-};
 
 export const CashService = {
   getActiveArqueo: () => request<Arqueo | null>('/arqueo/active'),
-  /**
-   * Fix: Added getSessionDetails method to match route and usage in AdminCashDashboard
-   */
-  getSessionDetails: (idArqueo: string) => request<{arqueo: Arqueo, ingresos: Ingreso[], egresos: Egreso[]}>(`/arqueo/${idArqueo}/details`),
+  getSessionDetails: (idArqueo: string) => request<{arqueo: Arqueo, ventas: any[]}>(`/arqueo/${idArqueo}/details`),
   openCaja: (data: any) => request('/arqueo/open', { method: 'POST', body: JSON.stringify(data) }),
   closeCaja: (idArqueo: string) => request<{resumen: any}>('/arqueo/close', { method: 'POST', body: JSON.stringify({ idArqueo }) }),
-  getIngresos: (idCaja: string, fecha?: string) => request<Ingreso[]>(`/ingresos?idCaja=${idCaja}${fecha ? `&fecha=${fecha}` : ''}`),
-  getEgresos: (idCaja: string, fecha?: string) => request<Egreso[]>(`/egresos?idCaja=${idCaja}${fecha ? `&fecha=${fecha}` : ''}`),
-  getSaldosToday: (fecha?: string) => request<Saldo[]>(`/saldos/today${fecha ? `?fecha=${fecha}` : ''}`),
-  getSaldosStatus: (fecha?: string) => request<any>(`/saldos/status${fecha ? `?fecha=${fecha}` : ''}`),
-  createIngreso: (data: any) => request('/ingresos', { method: 'POST', body: JSON.stringify(data) }),
-  updateIngreso: (id: string, data: any) => request(`/ingresos/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  deleteIngreso: (id: string) => request(`/ingresos/${id}`, { method: 'DELETE' }),
-  createEgreso: (data: any) => request('/egresos', { method: 'POST', body: JSON.stringify(data) }),
-  updateEgreso: (id: string, data: any) => request(`/egresos/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  deleteEgreso: (id: string) => request(`/egresos/${id}`, { method: 'DELETE' }),
-  buySaldo: (data: any) => request('/saldos/buy', { method: 'POST', body: JSON.stringify(data) }),
-  createRecarga: (data: any) => request('/recargas', { method: 'POST', body: JSON.stringify(data) }),
   getAdminBoxesStatus: () => request<any[]>('/admin/boxes/status'),
   getBoxHistory: (idCaja: string) => request<any[]>(`/admin/boxes/${idCaja}/history`),
-  getSaldosByDate: (fecha: string) => request<Saldo[]>(`/admin/saldos?fecha=${fecha}`),
-  updateSaldo: (id: string, data: any) => request(`/admin/saldos/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   reopenCaja: (idArqueo: string) => request(`/admin/arqueo/${idArqueo}/reopen`, { method: 'PUT' }),
-  /**
-   * Fix: Added updateInitialAmount method to match route and usage in AdminCashDashboard
-   */
   updateInitialAmount: (idArqueo: string, montoInicial: number) => request(`/arqueo/${idArqueo}/initial`, { method: 'PUT', body: JSON.stringify({ montoInicial }) }),
 };
 
 export const ReportsService = {
   getSalesTrend: (year: number) => request<any[]>(`/reports/sales-trend?year=${year}`),
   getTopProducts: (startDate: string, endDate: string) => request<any[]>(`/reports/top-products?startDate=${startDate}&endDate=${endDate}`),
-  getRechargesProfit: (year: number) => request<any[]>(`/reports/recharges-profit?year=${year}`),
   getInventoryValuation: () => request<any[]>('/reports/inventory-valuation'),
   getTopClients: (startDate: string, endDate: string) => request<any[]>(`/reports/top-clients?startDate=${startDate}&endDate=${endDate}`),
   getDailySales: (startDate: string, endDate: string) => request<any[]>(`/reports/daily-sales?startDate=${startDate}&endDate=${endDate}`),
   getKpiSummary: (startDate: string, endDate: string) => request<any>(`/reports/kpi-summary?startDate=${startDate}&endDate=${endDate}`),
   getSalesBySeller: (startDate: string, endDate: string) => request<any[]>(`/reports/sales-by-seller?startDate=${startDate}&endDate=${endDate}`),
+  sendMonthly: () => request<any>('/reports/send-monthly', { method: 'POST' }),
+};
+
+export const DashboardService = {
+  getMe: () => request<any>('/dashboard/me'),
+  getAdmin: () => request<any>(`/dashboard/admin?year=${new Date().getFullYear()}`),
+  getCashier: () => request<any>('/dashboard/cashier'),
+  getInventory: () => request<any>('/dashboard/inventory'),
+  getFinance: () => request<any>('/dashboard/finance'),
 };
 
 export const AdminService = {
@@ -309,28 +272,24 @@ export const AdminService = {
   createUser: (data: any) => request('/users', { method: 'POST', body: JSON.stringify(data) }),
   updateUser: (id: string, data: any) => request(`/users/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteUser: (id: string) => request(`/users/${id}`, { method: 'DELETE' }),
-  getEmpleados: () => request<any[]>('/empleados'),
+  getEmpleados: (id_sucursal?: number) => request<any[]>(`/empleados${id_sucursal ? `?id_sucursal=${id_sucursal}` : ''}`),
   createEmpleado: (data: any) => request('/empleados', { method: 'POST', body: JSON.stringify(data) }),
   updateEmpleado: (id: string, data: any) => request(`/empleados/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  transferirEmpleado: (id: string, id_sucursal_destino: number, nueva_idCaja?: string) =>
+    request(`/empleados/${id}/transferir`, { method: 'POST', body: JSON.stringify({ id_sucursal_destino, nueva_idCaja }) }),
   deleteEmpleado: (id: string) => request(`/empleados/${id}`, { method: 'DELETE' }),
   getRoles: () => request<any[]>('/roles'),
   createRol: (data: any) => request('/roles', { method: 'POST', body: JSON.stringify(data) }),
   updateRol: (id: string, data: any) => request(`/roles/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteRol: (id: string) => request(`/roles/${id}`, { method: 'DELETE' }),
   getPermisos: () => request<any[]>('/permisos'),
-  getCajas: () => request<any[]>('/cajas'),
-  createCaja: (nombre: string) => request('/cajas', { method: 'POST', body: JSON.stringify({ nombre }) }),
+  getCajas: (id_sucursal?: number) => request<any[]>(`/cajas${id_sucursal ? `?id_sucursal=${id_sucursal}` : ''}`),
+  createCaja: (nombre: string, id_sucursal: number) => request('/cajas', { method: 'POST', body: JSON.stringify({ nombre, id_sucursal }) }),
   updateCaja: (id: string, data: any) => request(`/cajas/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteCaja: (id: string) => request(`/cajas/${id}`, { method: 'DELETE' }),
   getSchema: () => request('/schema'),
 };
 
-export const PackagesService = {
-  getAll: () => request<any[]>('/paquetes'),
-  create: (data: any) => request('/paquetes', { method: 'POST', body: JSON.stringify(data) }),
-  update: (id: string, data: any) => request(`/paquetes/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  delete: (id: string) => request(`/paquetes/${id}`, { method: 'DELETE' }),
-};
 
 export const ConfigService = {
   get: () => request<any>('/config'),
@@ -345,14 +304,13 @@ export const LabelService = {
   delete: (id: string) => request(`/labels/${id}`, { method: 'DELETE' }),
 };
 
-export const CostsService = {
-  getAll: () => request<Costo[]>('/costos'),
-  create: (data: any) => request('/costos', { method: 'POST', body: JSON.stringify(data) }),
-  update: (id: string, data: any) => request(`/costos/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  delete: (id: string) => request(`/costos/${id}`, { method: 'DELETE' }),
-};
 
 export const AuthService = {
+  login: (usuario: string, password: string, tenantSlug: string) =>
+    request<{ token: string; user: any }>('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ usuario, password, tenantSlug }),
+    }),
   changePassword: (currentPassword: string, newPassword: string) =>
     request<{ message: string }>('/auth/change-password', {
       method: 'POST',
@@ -360,26 +318,379 @@ export const AuthService = {
     }),
 };
 
+// ─── SAAS SERVICE ─────────────────────────────────────────────────────────────
+
+// Helper to make requests using the super-admin token instead of the regular user token
+async function saasRequest<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+  const adminToken = localStorage.getItem('saas_admin_token');
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(adminToken ? { 'Authorization': `Bearer ${adminToken}` } : {}),
+    ...((options.headers || {}) as Record<string, string>),
+  };
+  const response = await fetch(`${API_URL}${endpoint}`, { ...options, headers });
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.error || `Error ${response.status}`);
+  }
+  const json = await response.json();
+  return ((json as any).data ?? json) as T;
+}
+
+function mapTenantRow(row: any): Tenant {
+  return {
+    id: row.id,
+    slug: row.slug,
+    nombreEmpresa: row.nombre_empresa ?? row.nombreEmpresa ?? '',
+    emailContacto: row.email_contacto ?? row.emailContacto ?? '',
+    telefono: row.telefono,
+    pais: row.pais ?? '',
+    plan: row.plan,
+    estado: row.estado,
+    maxSucursales: row.max_sucursales ?? row.maxSucursales ?? 0,
+    maxUsuarios: row.max_usuarios ?? row.maxUsuarios ?? 0,
+    maxMedicamentos: row.max_medicamentos ?? row.maxMedicamentos ?? 0,
+    fechaInicio: row.fecha_inicio ?? row.fechaInicio ?? row.created_at ?? '',
+    fechaVencimiento: row.fecha_vencimiento ?? row.fechaVencimiento,
+    createdAt: row.created_at ?? row.createdAt ?? '',
+  };
+}
+
+export class SaasService {
+  static async adminLogin(secret: string): Promise<{ token: string }> {
+    const response = await fetch(`${API_URL}/saas/admin/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ secret }),
+    });
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || 'Credenciales incorrectas');
+    }
+    const json = await response.json();
+    const payload = (json as any).data ?? json;
+    return { token: payload.token };
+  }
+
+  static async getTenants(): Promise<Tenant[]> {
+    const rows = await saasRequest<any[]>('/saas/tenants');
+    return rows.map(mapTenantRow);
+  }
+
+  static async createTenant(data: CreateTenantPayload): Promise<Tenant> {
+    const payload = {
+      slug: data.slug,
+      nombre_empresa: data.nombreEmpresa,
+      plan: data.plan,
+      admin_email: data.adminUsuario,
+      admin_password: data.adminPassword,
+      max_sucursales: data.maxSucursales,
+      max_usuarios: data.maxUsuarios,
+      max_medicamentos: data.maxMedicamentos,
+      fecha_vencimiento: data.fechaVencimiento || null,
+    };
+    const result = await saasRequest<{ tenant: any; roles: any[]; admin: any }>('/saas/tenants', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    return mapTenantRow(result.tenant);
+  }
+
+  static async updateTenant(id: string, data: Partial<Tenant>): Promise<Tenant> {
+    const payload: Record<string, any> = {};
+    if (data.nombreEmpresa !== undefined) payload.nombre_empresa = data.nombreEmpresa;
+    if (data.plan !== undefined) payload.plan = data.plan;
+    if (data.estado !== undefined) payload.estado = data.estado;
+    if (data.maxSucursales !== undefined) payload.max_sucursales = data.maxSucursales;
+    if (data.maxUsuarios !== undefined) payload.max_usuarios = data.maxUsuarios;
+    if (data.maxMedicamentos !== undefined) payload.max_medicamentos = data.maxMedicamentos;
+    if (data.fechaVencimiento !== undefined) payload.fecha_vencimiento = data.fechaVencimiento;
+    const row = await saasRequest<any>(`/saas/tenants/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+    return mapTenantRow(row);
+  }
+
+  static suspendTenant(id: string): Promise<void> {
+    return saasRequest<void>(`/saas/tenants/${id}/suspend`, { method: 'POST' });
+  }
+
+  static activateTenant(id: string): Promise<void> {
+    return saasRequest<void>(`/saas/tenants/${id}/activate`, { method: 'POST' });
+  }
+
+  static async getTenantStats(id: string): Promise<TenantStats> {
+    const result = await saasRequest<{ tenant: any; stats: any }>(`/saas/tenants/${id}/stats`);
+    const s = result.stats;
+    return {
+      tenantId: result.tenant?.id ?? id,
+      totalUsuarios: s.usuarios ?? 0,
+      totalSucursales: s.sucursales ?? 0,
+      totalMedicamentos: s.medicamentos ?? 0,
+      totalVentasMes: s.ventas_monto ?? 0,
+      totalVentasHoy: 0,
+    };
+  }
+
+  static async checkSlugAvailable(slug: string): Promise<boolean> {
+    const result = await saasRequest<{ available: boolean }>(`/saas/tenants/check-slug?slug=${encodeURIComponent(slug)}`);
+    return result.available;
+  }
+
+  static async getTenantAIQuota(id: string): Promise<AIQuotaStatus & { ai_habilitado: boolean }> {
+    const result = await saasRequest<{ data: any }>(`/saas/tenants/${id}/ai-quota`);
+    return (result as any).data ?? result;
+  }
+
+  static async updateTenantAIQuota(id: string, data: {
+    ai_habilitado?: boolean;
+    ai_tokens_override?: number | null;
+    ai_requests_override?: number | null;
+    ai_req_diario_override?: number | null;
+  }): Promise<void> {
+    await saasRequest<void>(`/saas/tenants/${id}/ai-quota`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
+
+  static async getAIQuotaPlans(): Promise<any[]> {
+    const result = await saasRequest<{ data: any[] }>('/saas/ai/quota-plans');
+    return (result as any).data ?? result;
+  }
+}
+
+export interface AppNotification {
+  id: number;
+  tipo: string;
+  titulo: string;
+  cuerpo: string | null;
+  leida: boolean;
+  fecha_creacion: string;
+  fecha_lectura: string | null;
+  para_usuario: string | null;
+}
+
+export const NotificationService = {
+  getAll: () => request<AppNotification[]>('/notifications'),
+  getUnreadCount: () => request<{ count: number }>('/notifications/unread-count'),
+  markRead: (id: number) => request<void>(`/notifications/${id}/read`, { method: 'PATCH' }),
+  markAllRead: () => request<void>('/notifications/read-all', { method: 'PATCH' }),
+  remove: (id: number) => request<void>(`/notifications/${id}`, { method: 'DELETE' }),
+  broadcast: (data: { titulo: string; cuerpo?: string; tipo?: string }) =>
+    request<{ ok: boolean; notification: AppNotification }>('/notifications/broadcast', { method: 'POST', body: JSON.stringify(data) }),
+};
+
 export const AccountingService = {
   getAuditTransactions: (startDate: string, endDate: string) => request<any[]>(`/accounting/audit/transactions?startDate=${startDate}&endDate=${endDate}`),
   getProfitabilityReport: (startDate: string, endDate: string) => request<any>(`/accounting/report/profitability?startDate=${startDate}&endDate=${endDate}`),
-  getOpexReport: (startDate: string, endDate: string) => request<any>(`/accounting/report/opex?startDate=${startDate}&endDate=${endDate}`),
-  getSocios: () => request<Socio[]>('/accounting/socios'),
-  createSocio: (data: any) => request('/accounting/socios', { method: 'POST', body: JSON.stringify(data) }),
-  updateSocio: (id: number, data: any) => request(`/accounting/socios/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  deleteSocio: (id: number) => request(`/accounting/socios/${id}`, { method: 'DELETE' }),
-  updateAuditTransaction: (tipo: string, id: string, data: any) => request(`/accounting/audit/transactions/${tipo}/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
 };
 
+export interface AIQuotaStatus {
+  plan: string;
+  ai_habilitado: boolean;
+  periodo: string;
+  tokens_consumidos: number;
+  tokens_limite: number;
+  pct_tokens_usado: number;
+  requests_totales: number;
+  requests_limite: number;
+  requests_hoy: number;
+  req_diario_limite: number;
+  procesos_habilitados: string[];
+  estado: 'ok' | 'alerta' | 'agotado' | 'deshabilitado';
+}
+
 export const AIService = {
-  diagnoseRepair: (data: { repairId?: string; deviceDesc: string; issueDescription: string }) =>
-    request<any>('/ai/repair-diagnosis', { method: 'POST', body: JSON.stringify(data) }),
+  analyzeMedicationImages: (data: { images?: AIMedicationImagePayload[]; imageIds?: number[]; context?: Record<string, any> }) =>
+    request<AIMedicationAnalysisResult>('/ai/medicamentos/analyze-images', { method: 'POST', body: JSON.stringify(data) }),
   analyzeClient: (idCliente: string) =>
-    request<any>('/ai/client-analysis', { method: 'POST', body: JSON.stringify({ idCliente }) }),
-  suggestPrice: (modelo: string, precioCompra: number) =>
-    request<any>('/ai/price-suggestion', { method: 'POST', body: JSON.stringify({ modelo, precioCompra }) }),
+    request<any>('/ai/analizar-cliente', { method: 'POST', body: JSON.stringify({ idCliente }) }),
   checkAnomaly: (idArqueo: string) =>
     request<any>(`/ai/anomaly-check/${idArqueo}`),
-  predictRecharge: (red: 'TIGO' | 'CLARO') =>
-    request<any>(`/ai/recharge-prediction/${red}`),
+  recomendarPorSintomas: (data: any) =>
+    request<any>('/ai/recomendar-por-sintomas', { method: 'POST', body: JSON.stringify(data) }),
+  recommendBySymptoms: (data: AISymptomRecommendationPayload) =>
+    request<AISymptomRecommendationResult>('/ai/recommendations/symptoms', { method: 'POST', body: JSON.stringify(data) }),
+  verificarInteracciones: (data: { medicamento_nuevo: string; id_cliente?: string }) =>
+    request<any>('/ai/verificar-interacciones', { method: 'POST', body: JSON.stringify(data) }),
+  predecirReabastecimiento: (codMedicamento: string) =>
+    request<any>(`/ai/predecir-reabastecimiento/${codMedicamento}`),
+  getQuotaStatus: () =>
+    request<AIQuotaStatus>('/ai/quota/status'),
+  requestTokenUpgrade: (data: { paquete_solicitado: string; motivo?: string }) =>
+    request<{ message: string; id: number; created_at: string }>('/ai/quota/request-upgrade', { method: 'POST', body: JSON.stringify(data) }),
+  getUpgradeRequests: () =>
+    request<any[]>('/ai/quota/upgrade-requests'),
+};
+
+// ─── SERVICIOS FARMACIA ──────────────────────────────────────────────────────
+import type {
+  Medicamento, PresentacionVenta, LoteMedicamento, ImagenMedicamento,
+  AlertaVencimiento, StockCritico, Receta, Sucursal,
+  CategoriaTerapeutica, FormaFarmaceutica
+} from '../types';
+
+export const MedicamentosService = {
+  getAll: (params?: { q?: string; id_categoria?: number; tipo_isv?: string; requiere_receta?: boolean; es_controlado?: boolean; estado_catalogo?: string; id_sucursal?: number | null }) => {
+    const paramsWithSucursal = { id_sucursal: getCurrentSucursalId(), ...(params || {}) };
+    const qs = '?' + new URLSearchParams(Object.entries(paramsWithSucursal).filter(([, v]) => v !== undefined && v !== null && v !== '').map(([k, v]) => [k, String(v)])).toString();
+    return request<Medicamento[]>(`/medicamentos${qs}`);
+  },
+  getById: (id: string) => request<Medicamento>(`/medicamentos/${id}`),
+  create: (data: Partial<Medicamento>) => request<{ mensaje: string; codigo: string }>('/medicamentos', { method: 'POST', body: JSON.stringify(data) }),
+  update: (id: string, data: Partial<Medicamento>) => request(`/medicamentos/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  delete: (id: string) => request(`/medicamentos/${id}`, { method: 'DELETE' }),
+
+  getPresentaciones: (id: string) => request<PresentacionVenta[]>(`/medicamentos/${id}/presentaciones`),
+  createPresentacion: (id: string, data: Partial<PresentacionVenta>) => request<{ id_presentacion: number }>(`/medicamentos/${id}/presentaciones`, { method: 'POST', body: JSON.stringify(data) }),
+  updatePresentacion: (id: number, data: Partial<PresentacionVenta>) => request(`/presentaciones/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deletePresentacion: (id: number) => request(`/presentaciones/${id}`, { method: 'DELETE' }),
+
+  getLotesAll: (id_sucursal?: number | null) => {
+    const sucursalId = id_sucursal === undefined ? getCurrentSucursalId() : id_sucursal;
+    const qs = sucursalId ? `?id_sucursal=${sucursalId}` : '';
+    return request<any[]>(`/medicamentos/lotes/all${qs}`);
+  },
+  getLotes: (id: string, id_sucursal?: number | null) => {
+    const sucursalId = id_sucursal === undefined ? getCurrentSucursalId() : id_sucursal;
+    const qs = sucursalId ? `?id_sucursal=${sucursalId}` : '';
+    return request<LoteMedicamento[]>(`/medicamentos/${id}/lotes${qs}`);
+  },
+  createLote: (id: string, data: any) => request<{ id_lote: number }>(`/medicamentos/${id}/lotes`, { method: 'POST', body: JSON.stringify(data) }),
+
+  getImagenes: (id: string) => request<ImagenMedicamento[]>(`/medicamentos/${id}/imagenes`),
+  createImagen: (id: string, data: Partial<ImagenMedicamento>) => request<{ id_imagen: number }>(`/medicamentos/${id}/imagenes`, { method: 'POST', body: JSON.stringify(data) }),
+  deleteImagen: (id: number) => request(`/medicamentos/imagenes/${id}`, { method: 'DELETE' }),
+  setPrincipalImagen: (id: number) => request(`/medicamentos/imagenes/${id}/set-principal`, { method: 'PATCH' }),
+
+  getAlertasVencimiento: (dias = 90, id_sucursal?: number | null) => {
+    const sucursalId = id_sucursal === undefined ? getCurrentSucursalId() : id_sucursal;
+    const qs = `?dias=${dias}${sucursalId ? `&id_sucursal=${sucursalId}` : ''}`;
+    return request<AlertaVencimiento[]>(`/medicamentos/alertas/vencimientos${qs}`);
+  },
+  getStockCritico: (id_sucursal?: number | null) => {
+    const sucursalId = id_sucursal === undefined ? getCurrentSucursalId() : id_sucursal;
+    return request<StockCritico[]>(`/medicamentos/alertas/stock-critico${sucursalId ? `?id_sucursal=${sucursalId}` : ''}`);
+  },
+  getDisponibilidadSucursales: (codigo: string) =>
+    request<any[]>(`/medicamentos/${codigo}/disponibilidad-sucursales`),
+};
+
+export const CatalogoService = {
+  getCategorias: () => request<CategoriaTerapeutica[]>('/categorias-terapeuticas'),
+  createCategoria: (data: Partial<CategoriaTerapeutica>) => request('/categorias-terapeuticas', { method: 'POST', body: JSON.stringify(data) }),
+  updateCategoria: (id: number, data: any) => request(`/categorias-terapeuticas/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  getFormas: () => request<FormaFarmaceutica[]>('/formas-farmaceuticas'),
+  getPrincipios: (q?: string) => request<any[]>(`/principios-activos${q ? `?q=${encodeURIComponent(q)}` : ''}`),
+};
+
+export const RecetasService = {
+  getAll: (params?: { estado?: string; id_cliente?: string; id_sucursal?: number }) => {
+    const qs = params ? '?' + new URLSearchParams(Object.entries(params).filter(([, v]) => v !== undefined).map(([k, v]) => [k, String(v)])).toString() : '';
+    return request<Receta[]>(`/recetas${qs}`);
+  },
+  getById: (id: string) => request<Receta>(`/recetas/${id}`),
+  create: (data: any) => request<{ codigo: string }>('/recetas', { method: 'POST', body: JSON.stringify(data) }),
+  update: (id: string, data: any) => request(`/recetas/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  dispensar: (id: string, data: { id_detalle: number; cantidad_a_dispensar: number; id_sucursal?: number }) =>
+    request(`/recetas/${id}/dispensar`, { method: 'POST', body: JSON.stringify(data) }),
+  getRetenidas: () => request<any[]>('/recetas-retenidas'),
+  getLibroPsicofarmaco: (params?: { id_medicamento?: string; fecha_desde?: string; fecha_hasta?: string }) => {
+    const qs = params ? '?' + new URLSearchParams(Object.entries(params).filter(([, v]) => v !== undefined).map(([k, v]) => [k, String(v)])).toString() : '';
+    return request<any[]>(`/libro-psicofarmacos${qs}`);
+  },
+};
+
+export const SucursalesService = {
+  getAll: () => request<Sucursal[]>('/sucursales'),
+  getById: (id: number) => request<Sucursal>(`/sucursales/${id}`),
+  getSummary: (id: number) => request<any>(`/sucursales/${id}/summary`),
+  create: (data: Partial<Sucursal>) => request<{ id_sucursal: number; codigo: string }>('/sucursales', { method: 'POST', body: JSON.stringify(data) }),
+  update: (id: number, data: Partial<Sucursal>) => request(`/sucursales/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+};
+
+export const TransferenciasService = {
+  getAll: (params?: { id_sucursal?: number; estado?: string }) => {
+    const qs = params ? '?' + new URLSearchParams(Object.entries(params).filter(([, v]) => v !== undefined).map(([k, v]) => [k, String(v)])).toString() : '';
+    return request<any[]>(`/transferencias${qs}`);
+  },
+  create: (data: any) => request<{ codigo: string }>('/transferencias', { method: 'POST', body: JSON.stringify(data) }),
+  updateEstado: (codigo: string, estado: 'Aceptada' | 'Rechazada') =>
+    request(`/transferencias/${codigo}/estado`, { method: 'PUT', body: JSON.stringify({ estado }) }),
+};
+
+export const EntregasService = {
+  getPendientes: (estado: EstadoEntrega | 'TODAS' = 'Pendiente') =>
+    request<EntregaSucursal[]>(`/entregas/pendientes?estado=${estado}`),
+  marcarEntregado: (id: number, notas?: string) =>
+    request<{ ok: boolean }>(`/entregas/${id}/marcar-entregado`,
+      { method: 'PATCH', body: JSON.stringify({ notas }) }),
+  cancelar: (id: number, notas?: string) =>
+    request<{ ok: boolean }>(`/entregas/${id}/cancelar`,
+      { method: 'PATCH', body: JSON.stringify({ notas }) }),
+};
+
+export const LoyaltyService = {
+  getConfig: (idSucursal?: number) => {
+    const qs = idSucursal != null ? `?id_sucursal=${idSucursal}` : '';
+    return request<LoyaltyConfig>(`/loyalty/config${qs}`);
+  },
+  getAllConfigs: () => request<LoyaltyConfig[]>('/loyalty/configs'),
+  saveConfig: (data: Partial<LoyaltyConfig> & { idSucursal?: number | null }) =>
+    request<LoyaltyConfig>('/loyalty/config', { method: 'PUT', body: JSON.stringify(data) }),
+
+  getAccount: (identidad: string) =>
+    request<LoyaltyAccount & { preview: LoyaltyPreview }>(`/loyalty/account/${encodeURIComponent(identidad)}`),
+  getAccounts: (params?: { limit?: number; offset?: number; search?: string }) => {
+    const qs = params ? '?' + new URLSearchParams(
+      Object.entries(params)
+        .filter(([, v]) => v !== undefined)
+        .map(([k, v]) => [k, String(v)])
+    ).toString() : '';
+    return request<LoyaltyAccountList>(`/loyalty/accounts${qs}`);
+  },
+
+  getTransactions: (identidad: string, limit?: number) => {
+    const qs = limit ? `?limit=${limit}` : '';
+    return request<LoyaltyTransaction[]>(`/loyalty/transactions/${encodeURIComponent(identidad)}${qs}`);
+  },
+
+  preview: (identidadCliente: string, totalAmount: number, idSucursal?: number) =>
+    request<LoyaltyPreview>('/loyalty/preview', {
+      method: 'POST',
+      body: JSON.stringify({ identidadCliente, totalAmount, idSucursal }),
+    }),
+  earn: (identidadCliente: string, codVenta: string, amount: number, idSucursal?: number) =>
+    request<{ ok: boolean; puntosGanados: number; puntosDespues: number; tierActual: string }>(
+      '/loyalty/earn',
+      { method: 'POST', body: JSON.stringify({ identidadCliente, codVenta, amount, idSucursal }) }
+    ),
+  redeem: (identidadCliente: string, codVenta: string, puntos: number, idSucursal?: number) =>
+    request<{ ok: boolean; puntosUsados: number; valorDescuento: number; puntosDespues: number }>(
+      '/loyalty/redeem',
+      { method: 'POST', body: JSON.stringify({ identidadCliente, codVenta, puntos, idSucursal }) }
+    ),
+  reverse: (codVenta: string) =>
+    request<{ ok: boolean; redReversals: number; earnReversals: number }>(
+      '/loyalty/reverse',
+      { method: 'POST', body: JSON.stringify({ codVenta }) }
+    ),
+  adjust: (accountId: number, delta: number, descripcion?: string) =>
+    request<{ ok: boolean; puntosAntes: number; puntosDespues: number }>(
+      '/loyalty/adjust',
+      { method: 'POST', body: JSON.stringify({ accountId, delta, descripcion }) }
+    ),
+  getStats: () => request<LoyaltyStats>('/loyalty/stats'),
+};
+
+export const OrdenesCompraService = {
+  getAll: (params?: any) => {
+    const qs = params ? '?' + new URLSearchParams(Object.entries(params).filter(([, v]) => v !== undefined).map(([k, v]) => [k, String(v)])).toString() : '';
+    return request<any[]>(`/ordenes-compra${qs}`);
+  },
+  create: (data: any) => request<{ codigo: string }>('/ordenes-compra', { method: 'POST', body: JSON.stringify(data) }),
+  updateEstado: (codigo: string, estado: string) =>
+    request(`/ordenes-compra/${codigo}/estado`, { method: 'PUT', body: JSON.stringify({ estado }) }),
 };

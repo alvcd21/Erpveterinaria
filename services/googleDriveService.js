@@ -2,13 +2,25 @@
 
 const { google } = require('googleapis');
 const { getSystemConfig } = require('../config/systemConfig');
-const { exec } = require('child_process');
+const { execFile } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const util = require('util');
 
-const execAsync = util.promisify(exec);
+const execFileAsync = util.promisify(execFile);
+
+function parseDatabaseUrl(databaseUrl) {
+    const url = new URL(databaseUrl);
+    return {
+        host: url.hostname,
+        port: url.port || '5432',
+        database: url.pathname.replace(/^\//, ''),
+        user: decodeURIComponent(url.username || ''),
+        password: decodeURIComponent(url.password || ''),
+        sslmode: url.searchParams.get('sslmode') || 'require',
+    };
+}
 
 async function backupDatabase() {
     const keyBase64 = process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
@@ -35,20 +47,34 @@ async function backupDatabase() {
     const tempFilePath = path.join(os.tmpdir(), backupFilename);
 
     try {
-        let pgDumpCmd;
+        let pgDumpArgs;
+        let pgDumpEnv = { ...process.env };
         if (process.env.DATABASE_URL) {
-            pgDumpCmd = `pg_dump ${process.env.DATABASE_URL} -f "${tempFilePath}"`;
+            const db = parseDatabaseUrl(process.env.DB_INTERNAL_URL || process.env.DATABASE_URL);
+            pgDumpArgs = [
+                '-h', db.host,
+                '-p', db.port,
+                '-U', db.user,
+                '-d', db.database,
+                '--no-password',
+                '-f', tempFilePath,
+            ];
+            pgDumpEnv.PGPASSWORD = db.password;
+            pgDumpEnv.PGSSLMODE = process.env.DB_INTERNAL_URL ? 'disable' : db.sslmode;
         } else {
-            pgDumpCmd = `pg_dump -h ${process.env.DB_HOST} -U ${process.env.DB_USER} -d ${process.env.DB_NAME} -p ${process.env.DB_PORT || 5432} --no-password -f "${tempFilePath}"`;
+            pgDumpArgs = [
+                '-h', process.env.DB_HOST,
+                '-U', process.env.DB_USER,
+                '-d', process.env.DB_NAME,
+                '-p', process.env.DB_PORT || '5432',
+                '--no-password',
+                '-f', tempFilePath,
+            ];
+            pgDumpEnv.PGPASSWORD = process.env.DB_PASSWORD || '';
         }
 
         try {
-            await execAsync(pgDumpCmd, {
-                env: {
-                    ...process.env,
-                    PGPASSWORD: process.env.DB_PASSWORD || '',
-                },
-            });
+            await execFileAsync('pg_dump', pgDumpArgs, { env: pgDumpEnv });
         } catch (pgErr) {
             console.error('[googleDriveService] pg_dump no disponible o falló:', pgErr.message);
             return { success: false, error: 'pg_dump falló: ' + pgErr.message };

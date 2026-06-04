@@ -3,11 +3,19 @@ const express = require('express');
 const router = express.Router();
 const { pool, generateNextId, handleDbError, updateArqueoBalance, getLocalTimestamp, anularVenta } = require('../config/db');
 const { authenticateToken } = require('../middleware/auth');
+const emailService = require('../services/emailService');
+
+function httpError(statusCode, message, code) {
+    const err = new Error(message);
+    err.statusCode = statusCode;
+    err.code = code;
+    return err;
+}
 
 // --- CLIENTES ---
 router.get('/clientes', authenticateToken, async (req, res) => {
     try {
-        const r = await pool.query('SELECT * FROM clientes ORDER BY nombre ASC');
+        const r = await pool.query('SELECT * FROM clientes WHERE tenant_id = $1 ORDER BY nombre ASC', [req.tenantId]);
         res.json(r.rows);
     } catch(e) { handleDbError(res, e); }
 });
@@ -15,8 +23,15 @@ router.get('/clientes', authenticateToken, async (req, res) => {
 router.post('/clientes', authenticateToken, async (req, res) => {
     try {
         const { identidad, nombre, apellido, direccion, telefono, correo } = req.body;
-        await pool.query('INSERT INTO clientes (identidad, nombre, apellido, direccion, telefono, correo, fechaCreacion) VALUES ($1,$2,$3,$4,$5,$6, NOW())',
-            [identidad, nombre, apellido, direccion, telefono, correo]);
+        await pool.query(
+            'INSERT INTO clientes (identidad, nombre, apellido, direccion, telefono, correo, fechaCreacion, tenant_id) VALUES ($1,$2,$3,$4,$5,$6, NOW(), $7)',
+            [identidad, nombre, apellido, direccion, telefono, correo, req.tenantId]
+        );
+        if (correo) {
+            emailService.sendWelcomeEmail(correo, nombre, apellido).catch(err =>
+                console.error('[salesRoutes] welcome email error:', err.message)
+            );
+        }
         res.status(201).json({ message: 'OK' });
     } catch(e) { handleDbError(res, e); }
 });
@@ -24,15 +39,17 @@ router.post('/clientes', authenticateToken, async (req, res) => {
 router.put('/clientes/:id', authenticateToken, async (req, res) => {
     try {
         const { nombre, apellido, direccion, telefono, correo } = req.body;
-        await pool.query('UPDATE clientes SET nombre=$1, apellido=$2, direccion=$3, telefono=$4, correo=$5 WHERE identidad=$6',
-            [nombre, apellido, direccion, telefono, correo, req.params.id]);
+        await pool.query(
+            'UPDATE clientes SET nombre=$1, apellido=$2, direccion=$3, telefono=$4, correo=$5 WHERE identidad=$6 AND tenant_id=$7',
+            [nombre, apellido, direccion, telefono, correo, req.params.id, req.tenantId]
+        );
         res.json({ message: 'OK' });
     } catch(e) { handleDbError(res, e); }
 });
 
 router.delete('/clientes/:id', authenticateToken, async (req, res) => {
     try {
-        await pool.query('DELETE FROM clientes WHERE identidad=$1', [req.params.id]);
+        await pool.query('DELETE FROM clientes WHERE identidad=$1 AND tenant_id=$2', [req.params.id, req.tenantId]);
         res.json({ message: 'OK' });
     } catch(e) { handleDbError(res, e); }
 });
@@ -40,210 +57,327 @@ router.delete('/clientes/:id', authenticateToken, async (req, res) => {
 // --- VENTAS ---
 router.get('/ventas/historial', authenticateToken, async (req, res) => {
     try {
-        const { fecha } = req.query; 
+        const { fecha } = req.query;
         const { codUsuario, idCaja } = req.user;
-        
-        let query = `
-            SELECT v.codVenta as "codVenta", v.fecha, v.total, v.estado, v.identidadCliente as "identidadCliente",
-            v.tipoCompra as "tipoCompra", v.estado_pago_financiera as "estado_pago_financiera",
-            v.codVendedor as "codVendedor",
-            c.nombre || ' ' || c.apellido as "nombreCliente"
+        const result = await pool.query(`
+            SELECT v.codVenta as "codVenta", v.fecha, v.total, v.estado,
+                   v.identidadCliente as "identidadCliente",
+                   v.tipoCompra as "tipoCompra", v.codVendedor as "codVendedor",
+                   COALESCE(c.nombre || ' ' || c.apellido, 'Consumidor Final') as "nombreCliente"
             FROM ventas v
-            JOIN clientes c ON v.identidadCliente = c.identidad
-            WHERE (
-                (v.tipoCompra = 'KrediYa' AND v.estado_pago_financiera = 'Pendiente')
-                OR (v.idCaja = $2 AND v.codVendedor = $1 AND TO_CHAR(v.fecha, 'YYYY-MM-DD') = $3)
-            )
-        `;
-        const params = [codUsuario, idCaja, fecha || getLocalTimestamp().substring(0,10)];
-        
-        query += ` ORDER BY v.fecha DESC`;
-        const result = await pool.query(query, params);
+            LEFT JOIN clientes c ON v.identidadCliente = c.identidad AND c.tenant_id = $4
+            WHERE v.idCaja = $2 AND v.codVendedor = $1::text
+              AND TO_CHAR(v.fecha, 'YYYY-MM-DD') = $3
+              AND v.tenant_id = $4
+            ORDER BY v.fecha DESC
+        `, [codUsuario, idCaja, fecha || getLocalTimestamp().substring(0, 10), req.tenantId]);
         res.json(result.rows);
     } catch(e) { handleDbError(res, e); }
 });
 
 router.get('/ventas/:id', authenticateToken, async (req, res) => {
     try {
-        const query = `
-            SELECT 
-                v.codVenta as "codVenta", 
-                v.fecha, 
-                v.codVendedor as "codVendedor", 
-                v.identidadCliente as "identidadCliente", 
-                v.total, 
-                v.estado, 
-                v.tipoCompra as "tipoCompra", 
-                v.isv, 
-                v.descuento, 
-                v.monto_prima as "montoPrima", 
-                v.monto_financiamiento as "montoFinanciado",
-                c.nombre as "nombreCliente",
-                c.apellido as "apellidoCliente",
+        const r = await pool.query(`
+            SELECT
+                v.codVenta as "codVenta", v.fecha, v.codVendedor as "codVendedor",
+                v.identidadCliente as "identidadCliente", v.total, v.estado,
+                v.tipoCompra as "tipoCompra", v.isv, v.descuento,
+                v.monto_prima as "montoPrima", v.monto_financiamiento as "montoFinanciado",
+                c.nombre as "nombreCliente", c.apellido as "apellidoCliente",
                 c.direccion as "direccionCliente",
                 COALESCE(e.nombre || ' ' || e.apellido, u.usuario) as "nombreVendedor"
             FROM ventas v
-            JOIN clientes c ON v.identidadCliente = c.identidad
-            JOIN usuarios u ON v.codVendedor = u.codUsuario
-            LEFT JOIN empleado e ON u.identidad = e.identidad
-            WHERE v.codVenta = $1
-        `;
-        const r = await pool.query(query, [req.params.id]);
+            LEFT JOIN clientes c ON v.identidadCliente = c.identidad AND c.tenant_id = $2
+            JOIN usuarios u ON v.codVendedor::text = u.codUsuario::text AND u.tenant_id = $2
+            LEFT JOIN empleado e ON u.identidad = e.identidad AND e.tenant_id = $2
+            WHERE v.codVenta = $1 AND v.tenant_id = $2
+        `, [req.params.id, req.tenantId]);
         res.json(r.rows[0]);
     } catch(e) { handleDbError(res, e); }
 });
 
 router.get('/ventas/:id/detalles', authenticateToken, async (req, res) => {
     try {
-        const query = `
-            SELECT 
-                dv.codDetalleVenta as "codDetalleVenta",
-                dv.idVenta as "idVenta",
-                dv.idTelefono as "idTelefono",
-                dv.idAccesorio as "idAccesorio",
-                dv.idAccesorio as "idInventario",
-                dv.cantidad as "cantidad",
-                dv.precioVenta as "precioVenta",
-                dv.tipoProducto as "tipoProducto",
-                COALESCE(t.precioCompra, inv.precioCompra) as "precioCompra",
-                COALESCE(t.marca || ' ' || t.modelo, acc.descripcion, 'PRODUCTO') as "descripcionProducto"
+        const r = await pool.query(`
+            SELECT
+                dv.codDetalleVenta  AS "codDetalleVenta",
+                dv.idVenta          AS "idVenta",
+                dv.cantidad         AS "cantidad",
+                COALESCE(dv.precioUnitario, dv.precioVenta) AS "precioVenta",
+                dv.tipoProducto     AS "tipoProducto",
+                dv.id_presentacion  AS "id_presentacion",
+                dv.tipo_isv         AS "tipoIsv",
+                dv.subtotal_exento  AS "subtotalExento",
+                dv.subtotal_gravado AS "subtotalGravado",
+                dv.isv_linea        AS "isvLinea",
+                COALESCE(dv.producto, 'PRODUCTO') AS "descripcionProducto",
+                pv.id_medicamento   AS "id_medicamento"
             FROM detalleventa dv
-            LEFT JOIN telefonos t ON dv.idTelefono = t.codigo
-            LEFT JOIN inventario inv ON dv.idAccesorio = inv.codInventario
-            LEFT JOIN accesorios acc ON inv.codAccesorio = acc.codAccesorio
-            WHERE dv.idVenta = $1
-        `;
-        const r = await pool.query(query, [req.params.id]);
+            LEFT JOIN presentaciones_venta pv ON dv.id_presentacion = pv.id_presentacion AND pv.tenant_id = $2
+            WHERE dv.idVenta = $1 AND dv.tenant_id = $2
+        `, [req.params.id, req.tenantId]);
         res.json(r.rows);
     } catch(e) { handleDbError(res, e); }
 });
 
 router.post('/ventas', authenticateToken, async (req, res) => {
-  const client = await pool.connect();
-  try {
-    const { identidadCliente, tipoCompra, total, detalles, isv, descuento, montoPrima, montoFinanciado } = req.body;
-    const { codUsuario } = req.user;
-
-    const toSafeNum = (v) => { const n = parseFloat(v); return isFinite(n) && n >= 0 ? n : null; };
-    const totalNum = toSafeNum(total);
-    if (totalNum === null) return res.status(400).json({ error: 'total debe ser un número positivo' });
-    if (isv !== undefined && toSafeNum(isv) === null) return res.status(400).json({ error: 'isv debe ser un número positivo' });
-    if (descuento !== undefined && toSafeNum(descuento) === null) return res.status(400).json({ error: 'descuento debe ser un número positivo' });
-
-    await client.query('BEGIN');
-
-    // CORRECCIÓN: Usar idcaja en minúsculas para coincidir con el retorno de PG
-    const userRes = await client.query('SELECT idCaja FROM usuarios WHERE codUsuario = $1', [codUsuario]);
-    const idCajaActual = userRes.rows[0]?.idcaja;
-
-    if (!idCajaActual) {
-        throw new Error('El usuario no tiene una caja asignada para realizar ventas.');
-    }
-
-    const hndTime = getLocalTimestamp();
-    const codVenta = await generateNextId('ventas', 'codVenta', 'FACT', client);
-
-    let totalCostoReal = 0;
-    let descArray = [];
-
-    for (const item of detalles) {
-        if (item.idTelefono) {
-            const tel = await client.query("SELECT marca, modelo, precioCompra FROM telefonos WHERE codigo = $1", [item.idTelefono]);
-            const row = tel.rows[0];
-            totalCostoReal += Number(row?.preciocompra || 0);
-            if (row) descArray.push(`${row.marca} ${row.modelo}`.toUpperCase());
-        } else if (item.idInventario) {
-            const inv = await client.query(`
-                SELECT i.precioCompra, a.descripcion, c.tipo as categoria 
-                FROM inventario i 
-                JOIN accesorios a ON i.codAccesorio = a.codAccesorio
-                LEFT JOIN categoria c ON a.codCategoria = c.codCategoria
-                WHERE i.codInventario = $1
-            `, [item.idInventario]);
-            const row = inv.rows[0];
-            totalCostoReal += (Number(row?.preciocompra || 0) * Number(item.cantidad || 1));
-            if (row) descArray.push(`${row.categoria || ''} ${row.descripcion}`.trim().toUpperCase());
-        }
-    }
-
-    const idIngreso = await generateNextId('ingresos', 'idIngreso', 'INGR', client);
-    const esKrediya = (tipoCompra === 'KrediYa');
-    
-    const montoIngresoCaja = esKrediya ? Number(montoPrima) : Number(total);
-    const costoIngresoCaja = esKrediya ? Number(montoPrima) : totalCostoReal;
-    const subtipoMovimiento = esKrediya ? 'KrediYa_Prima' : 'Venta';
-    
-    const descripcionVenta = descArray.length > 0 ? descArray.join(', ') : `VENTA FACTURA #${codVenta}`;
-
-    await client.query(
-      `INSERT INTO ingresos (idIngreso, idCaja, descripcion, monto, costo, fechaCreacion, estado, subtipo_movimiento) 
-       VALUES ($1, $2, $3, $4, $5, $6, 'Completada', $7)`,
-      [idIngreso, idCajaActual, descripcionVenta, montoIngresoCaja, costoIngresoCaja, hndTime, subtipoMovimiento]
-    );
-
-    await client.query(
-      `INSERT INTO ventas (codVenta, fecha, codVendedor, identidadCliente, total, estado, tipoCompra, isv, descuento, monto_prima, monto_financiamiento, monto_financiera, monto_prima_efectivo, es_krediya, estado_pago_financiera, idCaja) 
-       VALUES ($1, $2, $3, $4, $5, 'Completada', $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
-      [codVenta, hndTime, codUsuario, identidadCliente, total, tipoCompra, isv || 0, descuento || 0, montoPrima || 0, montoFinanciado || 0, montoFinanciado || 0, montoPrima || 0, esKrediya, esKrediya ? 'Pendiente' : null, idCajaActual]
-    );
-
-    for (const item of detalles) {
-      const codDetalle = await generateNextId('detalleventa', 'codDetalleVenta', 'PROD', client);
-      if (item.idTelefono) {
-        // El trigger trg_detalleventa_actualizar_stock actualiza telefonos.estado='Vendido' automáticamente
-        await client.query(`INSERT INTO detalleventa (codDetalleVenta, idVenta, idTelefono, idIngreso, cantidad, precioVenta, estado, tipoProducto) VALUES ($1,$2,$3,$4,1,$5,'Activo', 'TELEFONO')`, [codDetalle, codVenta, item.idTelefono, idIngreso, item.precioVenta]);
-      } else if (item.idInventario) {
-        // El trigger trg_detalleventa_actualizar_stock reduce inventario.cantidad automáticamente
-        await client.query(`INSERT INTO detalleventa (codDetalleVenta, idVenta, idAccesorio, idIngreso, cantidad, precioVenta, estado, tipoProducto) VALUES ($1,$2,$3,$4,$5,$6,'Activo', 'ACCESORIO')`, [codDetalle, codVenta, item.idInventario, idIngreso, item.cantidad, item.precioVenta]);
-      }
-    }
-
-    await updateArqueoBalance(idCajaActual, client);
-    await client.query('COMMIT');
-    res.status(201).json({ codVenta });
-  } catch (err) { await client.query('ROLLBACK'); handleDbError(res, err); } finally { client.release(); }
-});
-
-router.put('/ventas/:id/deposito-krediya', authenticateToken, async (req, res) => {
     const client = await pool.connect();
     try {
-        const codVenta = req.params.id;
-        const userRes = await client.query('SELECT idCaja FROM usuarios WHERE codUsuario = $1', [req.user.codUsuario]);
-        const idCajaActual = userRes.rows[0]?.idcaja;
+        const { identidadCliente, tipoCompra, total, detalles, isv, descuento, montoPrima, montoFinanciado, clientMutationId } = req.body;
+        const { codUsuario } = req.user;
 
-        if (!idCajaActual) throw new Error('Usuario sin caja asignada');
+        const toSafeNum = (v) => { const n = parseFloat(v); return isFinite(n) && n >= 0 ? n : null; };
+        const totalNum = toSafeNum(total);
+        if (totalNum === null) return res.status(400).json({ error: 'total debe ser un número positivo' });
+        if (toSafeNum(isv)             === null && isv             != null) return res.status(400).json({ error: 'isv inválido' });
+        if (toSafeNum(descuento)       === null && descuento       != null) return res.status(400).json({ error: 'descuento inválido' });
+        if (toSafeNum(montoPrima)      === null && montoPrima      != null) return res.status(400).json({ error: 'montoPrima inválido' });
+        if (toSafeNum(montoFinanciado) === null && montoFinanciado != null) return res.status(400).json({ error: 'montoFinanciado inválido' });
+
+        if (!Array.isArray(detalles) || detalles.length === 0) {
+            return res.status(400).json({ error: 'detalles debe ser un arreglo con al menos un ítem' });
+        }
+        const VALID_TIPO_ISV = new Set(['exento', '15', '18']);
+        for (const item of detalles) {
+            if (toSafeNum(item.cantidad) === null || Number(item.cantidad) <= 0) return res.status(400).json({ error: 'cantidad de ítem inválida' });
+            if (toSafeNum(item.precioVenta) === null) return res.status(400).json({ error: 'precioVenta de ítem inválido' });
+            if (item.tipoIsv && !VALID_TIPO_ISV.has(item.tipoIsv)) return res.status(400).json({ error: `tipoIsv inválido: ${item.tipoIsv}` });
+        }
 
         await client.query('BEGIN');
 
-        const vRes = await client.query('SELECT total, monto_financiera, monto_prima_efectivo FROM ventas WHERE codVenta = $1 AND es_krediya = TRUE', [codVenta]);
-        if (vRes.rows.length === 0) throw new Error('Venta no encontrada');
-        const v = vRes.rows[0];
+        if (clientMutationId) {
+            const existing = await client.query(
+                'SELECT codVenta FROM ventas WHERE tenant_id = $1 AND client_mutation_id = $2',
+                [req.tenantId, clientMutationId]
+            );
+            if (existing.rows.length) {
+                await client.query('COMMIT');
+                return res.status(200).json({ codVenta: existing.rows[0].codventa, duplicate: true });
+            }
+        }
 
-        const cRes = await client.query(`
-            SELECT SUM(COALESCE(t.precioCompra, i.precioCompra * dv.cantidad)) as real_cost
-            FROM detalleventa dv
-            LEFT JOIN telefonos t ON dv.idTelefono = t.codigo
-            LEFT JOIN inventario i ON dv.idAccesorio = i.codInventario
-            WHERE dv.idVenta = $1
-        `, [codVenta]);
-        const totalCostoReal = Number(cRes.rows[0].real_cost);
-        
-        const montoDeposito = Number(v.monto_financiera);
-        const costoRemanente = totalCostoReal - Number(v.monto_prima_efectivo);
+        const userRes = await client.query(
+            `SELECT u.idCaja, c.estado AS "estadoCaja", c.id_sucursal AS "idSucursalCaja"
+             FROM usuarios u
+             LEFT JOIN caja c ON c.idCaja = u.idCaja AND c.tenant_id = u.tenant_id
+             WHERE u.codUsuario = $1 AND u.tenant_id = $2`,
+            [codUsuario, req.tenantId]
+        );
+        const idCajaActual = userRes.rows[0]?.idcaja;
+        if (!idCajaActual || idCajaActual === 'Sin Caja') {
+            throw httpError(
+                400,
+                'No puede facturar porque su usuario no tiene una caja asignada. Solicite a un administrador que le asigne una caja activa.',
+                'USER_WITHOUT_CASH_REGISTER'
+            );
+        }
+        if (!userRes.rows[0]?.estadoCaja) {
+            throw httpError(
+                400,
+                'La caja asignada a su usuario ya no existe. Solicite al administrador revisar su asignacion.',
+                'ASSIGNED_CASH_REGISTER_NOT_FOUND'
+            );
+        }
+        if (userRes.rows[0].estadoCaja !== 'Activo') {
+            throw httpError(
+                400,
+                'La caja asignada a su usuario esta inactiva. Solicite al administrador activar o reasignar la caja.',
+                'ASSIGNED_CASH_REGISTER_INACTIVE'
+            );
+        }
+        const idSucursalCaja = userRes.rows[0]?.idSucursalCaja;
+        if (!idSucursalCaja) {
+            throw httpError(
+                400,
+                'La caja asignada no tiene una sucursal configurada. Solicite al administrador revisar la caja.',
+                'CASH_REGISTER_WITHOUT_BRANCH'
+            );
+        }
 
-        const idI = await generateNextId('ingresos', 'idIngreso', 'INGR', client);
+        const activeArqueo = await client.query(
+            "SELECT idArqueo FROM arqueo WHERE idCaja = $1 AND estado = 'Activo' AND tenant_id = $2 LIMIT 1",
+            [idCajaActual, req.tenantId]
+        );
+        if (activeArqueo.rows.length === 0) {
+            throw httpError(
+                409,
+                'No puede facturar porque no hay un turno de caja abierto. Abra caja antes de procesar ventas.',
+                'CASH_REGISTER_NOT_OPEN'
+            );
+        }
+
+        const hndTime = getLocalTimestamp();
+        const codVenta = await generateNextId('ventas', 'codVenta', 'FACT', client);
+
+        // Insert parent ventas row first so detalleventa FK constraint is satisfied
         await client.query(
-            `INSERT INTO ingresos (idIngreso, idCaja, descripcion, monto, costo, fechaCreacion, estado, subtipo_movimiento) 
-             VALUES ($1, $2, $3, $4, $5, $6, 'Completada', 'KrediYa_Deposito')`,
-            [idI, idCajaActual, `DEPOSITO KREDIYA - FACTURA #${codVenta}`, montoDeposito, costoRemanente, getLocalTimestamp()]
+            `INSERT INTO ventas
+             (codVenta, fecha, codVendedor, identidadCliente, total, estado, tipoCompra, isv, descuento, monto_prima, monto_financiamiento, idCaja, tenant_id, client_mutation_id)
+             VALUES ($1,$2,$3,$4,$5,'Completada',$6,$7,$8,$9,$10,$11,$12,$13)`,
+            [codVenta, hndTime, codUsuario, identidadCliente, total,
+             tipoCompra, isv || 0, descuento || 0, montoPrima || 0, montoFinanciado || 0, idCajaActual, req.tenantId, clientMutationId || null]
         );
 
-        await client.query("UPDATE ventas SET estado_pago_financiera = 'Depositado' WHERE codVenta = $1", [codVenta]);
+        for (const item of detalles) {
+            if (item.tipoProducto !== 'MEDICAMENTO' || !item.id_medicamento) continue;
 
-        await updateArqueoBalance(idCajaActual, client);
+            const presR = await client.query(
+                'SELECT factor_conversion FROM presentaciones_venta WHERE id_presentacion = $1 AND tenant_id = $2',
+                [item.id_presentacion, req.tenantId]
+            );
+            const factor = presR.rows[0] ? Number(presR.rows[0].factor_conversion) : 1;
+            const cantidadBase = Number(item.cantidad) * factor;
+
+            const sucursalLotes = item.id_sucursal_origen || idSucursalCaja;
+            const lotesR = await client.query(
+                `SELECT id_lote, cantidad_actual FROM lotes_medicamento
+                 WHERE id_medicamento = $1 AND estado = 'Activo' AND cantidad_actual > 0
+                   AND id_sucursal = $2
+                   AND tenant_id = $3
+                 ORDER BY fecha_vencimiento ASC`,
+                [item.id_medicamento, sucursalLotes, req.tenantId]
+            );
+
+            let remaining = cantidadBase;
+            let primaryLoteId = null;
+            for (const lote of lotesR.rows) {
+                if (remaining <= 0) break;
+                const deduct = Math.min(remaining, Number(lote.cantidad_actual));
+                await client.query(
+                    'UPDATE lotes_medicamento SET cantidad_actual = cantidad_actual - $1 WHERE id_lote = $2 AND tenant_id = $3',
+                    [deduct, lote.id_lote, req.tenantId]
+                );
+                if (!primaryLoteId) primaryLoteId = lote.id_lote;
+                remaining -= deduct;
+            }
+            if (remaining > 0.001) {
+                throw httpError(
+                    400,
+                    `Stock insuficiente para ${item.descripcionProducto || item.id_medicamento}`,
+                    'INSUFFICIENT_STOCK'
+                );
+            }
+
+            const lineTotal = Number(item.precioVenta) * Number(item.cantidad);
+            const tipoIsv = item.tipoIsv || 'exento';
+            let subExento = 0, subGravado = 0, isvLinea = 0;
+            if (tipoIsv === 'exento') {
+                subExento = lineTotal;
+            } else {
+                const rate = tipoIsv === '18' ? 0.18 : 0.15;
+                subGravado = lineTotal / (1 + rate);
+                isvLinea = lineTotal - subGravado;
+            }
+
+            const nombreProd = item.descripcionProducto || item.id_medicamento;
+            const codDetalle = await generateNextId('detalleventa', 'codDetalleVenta', 'PROD', client);
+            await client.query(
+                `INSERT INTO detalleventa
+                 (codDetalleVenta, idVenta, producto, cantidad, precioUnitario, tipoProducto,
+                  id_lote, id_presentacion, cantidad_base_descontada, tipo_isv,
+                  subtotal_exento, subtotal_gravado, isv_linea, tenant_id)
+                 VALUES ($1,$2,$3,$4,$5,'MEDICAMENTO',$6,$7,$8,$9,$10,$11,$12,$13)`,
+                [codDetalle, codVenta, nombreProd, item.cantidad, item.precioVenta,
+                 primaryLoteId, item.id_presentacion || null, cantidadBase, tipoIsv,
+                 subExento, subGravado, isvLinea, req.tenantId]
+            );
+        }
+
+        await updateArqueoBalance(idCajaActual, client, req.tenantId);
         await client.query('COMMIT');
-        res.json({ message: 'Depósito conciliado' });
-    } catch(err) { await client.query('ROLLBACK'); handleDbError(res, err); } finally { client.release(); }
+
+        // Post-commit: create delivery records for cross-branch items (non-transactional)
+        const crossItems = detalles.filter(d => d.tipoProducto === 'MEDICAMENTO'
+            && d.id_sucursal_origen
+            && d.id_sucursal_origen !== idSucursalCaja);
+        if (crossItems.length > 0) {
+            let nombreCliente = 'Consumidor Final';
+            let nombreSucursalFacturacion = idSucursalCaja ? `Sucursal ${idSucursalCaja}` : 'Sucursal facturadora';
+            if (identidadCliente) {
+                try {
+                    const cli = await pool.query(
+                        'SELECT nombre, apellido FROM clientes WHERE identidad=$1 AND tenant_id=$2',
+                        [identidadCliente, req.tenantId]
+                    );
+                    if (cli.rows[0]) nombreCliente = `${cli.rows[0].nombre} ${cli.rows[0].apellido || ''}`.trim();
+                } catch {}
+            }
+            if (idSucursalCaja) {
+                try {
+                    const suc = await pool.query(
+                        'SELECT nombre FROM sucursales WHERE id_sucursal=$1 AND tenant_id=$2',
+                        [idSucursalCaja, req.tenantId]
+                    );
+                    if (suc.rows[0]?.nombre) nombreSucursalFacturacion = suc.rows[0].nombre;
+                } catch {}
+            }
+            for (const item of crossItems) {
+                try {
+                    await pool.query(`
+                        INSERT INTO entregas_sucursal
+                          (tenant_id,cod_venta,id_sucursal_facturacion,id_sucursal_origen,
+                           id_medicamento,nombre_medicamento,cantidad,identidad_cliente,nombre_cliente)
+                        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+                        [req.tenantId, codVenta, idSucursalCaja, item.id_sucursal_origen,
+                         item.id_medicamento, item.descripcionProducto || item.id_medicamento,
+                         item.cantidad, identidadCliente || null, nombreCliente]
+                    );
+                    /* await pool.query(`
+                        INSERT INTO notificaciones(tenant_id,tipo,titulo,cuerpo,leida,fecha_creacion)
+                        VALUES($1,'entrega_pendiente',$2,$3,FALSE,NOW())`,
+                        [req.tenantId,
+                         `Entrega pendiente — ${item.descripcionProducto || item.id_medicamento}`,
+                         `Factura ${codVenta}: Cliente ${nombreCliente} retirará ${item.cantidad} ud(s). Facturado en ${nombreSucursalFacturacion}.`]
+                    ); */
+                    const notificationTitle = `Entrega pendiente - ${item.descripcionProducto || item.id_medicamento}`;
+                    const notificationBody = `Factura ${codVenta}: Cliente ${nombreCliente} retirara ${item.cantidad} ud(s). Facturado en ${nombreSucursalFacturacion}.`;
+                    const targetUsers = await pool.query(
+                        `SELECT usuario
+                         FROM usuarios
+                         WHERE tenant_id = $1
+                           AND id_sucursal = $2
+                           AND estado = 'Activo'
+                         ORDER BY usuario`,
+                        [req.tenantId, item.id_sucursal_origen]
+                    );
+
+                    if (targetUsers.rows.length > 0) {
+                        for (const user of targetUsers.rows) {
+                            await pool.query(`
+                                INSERT INTO notificaciones
+                                  (tenant_id,tipo,titulo,cuerpo,para_usuario,id_sucursal,leida,fecha_creacion)
+                                VALUES($1,'entrega_pendiente',$2,$3,$4,$5,FALSE,NOW())`,
+                                [req.tenantId, notificationTitle, notificationBody, user.usuario, item.id_sucursal_origen]
+                            );
+                        }
+                    } else {
+                        await pool.query(`
+                            INSERT INTO notificaciones
+                              (tenant_id,tipo,titulo,cuerpo,id_sucursal,leida,fecha_creacion)
+                            VALUES($1,'entrega_pendiente',$2,$3,$4,FALSE,NOW())`,
+                            [req.tenantId, notificationTitle, notificationBody, item.id_sucursal_origen]
+                        );
+                    }
+                } catch (e) { console.error('[salesRoutes] entrega record error:', e.message); }
+            }
+        }
+
+        res.status(201).json({ codVenta });
+    } catch (err) {
+        await client.query('ROLLBACK');
+        if (err.code === '23505' && req.body?.clientMutationId) {
+            try {
+                const existing = await pool.query(
+                    'SELECT codVenta FROM ventas WHERE tenant_id = $1 AND client_mutation_id = $2',
+                    [req.tenantId, req.body.clientMutationId]
+                );
+                if (existing.rows.length) return res.status(200).json({ codVenta: existing.rows[0].codventa, duplicate: true });
+            } catch {}
+        }
+        if (err.statusCode) return res.status(err.statusCode).json({ error: err.message, code: err.code });
+        handleDbError(res, err);
+    } finally { client.release(); }
 });
 
 router.put('/ventas/:id', authenticateToken, async (req, res) => {
@@ -251,94 +385,105 @@ router.put('/ventas/:id', authenticateToken, async (req, res) => {
     try {
         const codVenta = req.params.id;
         const { identidadCliente, tipoCompra, total, detalles, isv, descuento, montoPrima, montoFinanciado } = req.body;
-        const { codUsuario } = req.user;
 
         await client.query('BEGIN');
 
-        const ventaRes = await client.query('SELECT codVenta, idCaja FROM ventas WHERE codVenta = $1', [codVenta]);
+        const ventaRes = await client.query(
+            `SELECT v.codVenta, v.idCaja, c.id_sucursal AS "idSucursalCaja"
+             FROM ventas v
+             LEFT JOIN caja c ON c.idCaja = v.idCaja AND c.tenant_id = v.tenant_id
+             WHERE v.codVenta = $1 AND v.tenant_id = $2`,
+            [codVenta, req.tenantId]
+        );
         if (ventaRes.rows.length === 0) throw new Error('Venta no encontrada');
         const idCajaActual = ventaRes.rows[0].idcaja;
+        const idSucursalCaja = ventaRes.rows[0].idSucursalCaja;
+        if (!idSucursalCaja) throw new Error('La caja de la venta no tiene una sucursal configurada.');
 
-        // Obtener idIngreso vinculado a esta venta antes de borrar detalles
-        const ingresoVinculadoRes = await client.query(
-            'SELECT idIngreso FROM detalleventa WHERE idVenta = $1 LIMIT 1',
-            [codVenta]
+        // Restore FEFO lot stock from old details before deleting them
+        const oldDetails = await client.query(
+            'SELECT * FROM detalleventa WHERE idVenta = $1 AND tenant_id = $2',
+            [codVenta, req.tenantId]
         );
-        const idIngresoVinculado = ingresoVinculadoRes.rows[0]?.idingreso || null;
-
-        // Restaurar inventario de los detalles anteriores
-        const oldDetails = await client.query('SELECT * FROM detalleventa WHERE idVenta = $1', [codVenta]);
         for (const d of oldDetails.rows) {
-            if (d.idtelefono) {
-                await client.query("UPDATE telefonos SET estado = 'Disponible' WHERE codigo = $1", [d.idtelefono]);
-            } else if (d.idaccesorio) {
-                await client.query("UPDATE inventario SET cantidad = cantidad + $1 WHERE codInventario = $2", [d.cantidad, d.idaccesorio]);
+            if (d.tipoproducto === 'MEDICAMENTO' && d.cantidad_base_descontada && d.id_lote) {
+                await client.query(
+                    'UPDATE lotes_medicamento SET cantidad_actual = cantidad_actual + $1 WHERE id_lote = $2 AND tenant_id = $3',
+                    [d.cantidad_base_descontada, d.id_lote, req.tenantId]
+                );
             }
         }
-
-        // Eliminar detalles anteriores
-        await client.query('DELETE FROM detalleventa WHERE idVenta = $1', [codVenta]);
-
-        const esKrediya = (tipoCompra === 'KrediYa');
-        const montoIngresoCaja = esKrediya ? Number(montoPrima) : Number(total);
-
-        let totalCostoReal = 0;
-        let descArray = [];
+        await client.query(
+            'DELETE FROM detalleventa WHERE idVenta = $1 AND tenant_id = $2',
+            [codVenta, req.tenantId]
+        );
 
         for (const item of detalles) {
-            if (item.idTelefono) {
-                const tel = await client.query("SELECT marca, modelo, precioCompra FROM telefonos WHERE codigo = $1", [item.idTelefono]);
-                const row = tel.rows[0];
-                totalCostoReal += Number(row?.preciocompra || 0);
-                if (row) descArray.push(`${row.marca} ${row.modelo}`.toUpperCase());
-            } else if (item.idInventario) {
-                const inv = await client.query(`
-                    SELECT i.precioCompra, a.descripcion, c.tipo as categoria
-                    FROM inventario i
-                    JOIN accesorios a ON i.codAccesorio = a.codAccesorio
-                    LEFT JOIN categoria c ON a.codCategoria = c.codCategoria
-                    WHERE i.codInventario = $1
-                `, [item.idInventario]);
-                const row = inv.rows[0];
-                totalCostoReal += (Number(row?.preciocompra || 0) * Number(item.cantidad || 1));
-                if (row) descArray.push(`${row.categoria || ''} ${row.descripcion}`.trim().toUpperCase());
+            if (item.tipoProducto !== 'MEDICAMENTO' || !item.id_medicamento) continue;
+
+            const presR = await client.query(
+                'SELECT factor_conversion FROM presentaciones_venta WHERE id_presentacion = $1 AND tenant_id = $2',
+                [item.id_presentacion, req.tenantId]
+            );
+            const factor = presR.rows[0] ? Number(presR.rows[0].factor_conversion) : 1;
+            const cantidadBase = Number(item.cantidad) * factor;
+
+            const sucursalLotes = item.id_sucursal_origen || idSucursalCaja;
+            const lotesR = await client.query(
+                `SELECT id_lote, cantidad_actual FROM lotes_medicamento
+                 WHERE id_medicamento = $1 AND estado = 'Activo' AND cantidad_actual > 0
+                   AND id_sucursal = $2
+                   AND tenant_id = $3
+                 ORDER BY fecha_vencimiento ASC`,
+                [item.id_medicamento, sucursalLotes, req.tenantId]
+            );
+
+            let remaining = cantidadBase;
+            let primaryLoteId = null;
+            for (const lote of lotesR.rows) {
+                if (remaining <= 0) break;
+                const deduct = Math.min(remaining, Number(lote.cantidad_actual));
+                await client.query(
+                    'UPDATE lotes_medicamento SET cantidad_actual = cantidad_actual - $1 WHERE id_lote = $2 AND tenant_id = $3',
+                    [deduct, lote.id_lote, req.tenantId]
+                );
+                if (!primaryLoteId) primaryLoteId = lote.id_lote;
+                remaining -= deduct;
             }
-        }
+            if (remaining > 0.001) throw new Error(`Stock insuficiente para ${item.descripcionProducto || item.id_medicamento}`);
 
-        const costoIngresoCaja = esKrediya ? Number(montoPrima) : totalCostoReal;
-        const descripcionVenta = descArray.length > 0 ? descArray.join(', ') : `VENTA FACTURA #${codVenta}`;
+            const lineTotal = Number(item.precioVenta) * Number(item.cantidad);
+            const tipoIsv = item.tipoIsv || 'exento';
+            let subExento = 0, subGravado = 0, isvLinea = 0;
+            if (tipoIsv === 'exento') {
+                subExento = lineTotal;
+            } else {
+                const rate = tipoIsv === '18' ? 0.18 : 0.15;
+                subGravado = lineTotal / (1 + rate);
+                isvLinea = lineTotal - subGravado;
+            }
 
-        // Actualizar venta principal
-        await client.query(
-            `UPDATE ventas SET identidadCliente=$1, tipoCompra=$2, total=$3, isv=$4, descuento=$5,
-             monto_prima=$6, monto_financiamiento=$7, monto_financiera=$7, monto_prima_efectivo=$6,
-             es_krediya=$8 WHERE codVenta=$9`,
-            [identidadCliente, tipoCompra, total, isv || 0, descuento || 0, montoPrima || 0, montoFinanciado || 0, esKrediya, codVenta]
-        );
-
-        // Actualizar ingreso asociado usando el idIngreso directo (si existe el vínculo)
-        if (idIngresoVinculado) {
+            const nombreProd = item.descripcionProducto || item.id_medicamento;
+            const codDetalle = await generateNextId('detalleventa', 'codDetalleVenta', 'PROD', client);
             await client.query(
-                `UPDATE ingresos SET descripcion=$1, monto=$2, costo=$3, subtipo_movimiento=$4
-                 WHERE idIngreso=$5`,
-                [descripcionVenta, montoIngresoCaja, costoIngresoCaja, esKrediya ? 'KrediYa_Prima' : 'Venta', idIngresoVinculado]
+                `INSERT INTO detalleventa
+                 (codDetalleVenta, idVenta, producto, cantidad, precioUnitario, tipoProducto,
+                  id_lote, id_presentacion, cantidad_base_descontada, tipo_isv,
+                  subtotal_exento, subtotal_gravado, isv_linea, tenant_id)
+                 VALUES ($1,$2,$3,$4,$5,'MEDICAMENTO',$6,$7,$8,$9,$10,$11,$12,$13)`,
+                [codDetalle, codVenta, nombreProd, item.cantidad, item.precioVenta,
+                 primaryLoteId, item.id_presentacion || null, cantidadBase, tipoIsv,
+                 subExento, subGravado, isvLinea, req.tenantId]
             );
         }
 
-        // Insertar nuevos detalles y actualizar inventario
-        for (const item of detalles) {
-            const codDetalle = await generateNextId('detalleventa', 'codDetalleVenta', 'PROD', client);
+        await client.query(
+            `UPDATE ventas SET identidadCliente=$1, tipoCompra=$2, total=$3, isv=$4, descuento=$5,
+             monto_prima=$6, monto_financiamiento=$7 WHERE codVenta=$8 AND tenant_id=$9`,
+            [identidadCliente, tipoCompra, total, isv || 0, descuento || 0, montoPrima || 0, montoFinanciado || 0, codVenta, req.tenantId]
+        );
 
-            if (item.idTelefono) {
-                // El trigger trg_detalleventa_actualizar_stock actualiza telefonos.estado='Vendido' automáticamente
-                await client.query(`INSERT INTO detalleventa (codDetalleVenta, idVenta, idTelefono, idIngreso, cantidad, precioVenta, estado, tipoProducto) VALUES ($1,$2,$3,$4,1,$5,'Activo','TELEFONO')`, [codDetalle, codVenta, item.idTelefono, idIngresoVinculado, item.precioVenta]);
-            } else if (item.idInventario) {
-                // El trigger trg_detalleventa_actualizar_stock reduce inventario.cantidad automáticamente
-                await client.query(`INSERT INTO detalleventa (codDetalleVenta, idVenta, idAccesorio, idIngreso, cantidad, precioVenta, estado, tipoProducto) VALUES ($1,$2,$3,$4,$5,$6,'Activo','ACCESORIO')`, [codDetalle, codVenta, item.idInventario, idIngresoVinculado, item.cantidad, item.precioVenta]);
-            }
-        }
-
-        await updateArqueoBalance(idCajaActual, client);
+        await updateArqueoBalance(idCajaActual, client, req.tenantId);
         await client.query('COMMIT');
         res.json({ codVenta });
     } catch (err) { await client.query('ROLLBACK'); handleDbError(res, err); } finally { client.release(); }
@@ -351,44 +496,45 @@ router.put('/ventas/:id/anular', authenticateToken, async (req, res) => {
         const { codUsuario } = req.user;
         const motivo = req.body?.motivo || 'Anulada por usuario';
 
+        const isAdmin = ['administrador','admin','superadmin'].includes(String(req.user?.rol||'').toLowerCase());
+        if (!isAdmin && !req.user?.permisos?.includes('ANULAR_VENTA')) {
+            return res.status(403).json({ error: 'Permiso ANULAR_VENTA requerido', code: 'FORBIDDEN' });
+        }
+
         await client.query('BEGIN');
 
-        const vRes = await client.query('SELECT codVenta, idCaja, estado FROM ventas WHERE codVenta = $1', [id]);
+        const vRes = await client.query(
+            'SELECT codVenta, idCaja, estado FROM ventas WHERE codVenta = $1 AND tenant_id = $2',
+            [id, req.tenantId]
+        );
         if (vRes.rows.length === 0) throw new Error('Venta no encontrada');
         if (vRes.rows[0].estado === 'Anulada') throw new Error('La venta ya está anulada');
-
         const idCajaActual = vRes.rows[0].idcaja;
 
-        // Intentar usar SP; si no existe aún, lógica manual
-        const spResult = await anularVenta(id, codUsuario, motivo, client);
+        if (req.tenantId) await client.query("SELECT set_config('app.current_tenant_id', $1, true)", [req.tenantId]);
+        const spResult = await anularVenta(id, codUsuario, motivo, client, req.tenantId);
 
         if (!spResult) {
-            // Fallback manual (SP pendiente de migración)
-            await client.query("UPDATE ventas SET estado = 'Anulada', updated_at = NOW(), updated_by = $2 WHERE codVenta = $1", [id, codUsuario]);
-            const safeId = id.replace(/%/g, '\\%').replace(/_/g, '\\_');
-            await client.query("DELETE FROM ingresos WHERE descripcion LIKE $1 ESCAPE '\\'", [`%FACTURA #${safeId}%`]);
-
-            const details = await client.query('SELECT * FROM detalleventa WHERE idVenta = $1', [id]);
+            // Fallback manual: revert FEFO lot stock
+            await client.query(
+                "UPDATE ventas SET estado = 'Anulada', updated_at = NOW(), updated_by = $2 WHERE codVenta = $1 AND tenant_id = $3",
+                [id, codUsuario, req.tenantId]
+            );
+            const details = await client.query(
+                'SELECT * FROM detalleventa WHERE idVenta = $1 AND tenant_id = $2',
+                [id, req.tenantId]
+            );
             for (const d of details.rows) {
-                if (d.idtelefono) {
-                    await client.query("UPDATE telefonos SET estado = 'Disponible', updated_at = NOW(), updated_by = $2 WHERE codigo = $1", [d.idtelefono, codUsuario]);
-                    // Registrar en kardex si la tabla existe
-                    await client.query(`
-                        INSERT INTO kardex_inventario (tipo_producto, cod_telefono, tipo_movimiento, cantidad, precio_venta, referencia_doc, registrado_por, observaciones)
-                        VALUES ('TELEFONO', $1, 'Devolucion', 1, $2, $3, $4, $5)
-                    `, [d.idtelefono, d.precioventa, id, codUsuario, 'Anulación: ' + motivo]).catch(() => {});
-                }
-                if (d.idaccesorio) {
-                    await client.query("UPDATE inventario SET cantidad = cantidad + $1, updated_at = NOW(), updated_by = $3 WHERE codInventario = $2", [d.cantidad, d.idaccesorio, codUsuario]);
-                    await client.query(`
-                        INSERT INTO kardex_inventario (tipo_producto, cod_inventario, tipo_movimiento, cantidad, precio_venta, referencia_doc, registrado_por, observaciones)
-                        VALUES ('ACCESORIO', $1, 'Devolucion', $2, $3, $4, $5, $6)
-                    `, [d.idaccesorio, d.cantidad, d.precioventa, id, codUsuario, 'Anulación: ' + motivo]).catch(() => {});
+                if (d.tipoproducto === 'MEDICAMENTO' && d.cantidad_base_descontada && d.id_lote) {
+                    await client.query(
+                        'UPDATE lotes_medicamento SET cantidad_actual = cantidad_actual + $1 WHERE id_lote = $2 AND tenant_id = $3',
+                        [d.cantidad_base_descontada, d.id_lote, req.tenantId]
+                    );
                 }
             }
         }
 
-        await updateArqueoBalance(idCajaActual, client);
+        await updateArqueoBalance(idCajaActual, client, req.tenantId);
         await client.query('COMMIT');
         res.json({ message: 'Venta anulada', codVenta: id });
     } catch(e) { await client.query('ROLLBACK'); handleDbError(res, e); } finally { client.release(); }

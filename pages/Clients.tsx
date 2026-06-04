@@ -1,13 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { ClientService } from '../services/api';
-
-// Temporary stub — will be replaced once AIService is exported from api.ts
-const AIService = {
-  diagnoseRepair: async (d: any) => { const r = await fetch('/api/ai/repair-diagnosis', {method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${localStorage.getItem('smartcloud_token')}`},body:JSON.stringify(d)}); return r.json(); },
-  analyzeClient: async (id: any) => { const r = await fetch('/api/ai/client-analysis', {method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${localStorage.getItem('smartcloud_token')}`},body:JSON.stringify({idCliente:id})}); return r.json(); },
-  suggestPrice: async (m: any, p: any) => { const r = await fetch('/api/ai/price-suggestion', {method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${localStorage.getItem('smartcloud_token')}`},body:JSON.stringify({modelo:m,precioCompra:p})}); return r.json(); },
-};
+import { AIService, ClientService } from '../services/api';
 import { Cliente } from '../types';
 import { useOfflineSync } from '../hooks/useOfflineSync';
 import { Search, PlusCircle, Users, Edit2, Trash2, X, RefreshCw } from 'lucide-react';
@@ -93,12 +86,12 @@ const Clients: React.FC = () => {
 
   const handleDelete = async (id: string) => {
     const result = await Swal.fire({
-      title: '¿Eliminar Cliente?',
-      text: "Esta acción no se puede deshacer.",
+      title: 'Â¿Eliminar Cliente?',
+      text: "Esta acciÃ³n no se puede deshacer.",
       icon: 'warning',
       showCancelButton: true,
       confirmButtonColor: '#d33',
-      confirmButtonText: 'Sí, eliminar',
+      confirmButtonText: 'SÃ­, eliminar',
       cancelButtonText: 'Cancelar'
     });
 
@@ -161,8 +154,8 @@ const Clients: React.FC = () => {
               <tr>
                 <th className="p-4">Identidad</th>
                 <th className="p-4">Nombre Completo</th>
-                <th className="p-4">Dirección</th>
-                <th className="p-4">Teléfono</th>
+                <th className="p-4">DirecciÃ³n</th>
+                <th className="p-4">TelÃ©fono</th>
                 <th className="p-4">Correo</th>
                 <th className="p-4 text-center">Acciones</th>
               </tr>
@@ -180,8 +173,8 @@ const Clients: React.FC = () => {
                     <td className="p-4 text-sm text-blue-600">{c.correo}</td>
                     <td className="p-4 text-center">
                       <div className="flex justify-center gap-2">
-                        <button onClick={() => handleAIAnalyze(c.identidad)} disabled={clientAILoading === c.identidad} title="Análisis IA" className="text-[10px] font-black px-2 py-1 rounded-lg bg-indigo-50 text-indigo-600 hover:bg-indigo-100 disabled:opacity-50 transition-all border border-indigo-100 flex items-center gap-1">
-                          {clientAILoading === c.identidad ? <span className="inline-block w-2.5 h-2.5 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"/> : '🤖'}
+                        <button onClick={() => handleAIAnalyze(c.identidad)} disabled={clientAILoading === c.identidad} title="AnÃ¡lisis IA" className="text-[10px] font-black px-2 py-1 rounded-lg bg-indigo-50 text-indigo-600 hover:bg-indigo-100 disabled:opacity-50 transition-all border border-indigo-100 flex items-center gap-1">
+                          {clientAILoading === c.identidad ? <span className="inline-block w-2.5 h-2.5 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"/> : 'ðŸ¤–'}
                           IA
                         </button>
                         <button onClick={() => openEditModal(c)} className="text-blue-500 hover:bg-blue-50 p-1.5 rounded"><Edit2 size={16}/></button>
@@ -266,12 +259,12 @@ const Clients: React.FC = () => {
                 </div>
               </div>
               <div>
-                <label className="text-xs font-bold text-slate-500 uppercase">Dirección</label>
+                <label className="text-xs font-bold text-slate-500 uppercase">DirecciÃ³n</label>
                 <input required className="w-full p-2.5 bg-slate-50 border rounded-lg mt-1" value={form.direccion || ''} onChange={e => setForm({...form, direccion: e.target.value})} />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                   <label className="text-xs font-bold text-slate-500 uppercase">Teléfono</label>
+                   <label className="text-xs font-bold text-slate-500 uppercase">TelÃ©fono</label>
                    <input required className="w-full p-2.5 bg-slate-50 border rounded-lg mt-1" value={form.telefono || ''} onChange={e => setForm({...form, telefono: e.target.value})} />
                 </div>
                 <div>

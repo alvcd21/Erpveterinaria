@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { offlineDB, SyncItem } from '../services/offlineDB';
 import { refreshStaleCaches, warmAllCaches } from '../services/offlineSync';
+import { getAccessToken, getCurrentTenantId } from '../services/authSession';
 
 export interface SyncState {
   isOnline: boolean;
@@ -30,7 +31,8 @@ export function useOnlineStatus() {
 
     setState(prev => ({ ...prev, isSyncing: true, syncError: null }));
 
-    const token = localStorage.getItem('sc_token');
+    const token = getAccessToken();
+    const currentTenantId = getCurrentTenantId();
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       ...(token ? { Authorization: `Bearer ${token}` } : {})
@@ -39,11 +41,18 @@ export function useOnlineStatus() {
     let successCount = 0;
     let failCount = 0;
 
-    for (const item of queue) {
+    // Only replay items that belong to the currently active tenant.
+    // Items from a different tenant stay in the queue until that tenant logs in again.
+    const itemsToProcess = queue.filter(item =>
+      item.tenantId === null || item.tenantId === currentTenantId
+    );
+
+    for (const item of itemsToProcess) {
       try {
         const response = await fetch(item.url, {
           method: item.method,
           headers,
+          credentials: 'include',
           body: item.body ? JSON.stringify(item.body) : undefined
         });
 

@@ -1,12 +1,14 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { ConfigService } from '../services/api';
+import { ConfigService, AIService, AIQuotaStatus } from '../services/api';
 import { EmpresaConfig } from '../types';
-import { Settings, Save, Building2, FileText, AlertCircle, ImageIcon, X, Camera, CheckCircle2, ShieldAlert, Bell, Cloud } from 'lucide-react';
+import { Settings, Save, Building2, FileText, AlertCircle, ImageIcon, X, Camera, CheckCircle2, ShieldAlert, Bell, Cloud, Palette, Sparkles, RefreshCw } from 'lucide-react';
+import { useTheme } from '../context/ThemeContext';
 import { useCameraPermission } from '../hooks/useCameraPermission';
 import Swal from 'sweetalert2';
 
 const CompanyConfig: React.FC = () => {
+  const { theme, updateTheme, presets } = useTheme();
   const logoInputRef = useRef<HTMLInputElement>(null);
   const { state: camState, requestPermission } = useCameraPermission();
   const [camRequesting, setCamRequesting] = useState(false);
@@ -43,10 +45,25 @@ const CompanyConfig: React.FC = () => {
     driveFolderId: '',
   });
   const [loading, setLoading] = useState(false);
+  const [quota, setQuota] = useState<AIQuotaStatus | null>(null);
+  const [quotaLoading, setQuotaLoading] = useState(false);
 
   useEffect(() => {
     loadConfig();
+    loadQuota();
   }, []);
+
+  const loadQuota = async () => {
+    setQuotaLoading(true);
+    try {
+      const data = await AIService.getQuotaStatus();
+      setQuota(data);
+    } catch {
+      // Quota not available (plan sin IA, o tabla aún no migrada)
+    } finally {
+      setQuotaLoading(false);
+    }
+  };
 
   const loadConfig = async () => {
     setLoading(true);
@@ -344,12 +361,231 @@ const CompanyConfig: React.FC = () => {
             </div>
         </div>
 
+        {/* SECCION CUOTA IA */}
+        <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200">
+          <div className="flex items-center justify-between border-b border-slate-100 pb-2 mb-4">
+            <h3 className="font-bold text-lg text-slate-800 flex items-center gap-2">
+              <Sparkles className="text-indigo-600"/> Uso de Inteligencia Artificial
+            </h3>
+            <button type="button" onClick={loadQuota} disabled={quotaLoading}
+              className="text-slate-400 hover:text-indigo-600 transition-colors disabled:opacity-40">
+              <RefreshCw size={16} className={quotaLoading ? 'animate-spin' : ''} />
+            </button>
+          </div>
+          {quota ? (
+            <div className="space-y-4">
+              {/* Estado y plan */}
+              <div className="flex items-center gap-3 flex-wrap">
+                <span className="text-xs font-bold uppercase px-2.5 py-1 rounded-full bg-indigo-100 text-indigo-700">
+                  Plan {quota.plan}
+                </span>
+                {quota.estado === 'deshabilitado' && (
+                  <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-slate-100 text-slate-600">IA deshabilitada</span>
+                )}
+                {quota.estado === 'agotado' && (
+                  <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-red-100 text-red-700">Cuota agotada</span>
+                )}
+                {quota.estado === 'alerta' && (
+                  <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-amber-100 text-amber-700">Cuota al {quota.pct_tokens_usado}%</span>
+                )}
+                {quota.estado === 'ok' && (
+                  <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-700">Cuota disponible</span>
+                )}
+                <span className="text-xs text-slate-400">{quota.periodo}</span>
+              </div>
+
+              {/* Barra de tokens */}
+              <div>
+                <div className="flex justify-between text-xs text-slate-500 mb-1">
+                  <span>Tokens usados este mes</span>
+                  <span className="font-medium text-slate-700">
+                    {Number(quota.tokens_consumidos).toLocaleString()} / {Number(quota.tokens_limite).toLocaleString()}
+                  </span>
+                </div>
+                <div className="w-full h-3 rounded-full bg-slate-100 overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all ${
+                      quota.pct_tokens_usado >= 100 ? 'bg-red-500' :
+                      quota.pct_tokens_usado >= 80  ? 'bg-amber-500' :
+                      'bg-indigo-500'
+                    }`}
+                    style={{ width: `${Math.min(quota.pct_tokens_usado, 100)}%` }}
+                  />
+                </div>
+                <p className="text-xs text-slate-400 mt-0.5 text-right">{quota.pct_tokens_usado}% utilizado</p>
+              </div>
+
+              {/* Requests */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="bg-slate-50 rounded-xl p-3">
+                  <p className="text-xs text-slate-500 mb-0.5">Solicitudes este mes</p>
+                  <p className="text-base font-bold text-slate-800">
+                    {Number(quota.requests_totales).toLocaleString()}
+                    <span className="text-xs font-normal text-slate-400"> / {Number(quota.requests_limite).toLocaleString()}</span>
+                  </p>
+                </div>
+                <div className="bg-slate-50 rounded-xl p-3">
+                  <p className="text-xs text-slate-500 mb-0.5">Solicitudes hoy</p>
+                  <p className="text-base font-bold text-slate-800">
+                    {Number(quota.requests_hoy)}
+                    <span className="text-xs font-normal text-slate-400"> / {Number(quota.req_diario_limite)} diario</span>
+                  </p>
+                </div>
+              </div>
+
+              {/* Procesos habilitados */}
+              {Array.isArray(quota.procesos_habilitados) && quota.procesos_habilitados.length > 0 && (
+                <div>
+                  <p className="text-xs font-bold text-slate-500 uppercase mb-2">Funciones de IA incluidas</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {quota.procesos_habilitados.map(p => (
+                      <span key={p} className="text-xs px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded-full font-medium">
+                        {p.replace(/_/g, ' ')}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {(quota.estado === 'agotado' || quota.estado === 'alerta') && (
+                <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-800">
+                  <AlertCircle size={15} className="shrink-0 mt-0.5"/>
+                  <span>
+                    {quota.estado === 'agotado'
+                      ? 'Has agotado tu cuota de IA para este mes. Las funciones de IA no estarán disponibles hasta el próximo período. Contacta a soporte para ampliar tu plan.'
+                      : 'Estás cerca del límite mensual de IA. Considera optimizar el uso o contactar a soporte para ampliar tu plan.'}
+                  </span>
+                </div>
+              )}
+            </div>
+          ) : (
+            <p className="text-sm text-slate-400">
+              {quotaLoading ? 'Cargando estado de cuota...' : 'Información de cuota no disponible.'}
+            </p>
+          )}
+        </div>
+
         <div className="flex justify-end pt-4">
             <button type="submit" className="bg-emerald-600 hover:bg-emerald-700 text-white px-8 py-3 rounded-xl font-bold shadow-lg shadow-emerald-600/20 transition-all flex items-center gap-2">
                 <Save size={20}/> Guardar Cambios
             </button>
         </div>
       </form>
+
+      {/* SECCION APARIENCIA */}
+      <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200">
+        <h3 className="font-bold text-lg text-slate-800 mb-1 flex items-center gap-2 border-b border-slate-100 pb-2">
+          <Palette className="text-indigo-600"/> Apariencia de la Plataforma
+        </h3>
+        <p className="text-xs text-slate-500 mb-5">Personaliza el nombre y los colores del ERP. Los cambios son inmediatos y se guardan en este navegador.</p>
+
+        <div className="space-y-6">
+          {/* Nombre de la app */}
+          <div>
+            <label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Nombre que aparece en el menú lateral</label>
+            <input
+              className="w-full max-w-xs p-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none"
+              value={theme.appName}
+              onChange={e => updateTheme({ appName: e.target.value })}
+              placeholder="ERP Farmacia"
+            />
+          </div>
+
+          {/* Presets */}
+          <div>
+            <label className="text-xs font-bold text-slate-500 uppercase mb-3 block">Tema de Color</label>
+            <div className="flex flex-wrap gap-3">
+              {presets.map(p => (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => updateTheme({ primaryHex: p.primaryHex, sidebarHex: p.sidebarHex, presetId: p.id })}
+                  className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border-2 transition-all text-sm font-medium ${
+                    theme.presetId === p.id
+                      ? 'border-indigo-500 bg-slate-50 shadow-md text-slate-800'
+                      : 'border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50'
+                  }`}
+                >
+                  <span className="w-4 h-4 rounded-full border border-black/10 shrink-0" style={{ backgroundColor: p.primaryHex }} />
+                  {p.name}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Colores personalizados */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t border-slate-100">
+            <div>
+              <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">Color Principal (botones y activos)</label>
+              <div className="flex items-center gap-3">
+                <input
+                  type="color"
+                  className="w-11 h-11 rounded-lg border border-slate-200 cursor-pointer p-1 shrink-0"
+                  value={theme.primaryHex}
+                  onChange={e => updateTheme({ primaryHex: e.target.value, presetId: 'custom' })}
+                />
+                <input
+                  type="text"
+                  className="flex-1 p-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none font-mono text-sm"
+                  value={theme.primaryHex}
+                  onChange={e => {
+                    if (/^#[0-9a-fA-F]{6}$/.test(e.target.value))
+                      updateTheme({ primaryHex: e.target.value, presetId: 'custom' });
+                  }}
+                  maxLength={7}
+                  placeholder="#4f46e5"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">Color Sidebar (fondo del menú)</label>
+              <div className="flex items-center gap-3">
+                <input
+                  type="color"
+                  className="w-11 h-11 rounded-lg border border-slate-200 cursor-pointer p-1 shrink-0"
+                  value={theme.sidebarHex}
+                  onChange={e => updateTheme({ sidebarHex: e.target.value, presetId: 'custom' })}
+                />
+                <input
+                  type="text"
+                  className="flex-1 p-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none font-mono text-sm"
+                  value={theme.sidebarHex}
+                  onChange={e => {
+                    if (/^#[0-9a-fA-F]{6}$/.test(e.target.value))
+                      updateTheme({ sidebarHex: e.target.value, presetId: 'custom' });
+                  }}
+                  maxLength={7}
+                  placeholder="#0f172a"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Vista previa inline */}
+          <div className="mt-2 rounded-xl overflow-hidden border border-slate-200 shadow-sm flex h-14">
+            <div className="w-40 flex items-center gap-2 px-3 shrink-0" style={{ backgroundColor: theme.sidebarHex }}>
+              <span className="w-6 h-6 rounded-lg flex items-center justify-center shrink-0" style={{ backgroundColor: theme.primaryHex }}>
+                <span className="text-white text-xs font-bold">+</span>
+              </span>
+              <span className="text-white text-xs font-semibold truncate">{theme.appName}</span>
+            </div>
+            <div className="flex-1 bg-white flex items-center px-4 gap-3">
+              <span className="px-3 py-1 rounded-lg text-white text-xs font-bold" style={{ backgroundColor: theme.primaryHex }}>Guardar</span>
+              <span className="text-xs font-semibold" style={{ color: theme.primaryHex }}>Enlace activo</span>
+            </div>
+          </div>
+
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={() => updateTheme({ primaryHex: '#4f46e5', sidebarHex: '#0f172a', appName: 'ERP Farmacia', presetId: 'indigo' })}
+              className="text-slate-500 hover:text-slate-700 text-sm font-medium flex items-center gap-1 border border-slate-200 px-4 py-2 rounded-lg hover:bg-slate-50 transition-colors"
+            >
+              Restaurar predeterminado
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 };

@@ -6,6 +6,7 @@
  */
 
 import { offlineDB } from './offlineDB';
+import { getAccessToken, getCurrentTenantId, getStoredUser } from './authSession';
 
 const CACHE_TTL_MASTER  = 24 * 60 * 60 * 1000; // 24h — datos maestros (categorías, roles, etc.)
 const CACHE_TTL_TRANSAC =       60 * 60 * 1000; // 1h  — datos transaccionales (ventas, reparaciones)
@@ -14,49 +15,61 @@ interface WarmEndpoint {
   key: string;
   url: string;
   ttl: number;
+  permission?: string;
 }
+
+const API_ORIGIN = (() => {
+  if (typeof window !== 'undefined' && window.location.hostname === 'localhost' && window.location.port === '5173') {
+    return 'http://localhost:3000';
+  }
+  return '';
+})();
 
 // Lista completa de endpoints de lectura que necesitan estar disponibles offline
 export const WARM_ENDPOINTS: WarmEndpoint[] = [
-  // POS e Inventario
-  { key: 'cache:/productos/unificados',        url: '/api/productos/unificados',          ttl: CACHE_TTL_TRANSAC },
-  { key: 'cache:/inventory/telefonos',         url: '/api/inventory/telefonos',           ttl: CACHE_TTL_TRANSAC },
-  { key: 'cache:/inventory/stock',             url: '/api/inventory/stock',               ttl: CACHE_TTL_TRANSAC },
-  { key: 'cache:/inventory/accesorios-master', url: '/api/inventory/accesorios-master',   ttl: CACHE_TTL_MASTER  },
-  { key: 'cache:/inventory/categorias',        url: '/api/inventory/categorias',          ttl: CACHE_TTL_MASTER  },
-  { key: 'cache:/inventory/ubicaciones',       url: '/api/inventory/ubicaciones',         ttl: CACHE_TTL_MASTER  },
-  // Clientes
-  { key: 'cache:/clientes',                    url: '/api/clientes',                      ttl: CACHE_TTL_TRANSAC },
-  // Servicios post-venta
-  { key: 'cache:/reparaciones',                url: '/api/reparaciones',                  ttl: CACHE_TTL_TRANSAC },
-  { key: 'cache:/garantias',                   url: '/api/garantias',                     ttl: CACHE_TTL_TRANSAC },
-  { key: 'cache:/consignaciones',              url: '/api/consignaciones',                ttl: CACHE_TTL_TRANSAC },
+  // Farmacia — catálogo y ventas
+  { key: 'cache:/medicamentos',                url: '/api/medicamentos',                  ttl: CACHE_TTL_TRANSAC, permission: 'VER_INVENTARIO' },
+  { key: 'cache:/productos/unificados',        url: '/api/productos/unificados',          ttl: CACHE_TTL_TRANSAC, permission: 'VER_POS' },
+  // Clientes y proveedores
+  { key: 'cache:/clientes',                    url: '/api/clientes',                      ttl: CACHE_TTL_TRANSAC, permission: 'VER_CLIENTES' },
+  { key: 'cache:/proveedores',                 url: '/api/proveedores',                   ttl: CACHE_TTL_MASTER,  permission: 'VER_PROVEEDORES' },
   // Finanzas
-  { key: 'cache:/arqueo/active',               url: '/api/arqueo/active',                 ttl: CACHE_TTL_TRANSAC },
-  { key: 'cache:/saldos/today',                url: '/api/saldos/today',                  ttl: CACHE_TTL_TRANSAC },
+  { key: 'cache:/arqueo/active',               url: '/api/arqueo/active',                 ttl: CACHE_TTL_TRANSAC, permission: 'VER_CAJA' },
   // Datos maestros
-  { key: 'cache:/proveedores',                 url: '/api/proveedores',                   ttl: CACHE_TTL_MASTER  },
-  { key: 'cache:/paquetes',                    url: '/api/paquetes',                      ttl: CACHE_TTL_MASTER  },
-  { key: 'cache:/costos',                      url: '/api/costos',                        ttl: CACHE_TTL_MASTER  },
   { key: 'cache:/config',                      url: '/api/config',                        ttl: CACHE_TTL_MASTER  },
-  { key: 'cache:/labels',                      url: '/api/labels',                        ttl: CACHE_TTL_MASTER  },
+  { key: 'cache:/labels',                      url: '/api/labels',                        ttl: CACHE_TTL_MASTER,  permission: 'DISEÃ‘AR_ETIQUETAS' },
   // Admin
-  { key: 'cache:/roles',                       url: '/api/roles',                         ttl: CACHE_TTL_MASTER  },
-  { key: 'cache:/permisos',                    url: '/api/permisos',                      ttl: CACHE_TTL_MASTER  },
-  { key: 'cache:/cajas',                       url: '/api/cajas',                         ttl: CACHE_TTL_MASTER  },
-  { key: 'cache:/empleados',                   url: '/api/empleados',                     ttl: CACHE_TTL_MASTER  },
-  { key: 'cache:/users',                       url: '/api/users',                         ttl: CACHE_TTL_MASTER  },
+  { key: 'cache:/roles',                       url: '/api/roles',                         ttl: CACHE_TTL_MASTER,  permission: 'GESTIONAR_ROLES' },
+  { key: 'cache:/cajas',                       url: '/api/cajas',                         ttl: CACHE_TTL_MASTER,  permission: 'GESTIONAR_PANEL_CAJAS' },
+  { key: 'cache:/empleados',                   url: '/api/empleados',                     ttl: CACHE_TTL_MASTER,  permission: 'GESTIONAR_USUARIOS' },
+  { key: 'cache:/users',                       url: '/api/users',                         ttl: CACHE_TTL_MASTER,  permission: 'GESTIONAR_USUARIOS' },
 ];
 
+function tenantCacheKey(key: string): string {
+  const tenantId = getCurrentTenantId();
+  return tenantId ? `cache:t:${tenantId}:${key.replace(/^cache:/, '')}` : key;
+}
+
+function hasPermission(permission?: string): boolean {
+  if (!permission) return true;
+  const user = getStoredUser();
+  if (!user) return false;
+  const role = String(user.rol || '').toLowerCase();
+  if (role === 'administrador' || role === 'admin' || role === 'superadmin') return true;
+  return Array.isArray(user.permisos) && user.permisos.includes(permission);
+}
+
 async function fetchAndCache(ep: WarmEndpoint): Promise<void> {
-  const token = localStorage.getItem('sc_token');
+  if (!hasPermission(ep.permission)) return;
+  const token = getAccessToken();
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (token) headers['Authorization'] = `Bearer ${token}`;
   try {
-    const res = await fetch(ep.url, { headers });
+    const url = ep.url.startsWith('/api') ? `${API_ORIGIN}${ep.url}` : ep.url;
+    const res = await fetch(url, { headers, credentials: 'include' });
     if (res.ok) {
       const data = await res.json();
-      await offlineDB.cacheData(ep.key, data);
+      await offlineDB.cacheData(tenantCacheKey(ep.key), data);
     }
   } catch {
     // Silencioso — si no hay red, simplemente no cachea
@@ -83,7 +96,7 @@ export async function refreshStaleCaches(): Promise<void> {
   if (!navigator.onLine) return;
   const checks = await Promise.all(
     WARM_ENDPOINTS.map(async ep => {
-      const age = await offlineDB.getCacheAge(ep.key);
+      const age = await offlineDB.getCacheAge(tenantCacheKey(ep.key));
       return age === null || age > ep.ttl ? ep : null;
     })
   );

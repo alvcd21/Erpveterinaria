@@ -1,233 +1,280 @@
 
-const Anthropic = require('@anthropic-ai/sdk');
+// IA con OpenAI (ChatGPT) — funciones farmacéuticas
+const OpenAI = require('openai');
 
-const MODEL = 'claude-haiku-4-5-20251001';
+const MODEL = 'gpt-4o-mini';
 
 let _client = null;
 
 function getClient() {
-  if (!_client) {
-    _client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-  }
-  return _client;
+    if (!_client) {
+        if (!process.env.OPENAI_API_KEY) {
+            throw new Error('OPENAI_API_KEY no está configurada');
+        }
+        _client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    }
+    return _client;
 }
 
-async function callClaude(systemPrompt, userPrompt) {
-  const client = getClient();
-  const response = await client.messages.create({
-    model: MODEL,
-    max_tokens: 1024,
-    system: systemPrompt,
-    messages: [{ role: 'user', content: userPrompt }],
-  });
-  return response.content[0].text;
+async function callAI(systemPrompt, userPrompt, maxTokens = 1200) {
+    const client = getClient();
+    const response = await client.chat.completions.create({
+        model: MODEL,
+        messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt }
+        ],
+        max_tokens: maxTokens,
+        temperature: 0.3,
+        response_format: { type: 'json_object' }
+    });
+    return response.choices[0].message.content;
 }
 
 function parseJson(text, fallback) {
-  try {
-    const match = text.match(/```json\s*([\s\S]*?)```/) || text.match(/\{[\s\S]*\}/);
-    const raw = match ? (match[1] || match[0]) : text;
-    return JSON.parse(raw.trim());
-  } catch {
-    return fallback;
-  }
+    try {
+        return JSON.parse(text);
+    } catch {
+        try {
+            const match = text.match(/\{[\s\S]*\}/);
+            return match ? JSON.parse(match[0]) : fallback;
+        } catch {
+            return fallback;
+        }
+    }
 }
 
-async function diagnoseRepair(deviceDesc, issueDescription, repairHistory = []) {
-  try {
-    const systemPrompt =
-      'Eres un asistente experto en técnica de teléfonos móviles para un taller de reparación en Honduras. Responde en español. Sé conciso y práctico.';
+/**
+ * Recomendar medicamentos OTC según síntomas del cliente.
+ * Consulta el inventario disponible y solo recomienda productos en stock.
+ */
+async function recommendBySintomas(sintomasData, inventarioDisponible = []) {
+    try {
+        const inventarioText = inventarioDisponible.length > 0
+            ? inventarioDisponible.map(m => `- ${m.nombre_generico}${m.nombre_comercial ? ` / ${m.nombre_comercial}` : ''} (${m.concentracion || ''}) [Stock: ${m.stock}]`).join('\n')
+            : 'Sin inventario disponible';
 
-    const historyText = repairHistory.length > 0
-      ? `\nHistorial de reparaciones similares:\n${repairHistory.map(r =>
-          `- ${r.marca || ''} ${r.modelo || ''}: ${r.descripcion_falla || ''} — ${r.estado_reparacion || ''}`
-        ).join('\n')}`
-      : '';
+        const systemPrompt = `Eres un asistente farmacéutico de Honduras.
+Tu función es sugerir medicamentos OTC (de venta libre, sin receta) para síntomas comunes.
+REGLAS ESTRICTAS:
+- SOLO recomienda medicamentos que NO requieran receta médica
+- SOLO recomienda productos del inventario disponible que se te proporcione
+- Siempre advierte que esto NO reemplaza consulta médica
+- Si los síntomas sugieren urgencia o gravedad, recomienda ir al médico
+- Considera alergias y medicamentos actuales del paciente
+- Responde siempre en español
+- Responde ÚNICAMENTE con el JSON especificado, sin texto adicional`;
 
-    const userPrompt = `Diagnóstica el siguiente problema de reparación y responde ÚNICAMENTE con un objeto JSON válido sin bloques de código markdown.
+        // Sanitize inputs before sending to AI — no patient identity, cap lengths
+        const sanitize = (s) => String(s || '').replace(/[^\w\s,áéíóúñÁÉÍÓÚÑ.-]/gi, '').substring(0, 100);
+        const sintomas    = (sintomasData.sintomas || []).slice(0, 10).map(sanitize);
+        const alergias    = (sintomasData.alergias || []).slice(0, 20).map(sanitize);
+        const medicActuales = (sintomasData.medicamentos_actuales || []).slice(0, 20).map(sanitize);
+        const condiciones = sanitize(sintomasData.condiciones_cronicas).substring(0, 300);
 
-Equipo: ${deviceDesc}
-Problema reportado: ${issueDescription}${historyText}
+        const userPrompt = `Paciente con síntomas: ${sintomas.join(', ')}.
+Edad aproximada: ${sintomasData.edad || 'desconocida'} años.
+${sintomasData.embarazada ? 'IMPORTANTE: EMBARAZADA - evitar medicamentos teratogénicos.' : ''}
+Alergias conocidas: ${alergias.join(', ') || 'ninguna conocida'}.
+Medicamentos actuales: ${medicActuales.join(', ') || 'ninguno'}.
+Condiciones crónicas: ${condiciones || 'ninguna conocida'}.
+
+Inventario disponible en la farmacia:
+${inventarioText}
 
 Responde con este JSON exacto:
 {
-  "causasProbables": ["causa1", "causa2"],
-  "partesNecesarias": ["parte1", "parte2"],
-  "tiempoEstimado": "X horas/días",
-  "precioSugerido": { "min": 0, "max": 0 },
-  "observaciones": "texto"
+  "recomendaciones": [
+    {
+      "nombre": "nombre del medicamento",
+      "razon": "por qué se recomienda para estos síntomas",
+      "dosis_sugerida": "dosis y frecuencia aproximada",
+      "advertencias": ["advertencia1", "advertencia2"],
+      "prioridad": 1
+    }
+  ],
+  "advertencia_general": "mensaje al farmacéutico",
+  "requiere_medico": false,
+  "motivo_medico": "si requiere médico, explicar por qué"
 }`;
 
-    const text = await callClaude(systemPrompt, userPrompt);
-    const result = parseJson(text, null);
-    if (!result) {
-      return {
-        causasProbables: ['No se pudo analizar'],
-        partesNecesarias: [],
-        tiempoEstimado: 'Indeterminado',
-        precioSugerido: { min: 0, max: 0 },
-        observaciones: text,
-      };
+        const text = await callAI(systemPrompt, userPrompt);
+        const result = parseJson(text, null);
+        if (!result) {
+            return { recomendaciones: [], advertencia_general: text, requiere_medico: false };
+        }
+        return result;
+    } catch (err) {
+        console.error('[aiService] error:', err.code || err.status || 'unknown');
+        return { error: 'IA no disponible' };
     }
-    return result;
-  } catch (err) {
-    return { error: 'AI no disponible', details: err.message };
-  }
 }
 
+/**
+ * Verificar interacciones medicamentosas entre el medicamento nuevo y los actuales del paciente.
+ */
+async function analyzeInteractions(medicamentoNuevo, medicamentosActuales = [], alergias = []) {
+    try {
+        if (medicamentosActuales.length === 0 && alergias.length === 0) {
+            return { interacciones: [], nivel_riesgo: 'bajo', mensaje: 'Sin medicamentos actuales registrados para verificar.' };
+        }
+
+        const systemPrompt = `Eres un farmacéutico clínico experto en interacciones medicamentosas.
+Analiza si el medicamento nuevo puede interactuar con los actuales del paciente.
+Responde solo con el JSON especificado, en español.`;
+
+        const userPrompt = `Medicamento NUEVO a dispensar: ${medicamentoNuevo}
+Medicamentos ACTUALES del paciente: ${medicamentosActuales.join(', ') || 'ninguno'}
+Alergias conocidas: ${alergias.join(', ') || 'ninguna'}
+
+Responde con este JSON exacto:
+{
+  "interacciones": [
+    {
+      "medicamento_involucrado": "nombre",
+      "descripcion": "descripción de la interacción",
+      "nivel_severidad": "leve|moderada|grave",
+      "recomendacion": "qué hacer"
+    }
+  ],
+  "nivel_riesgo_global": "bajo|moderado|alto",
+  "alerta_alergia": false,
+  "descripcion_alergia": null,
+  "mensaje_farmaceutico": "resumen para el farmacéutico"
+}`;
+
+        const text = await callAI(systemPrompt, userPrompt);
+        const result = parseJson(text, null);
+        if (!result) {
+            return { interacciones: [], nivel_riesgo_global: 'desconocido', mensaje_farmaceutico: text };
+        }
+        return result;
+    } catch (err) {
+        console.error('[aiService] error:', err.code || err.status || 'unknown');
+        return { error: 'IA no disponible' };
+    }
+}
+
+/**
+ * Analizar cliente farmacéutico: historial de compras, medicamentos frecuentes, oportunidades.
+ */
 async function analyzeClient(clientData) {
-  try {
-    const systemPrompt =
-      'Eres un analista CRM experto para una tienda de teléfonos hondureña. Responde en español. Sé amigable y orientado a la acción.';
+    try {
+        const systemPrompt = `Eres un analista CRM para una farmacia en Honduras.
+Analiza el historial del cliente y sugiere acciones de fidelización.
+Responde solo con el JSON especificado, en español.`;
 
-    const userPrompt = `Analiza este cliente y responde ÚNICAMENTE con un objeto JSON válido sin bloques de código markdown.
+        // Pseudonymize: remove patient name and detailed purchase items before sending to AI
+        const categoriasCompra = (clientData.compras || [])
+            .slice(0, 20)
+            .map(c => c.medicamento || 'producto')
+            .reduce((acc, m) => { acc[m] = (acc[m] || 0) + 1; return acc; }, {});
 
-Cliente: ${clientData.nombre}
-Total gastado: L ${clientData.totalGastado || 0}
+        const userPrompt = `Total gastado: L ${clientData.totalGastado || 0}
 Promedio por compra: L ${clientData.promedioCompra || 0}
-Frecuencia: ${clientData.frecuencia || 'desconocida'}
-Compras recientes: ${JSON.stringify(clientData.compras || [])}
-Reparaciones: ${JSON.stringify(clientData.reparaciones || [])}
+Frecuencia de visitas: ${clientData.frecuencia || 'desconocida'}
+Categorías de productos frecuentes: ${JSON.stringify(categoriasCompra)}
+Tiene condiciones crónicas registradas: ${clientData.condiciones_cronicas ? 'Sí' : 'No'}
+Es adulto mayor (≥60): ${clientData.es_adulto_mayor ? 'Sí (aplica 25% descuento)' : 'No'}
 
 Responde con este JSON exacto:
 {
   "resumen": "texto",
-  "perfilCliente": "texto",
-  "sugerenciaAccion": "texto",
-  "valorEstimadoFuturo": "texto"
+  "perfil_cliente": "texto",
+  "medicamentos_frecuentes": ["med1", "med2"],
+  "sugerencia_accion": "texto",
+  "valor_estimado_futuro": "texto",
+  "recordatorio_descuento": "texto si aplica descuento tercera edad"
 }`;
 
-    const text = await callClaude(systemPrompt, userPrompt);
-    const result = parseJson(text, null);
-    if (!result) {
-      return {
-        resumen: text,
-        perfilCliente: 'No determinado',
-        sugerenciaAccion: 'Revisar manualmente',
-        valorEstimadoFuturo: 'No determinado',
-      };
+        const text = await callAI(systemPrompt, userPrompt);
+        const result = parseJson(text, null);
+        if (!result) {
+            return { resumen: text, perfil_cliente: 'No determinado', sugerencia_accion: 'Revisar manualmente' };
+        }
+        return result;
+    } catch (err) {
+        console.error('[aiService] error:', err.code || err.status || 'unknown');
+        return { error: 'IA no disponible' };
     }
-    return result;
-  } catch (err) {
-    return { error: 'AI no disponible', details: err.message };
-  }
 }
 
-async function suggestPrice(deviceModel, purchasePrice, historicalSales = []) {
-  try {
-    const systemPrompt =
-      'Eres un experto en pricing de teléfonos móviles para el mercado hondureño. Responde en español.';
-
-    const salesText = historicalSales.length > 0
-      ? historicalSales.map(s => `${s.modelo}: L${s.precioVenta} (${s.fecha})`).join(', ')
-      : 'Sin historial disponible';
-
-    const userPrompt = `Sugiere un precio de venta y responde ÚNICAMENTE con un objeto JSON válido sin bloques de código markdown.
-
-Modelo: ${deviceModel}
-Precio de compra: L ${purchasePrice}
-Ventas históricas de modelos similares: ${salesText}
-
-Responde con este JSON exacto:
-{
-  "precioSugerido": 0,
-  "margenEsperado": 0,
-  "justificacion": "texto",
-  "rangoRecomendado": { "min": 0, "max": 0 }
-}`;
-
-    const text = await callClaude(systemPrompt, userPrompt);
-    const result = parseJson(text, null);
-    if (!result) {
-      return {
-        precioSugerido: purchasePrice * 1.25,
-        margenEsperado: 25,
-        justificacion: text,
-        rangoRecomendado: { min: purchasePrice * 1.15, max: purchasePrice * 1.35 },
-      };
-    }
-    return result;
-  } catch (err) {
-    return { error: 'AI no disponible', details: err.message };
-  }
-}
-
+/**
+ * Detectar anomalías en el cierre de caja.
+ */
 async function detectCashAnomaly(arqueoData, historicalArqueos = []) {
-  try {
-    const systemPrompt =
-      'Eres un auditor financiero experto en detección de anomalías para tiendas minoristas hondureñas. Responde en español.';
+    try {
+        const systemPrompt = `Eres un auditor financiero para farmacias en Honduras.
+Detecta anomalías en el cierre de caja comparando con el histórico.
+Responde solo con el JSON especificado.`;
 
-    const userPrompt = `Analiza este arqueo de caja y detecta anomalías. Responde ÚNICAMENTE con un objeto JSON válido sin bloques de código markdown.
-
-Arqueo actual:
-- Fecha: ${arqueoData.fecha}
+        const userPrompt = `Arqueo actual:
 - Monto inicial: L ${arqueoData.montoInicial}
 - Total ventas: L ${arqueoData.totalVentas}
 - Total egresos: L ${arqueoData.totalEgresos}
 - Ganancia: L ${arqueoData.ganancia}
 
-Resumen histórico (últimos ${historicalArqueos.length} arqueos):
+Histórico (últimos ${historicalArqueos.length} cierres):
 ${historicalArqueos.slice(0, 5).map(a =>
-  `- ${a.fecha}: ventas L${a.totalventas || a.totalVentas || 0}, ganancia L${a.ganancia || 0}`
+    `- Ventas L${a.totalventas || 0}, Ganancia L${a.ganancia || 0}`
 ).join('\n')}
 
 Responde con este JSON exacto:
 {
-  "esAnomal": false,
-  "nivelRiesgo": "bajo",
+  "es_anomal": false,
+  "nivel_riesgo": "bajo",
   "observaciones": "texto",
   "recomendacion": "texto"
 }`;
 
-    const text = await callClaude(systemPrompt, userPrompt);
-    const result = parseJson(text, null);
-    if (!result) {
-      return {
-        esAnomal: false,
-        nivelRiesgo: 'bajo',
-        observaciones: text,
-        recomendacion: 'Revisar manualmente',
-      };
+        const text = await callAI(systemPrompt, userPrompt);
+        const result = parseJson(text, null);
+        if (!result) {
+            return { es_anomal: false, nivel_riesgo: 'bajo', observaciones: text, recomendacion: 'Revisar manualmente' };
+        }
+        return result;
+    } catch (err) {
+        console.error('[aiService] error:', err.code || err.status || 'unknown');
+        return { error: 'IA no disponible' };
     }
-    return result;
-  } catch (err) {
-    return { error: 'AI no disponible', details: err.message };
-  }
 }
 
-async function predictRechargeNeeds(red, historicalData = []) {
-  try {
-    const systemPrompt =
-      'Eres un experto en gestión de saldos de recargas telefónicas en Honduras (Tigo y Claro). Responde en español.';
+/**
+ * Predecir necesidades de reabastecimiento basado en historial de ventas.
+ */
+async function predictRestock(medicamento, historialVentas = []) {
+    try {
+        const systemPrompt = `Eres un experto en gestión de inventario farmacéutico en Honduras.
+Predice cuánto stock pedir basándote en el historial de ventas.
+Responde solo con el JSON especificado.`;
 
-    const userPrompt = `Predice las necesidades de recarga y responde ÚNICAMENTE con un objeto JSON válido sin bloques de código markdown.
+        const userPrompt = `Medicamento: ${medicamento.nombre_generico} (${medicamento.concentracion || ''})
+Stock actual: ${medicamento.stockActual || 0} unidades base
+Stock mínimo: ${medicamento.stock_minimo || 0}
+Punto de reorden: ${medicamento.punto_reorden || 0}
 
-Red: ${red}
-Datos de consumo diario (últimos ${historicalData.length} días):
-${historicalData.map(d => `- ${d.fecha}: consumo L${d.consumo || 0}`).join('\n')}
+Historial de ventas (últimos ${historialVentas.length} registros):
+${historialVentas.map(v => `- Fecha: ${v.fecha}, Cantidad: ${v.cantidad}`).join('\n') || 'Sin historial disponible'}
 
 Responde con este JSON exacto:
 {
-  "cantidadSugerida": 0,
+  "cantidad_sugerida": 0,
+  "dias_stock_actual": 0,
+  "frecuencia_pedido_sugerida": "semanal|quincenal|mensual",
   "justificacion": "texto",
-  "diasAltoConsumo": ["lunes", "viernes"],
   "alertas": ["alerta1"]
 }`;
 
-    const text = await callClaude(systemPrompt, userPrompt);
-    const result = parseJson(text, null);
-    if (!result) {
-      return {
-        cantidadSugerida: 0,
-        justificacion: text,
-        diasAltoConsumo: [],
-        alertas: [],
-      };
+        const text = await callAI(systemPrompt, userPrompt);
+        const result = parseJson(text, null);
+        if (!result) {
+            return { cantidad_sugerida: 0, justificacion: text, alertas: [] };
+        }
+        return result;
+    } catch (err) {
+        console.error('[aiService] error:', err.code || err.status || 'unknown');
+        return { error: 'IA no disponible' };
     }
-    return result;
-  } catch (err) {
-    return { error: 'AI no disponible', details: err.message };
-  }
 }
 
-module.exports = { diagnoseRepair, analyzeClient, suggestPrice, detectCashAnomaly, predictRechargeNeeds };
+module.exports = { recommendBySintomas, analyzeInteractions, analyzeClient, detectCashAnomaly, predictRestock };
