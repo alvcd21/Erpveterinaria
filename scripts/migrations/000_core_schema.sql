@@ -52,6 +52,359 @@ CREATE TABLE IF NOT EXISTS configuracion (
     mensajefinal     TEXT
 );
 
+-- Bootstrap legacy ERP tables before the idempotent ALTER/INDEX blocks below.
+-- Fresh Render databases do not have the original pharmacy schema yet.
+CREATE TABLE IF NOT EXISTS sucursales (
+    id_sucursal      SERIAL PRIMARY KEY,
+    codigo           VARCHAR(10),
+    nombre           VARCHAR(100) NOT NULL DEFAULT 'Sucursal Principal',
+    direccion        TEXT,
+    telefono         VARCHAR(20),
+    ciudad           VARCHAR(60),
+    regente_farmacia VARCHAR(100),
+    numero_licencia  VARCHAR(50),
+    estado           VARCHAR(20) DEFAULT 'Activa',
+    created_at       TIMESTAMPTZ DEFAULT NOW(),
+    tenant_id        UUID
+);
+
+CREATE TABLE IF NOT EXISTS empleado (
+    identidad     VARCHAR(20) PRIMARY KEY,
+    nombre        VARCHAR(100) NOT NULL DEFAULT '',
+    apellido      VARCHAR(100),
+    direccion     TEXT,
+    telefono      VARCHAR(20),
+    correo        VARCHAR(100),
+    estado        VARCHAR(20) DEFAULT 'Activo',
+    fechaCreacion TIMESTAMPTZ DEFAULT NOW(),
+    tenant_id     UUID
+);
+
+CREATE TABLE IF NOT EXISTS roles (
+    idrol     SERIAL PRIMARY KEY,
+    nombre    VARCHAR(100) NOT NULL,
+    estado    VARCHAR(20) DEFAULT 'Activo',
+    tenant_id UUID
+);
+
+CREATE TABLE IF NOT EXISTS permisos (
+    idPermiso VARCHAR(50) PRIMARY KEY,
+    nombre    VARCHAR(100) NOT NULL,
+    modulo    VARCHAR(50)
+);
+
+CREATE TABLE IF NOT EXISTS usuarios (
+    codUsuario               SERIAL PRIMARY KEY,
+    usuario                  VARCHAR(100) UNIQUE NOT NULL,
+    password                 VARCHAR(255) NOT NULL,
+    identidad                VARCHAR(20),
+    idCaja                   VARCHAR(100),
+    idrol                    INT,
+    id_sucursal              INT,
+    estado                   VARCHAR(20) DEFAULT 'Activo',
+    requires_password_change BOOLEAN DEFAULT FALSE,
+    ultimo_login             TIMESTAMPTZ,
+    intentos_fallidos        INTEGER DEFAULT 0,
+    bloqueado_hasta          TIMESTAMPTZ,
+    password_changed_at      TIMESTAMPTZ DEFAULT NOW(),
+    tenant_id                UUID
+);
+
+CREATE TABLE IF NOT EXISTS rol_permisos (
+    idRol     INT,
+    idPermiso VARCHAR(50),
+    PRIMARY KEY (idRol, idPermiso)
+);
+
+CREATE TABLE IF NOT EXISTS caja (
+    idCaja      VARCHAR(100) PRIMARY KEY,
+    nombre      VARCHAR(100) NOT NULL DEFAULT 'Caja Principal',
+    estado      VARCHAR(20) DEFAULT 'Activo',
+    id_sucursal INT,
+    tenant_id   UUID
+);
+
+CREATE TABLE IF NOT EXISTS clientes (
+    identidad                VARCHAR(20) PRIMARY KEY,
+    nombre                   VARCHAR(100) NOT NULL,
+    apellido                 VARCHAR(100),
+    direccion                TEXT,
+    telefono                 VARCHAR(20),
+    correo                   VARCHAR(100),
+    fecha_nacimiento         DATE,
+    alergias_conocidas       TEXT,
+    condiciones_cronicas     TEXT,
+    medicamentos_habituales  TEXT,
+    fechaCreacion            TIMESTAMPTZ DEFAULT NOW(),
+    tenant_id                UUID
+);
+
+CREATE TABLE IF NOT EXISTS proveedores (
+    codProveedor  VARCHAR(20) PRIMARY KEY,
+    nombre        VARCHAR(100) NOT NULL,
+    telefono      VARCHAR(20),
+    direccion     TEXT,
+    correo        VARCHAR(100),
+    rtn           VARCHAR(20),
+    contacto      VARCHAR(100),
+    fechaCreacion TIMESTAMPTZ DEFAULT NOW(),
+    tenant_id     UUID
+);
+
+CREATE TABLE IF NOT EXISTS categorias_terapeuticas (
+    id_categoria      SERIAL PRIMARY KEY,
+    nombre            VARCHAR(100) NOT NULL,
+    descripcion       TEXT,
+    codigo_atc_nivel1 CHAR(1),
+    activo            BOOLEAN DEFAULT TRUE,
+    tenant_id         UUID
+);
+
+CREATE TABLE IF NOT EXISTS formas_farmaceuticas (
+    id_forma    SERIAL PRIMARY KEY,
+    nombre      VARCHAR(80) NOT NULL,
+    unidad_base VARCHAR(30) NOT NULL,
+    activo      BOOLEAN DEFAULT TRUE,
+    tenant_id   UUID
+);
+
+CREATE TABLE IF NOT EXISTS principios_activos (
+    id_principio        SERIAL PRIMARY KEY,
+    nombre_dci          VARCHAR(200) NOT NULL UNIQUE,
+    nombre_comun        VARCHAR(200),
+    clase_farmacologica VARCHAR(100)
+);
+
+CREATE TABLE IF NOT EXISTS medicamentos (
+    codigo                    VARCHAR(20) PRIMARY KEY,
+    nombre_generico           VARCHAR(200) NOT NULL,
+    nombre_comercial          VARCHAR(200),
+    concentracion             VARCHAR(80),
+    id_forma                  INT,
+    via_administracion        VARCHAR(50) DEFAULT 'Oral',
+    id_categoria              INT,
+    indicaciones              TEXT,
+    contraindicaciones        TEXT,
+    advertencias              TEXT,
+    registro_sanitario        VARCHAR(30),
+    fecha_vencimiento_rs      DATE,
+    laboratorio               VARCHAR(150),
+    pais_origen               VARCHAR(60) DEFAULT 'Honduras',
+    requiere_receta           BOOLEAN DEFAULT FALSE,
+    es_controlado             BOOLEAN DEFAULT FALSE,
+    clase_controlado          VARCHAR(5),
+    tipo_isv                  VARCHAR(10) DEFAULT 'exento',
+    precio_costo_base         NUMERIC(12,4),
+    margen_ganancia           NUMERIC(5,2) DEFAULT 30,
+    stock_minimo              NUMERIC(12,4) DEFAULT 10,
+    punto_reorden             NUMERIC(12,4) DEFAULT 20,
+    codigo_ean13              VARCHAR(15),
+    condicion_almacenamiento  VARCHAR(60) DEFAULT 'Temperatura ambiente',
+    id_sucursal_principal     INT,
+    activo                    BOOLEAN DEFAULT TRUE,
+    fecha_alta                TIMESTAMPTZ DEFAULT NOW(),
+    tenant_id                 UUID
+);
+
+CREATE TABLE IF NOT EXISTS medicamento_principios (
+    id_medicamento VARCHAR(20),
+    id_principio   INT,
+    cantidad       NUMERIC(10,4),
+    unidad_medida  VARCHAR(20),
+    PRIMARY KEY (id_medicamento, id_principio)
+);
+
+CREATE TABLE IF NOT EXISTS medicamento_imagenes (
+    id_imagen      SERIAL PRIMARY KEY,
+    id_medicamento VARCHAR(20),
+    url_imagen     TEXT,
+    imagen_base64  TEXT,
+    es_principal   BOOLEAN DEFAULT FALSE,
+    descripcion    VARCHAR(100),
+    fecha_upload   TIMESTAMPTZ DEFAULT NOW(),
+    tenant_id      UUID
+);
+
+CREATE TABLE IF NOT EXISTS presentaciones_venta (
+    id_presentacion            SERIAL PRIMARY KEY,
+    id_medicamento             VARCHAR(20),
+    nombre                     VARCHAR(80) NOT NULL,
+    factor_conversion          NUMERIC(12,4) NOT NULL DEFAULT 1,
+    descripcion_presentacion   VARCHAR(100),
+    precio_venta               NUMERIC(12,2),
+    precio_tercera_edad        NUMERIC(12,2),
+    codigo_barras_presentacion VARCHAR(50),
+    es_unidad_compra           BOOLEAN DEFAULT FALSE,
+    es_unidad_venta            BOOLEAN DEFAULT TRUE,
+    permite_fraccion           BOOLEAN DEFAULT FALSE,
+    activo                     BOOLEAN DEFAULT TRUE,
+    tenant_id                  UUID,
+    UNIQUE(id_medicamento, nombre)
+);
+
+CREATE TABLE IF NOT EXISTS lotes_medicamento (
+    id_lote                   SERIAL PRIMARY KEY,
+    id_medicamento            VARCHAR(20),
+    numero_lote               VARCHAR(80) NOT NULL,
+    fecha_vencimiento_display VARCHAR(7) NOT NULL,
+    fecha_vencimiento         DATE NOT NULL,
+    fecha_fabricacion         DATE,
+    cantidad_inicial          NUMERIC(12,4) NOT NULL,
+    cantidad_actual           NUMERIC(12,4) NOT NULL,
+    precio_compra_unitario    NUMERIC(12,4),
+    id_sucursal               INT,
+    id_proveedor              VARCHAR(20),
+    fecha_ingreso             TIMESTAMPTZ DEFAULT NOW(),
+    estado                    VARCHAR(20) DEFAULT 'Activo',
+    notas                     TEXT,
+    tenant_id                 UUID,
+    UNIQUE(id_medicamento, numero_lote, id_sucursal)
+);
+
+CREATE TABLE IF NOT EXISTS ventas (
+    codVenta                 VARCHAR(100) PRIMARY KEY,
+    fecha                    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    identidadCliente         VARCHAR(20),
+    codVendedor              VARCHAR(100),
+    total                    NUMERIC(14,2) NOT NULL DEFAULT 0,
+    estado                   VARCHAR(20) DEFAULT 'Activa',
+    tipoCompra               VARCHAR(50) DEFAULT 'Contado',
+    idCaja                   VARCHAR(100),
+    monto_prima              NUMERIC(10,2) DEFAULT 0,
+    monto_financiamiento     NUMERIC(10,2) DEFAULT 0,
+    updated_at               TIMESTAMPTZ,
+    updated_by               VARCHAR(100),
+    descuento_autorizado_por VARCHAR(100),
+    descuento_motivo         TEXT,
+    numero_factura_sar       VARCHAR(30),
+    rtn_cliente              VARCHAR(20) DEFAULT '0000-0000-000000',
+    es_consumidor_final      BOOLEAN DEFAULT TRUE,
+    tipo_descuento           VARCHAR(30),
+    porcentaje_descuento     NUMERIC(5,2) DEFAULT 0,
+    monto_descuento          NUMERIC(12,2) DEFAULT 0,
+    subtotal_exento          NUMERIC(14,2) DEFAULT 0,
+    subtotal_gravado         NUMERIC(14,2) DEFAULT 0,
+    isv_calculado            NUMERIC(14,2) DEFAULT 0,
+    isv                      NUMERIC(10,2) DEFAULT 0,
+    descuento                NUMERIC(10,2) DEFAULT 0,
+    id_receta                VARCHAR(20),
+    id_sucursal              INT,
+    tenant_id                UUID
+);
+
+CREATE TABLE IF NOT EXISTS detalleventa (
+    codDetalleventa          VARCHAR(100) PRIMARY KEY,
+    idVenta                  VARCHAR(100),
+    producto                 VARCHAR(200),
+    cantidad                 NUMERIC(12,4) NOT NULL DEFAULT 1,
+    precioUnitario           NUMERIC(12,2) NOT NULL DEFAULT 0,
+    precioVenta              NUMERIC(12,2),
+    tipoProducto             VARCHAR(20) DEFAULT 'MEDICAMENTO',
+    id_lote                  INT,
+    id_presentacion          INT,
+    cantidad_base_descontada NUMERIC(12,4),
+    tipo_isv                 VARCHAR(10) DEFAULT 'exento',
+    subtotal_exento          NUMERIC(12,2) DEFAULT 0,
+    subtotal_gravado         NUMERIC(12,2) DEFAULT 0,
+    isv_linea                NUMERIC(12,2) DEFAULT 0,
+    tenant_id                UUID
+);
+
+CREATE TABLE IF NOT EXISTS recetas (
+    codigo            VARCHAR(20) PRIMARY KEY,
+    id_cliente        VARCHAR(20),
+    nombre_medico     VARCHAR(150),
+    numero_colegiado  VARCHAR(30),
+    especialidad      VARCHAR(100),
+    telefono_medico   VARCHAR(20),
+    clinica_hospital  VARCHAR(150),
+    fecha_emision     DATE NOT NULL,
+    fecha_vencimiento DATE NOT NULL,
+    tipo_receta       VARCHAR(20) DEFAULT 'Normal',
+    diagnostico       TEXT,
+    imagen_url        TEXT,
+    imagen_base64     TEXT,
+    estado            VARCHAR(20) DEFAULT 'Pendiente',
+    id_sucursal       INT,
+    registrado_por    VARCHAR(100),
+    fecha_registro    TIMESTAMPTZ DEFAULT NOW(),
+    notas             TEXT,
+    tenant_id         UUID
+);
+
+CREATE TABLE IF NOT EXISTS detalle_receta (
+    id                         SERIAL PRIMARY KEY,
+    id_receta                  VARCHAR(20),
+    id_medicamento             VARCHAR(20),
+    nombre_prescrito           VARCHAR(200),
+    dosis_prescrita            VARCHAR(100),
+    cantidad_prescrita         NUMERIC(10,4) NOT NULL,
+    unidad_prescrita           VARCHAR(30),
+    cantidad_dispensada        NUMERIC(10,4) DEFAULT 0,
+    fecha_ultima_dispensacion  DATE,
+    estado                     VARCHAR(20) DEFAULT 'Pendiente',
+    tenant_id                  UUID
+);
+
+CREATE TABLE IF NOT EXISTS ordenes_compra (
+    codigo                 VARCHAR(20) PRIMARY KEY,
+    id_proveedor           VARCHAR(20),
+    id_sucursal            INT,
+    fecha_orden            DATE DEFAULT CURRENT_DATE,
+    fecha_entrega_esperada DATE,
+    estado                 VARCHAR(20) DEFAULT 'Pendiente',
+    total_estimado         NUMERIC(14,2),
+    generada_por           VARCHAR(30) DEFAULT 'manual',
+    notas                  TEXT,
+    fecha_creacion         TIMESTAMPTZ DEFAULT NOW(),
+    tenant_id              UUID
+);
+
+CREATE TABLE IF NOT EXISTS detalle_orden_compra (
+    id                 SERIAL PRIMARY KEY,
+    id_orden           VARCHAR(20),
+    id_medicamento     VARCHAR(20),
+    id_presentacion    INT,
+    cantidad_ordenada  NUMERIC(12,4) NOT NULL,
+    precio_unitario    NUMERIC(12,2),
+    cantidad_recibida  NUMERIC(12,4) DEFAULT 0,
+    estado_linea       VARCHAR(20) DEFAULT 'Pendiente',
+    tenant_id          UUID
+);
+
+CREATE TABLE IF NOT EXISTS transferencias_sucursal (
+    codigo              VARCHAR(20) PRIMARY KEY,
+    id_sucursal_origen  INT,
+    id_sucursal_destino INT,
+    id_medicamento      VARCHAR(20),
+    id_lote             INT,
+    cantidad_base       NUMERIC(12,4) NOT NULL,
+    motivo              TEXT,
+    estado              VARCHAR(20) DEFAULT 'Pendiente',
+    id_usuario_solicita INT,
+    id_usuario_aprueba  INT,
+    fecha_solicitud     TIMESTAMPTZ DEFAULT NOW(),
+    fecha_resolucion    TIMESTAMPTZ,
+    tenant_id           UUID
+);
+
+CREATE TABLE IF NOT EXISTS arqueo (
+    idArqueo      VARCHAR(20) PRIMARY KEY,
+    idCaja        VARCHAR(100),
+    idUsuario     VARCHAR(100),
+    fechaApertura TIMESTAMPTZ DEFAULT NOW(),
+    fechaCierre   TIMESTAMPTZ,
+    montoInicial  NUMERIC(14,2) DEFAULT 0,
+    montoFinal    NUMERIC(14,2) DEFAULT 0,
+    totalVentas   NUMERIC(14,2) DEFAULT 0,
+    totalCostos   NUMERIC(14,2) DEFAULT 0,
+    TotalGastos   NUMERIC(14,2) DEFAULT 0,
+    ganancia      NUMERIC(14,2) DEFAULT 0,
+    estado        VARCHAR(20) DEFAULT 'Activo',
+    cerradoPor    VARCHAR(100),
+    tenant_id     UUID
+);
+
 DO $$
 BEGIN
     BEGIN ALTER TABLE ventas        ADD COLUMN idCaja VARCHAR(100);                            EXCEPTION WHEN duplicate_column THEN NULL; END;
