@@ -203,6 +203,19 @@ async function seedClinic(client, clinic, clinicIndex) {
     `, [recepRole]);
     counts.roles = 3;
 
+    const adminIdentity = `${clinicIndex + 1}888${String(clinicIndex + 1).padStart(9, '0')}`;
+    const adminEmail = `admin.${clinic.slug}@demo.local`;
+    await client.query(`
+        INSERT INTO empleado (identidad, nombre, apellido, direccion, telefono, correo, estado, tenant_id)
+        VALUES ($1,'Administrador','Demo',$2,$3,$4,'Activo',$5)
+        ON CONFLICT DO NOTHING
+    `, [adminIdentity, clinic.address, clinic.phone, adminEmail, tenantId]);
+    await client.query(
+        'UPDATE empleado SET correo=$1, telefono=$2, tenant_id=$3 WHERE identidad=$4',
+        [adminEmail, clinic.phone, tenantId, adminIdentity]
+    );
+    await ensureUser(client, tenantId, { identity: adminIdentity, email: adminEmail }, adminRole, branchId);
+
     const vetUserIds = [];
     for (const vet of clinic.vets) {
         await client.query(`
@@ -229,8 +242,8 @@ async function seedClinic(client, clinic, clinicIndex) {
         [receptionEmail, clinic.phone, tenantId, receptionIdentity]
     );
     await ensureUser(client, tenantId, { identity: receptionIdentity, email: receptionEmail }, recepRole, branchId);
-    counts.empleados = 3;
-    counts.usuarios = 3;
+    counts.empleados = 4;
+    counts.usuarios = 4;
 
     await client.query(`
         INSERT INTO caja (idCaja, nombre, estado, id_sucursal, tenant_id)

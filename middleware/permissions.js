@@ -18,6 +18,7 @@ const PERMISSION_RULES = [
     { pattern: /^\/api\/proveedores\b/, methods: ['GET'], permissions: ['VER_PROVEEDORES', 'VER_INVENTARIO'] },
     { pattern: /^\/api\/proveedores\b/,                permission: 'VER_PROVEEDORES'       },
     { pattern: /^\/api\/clientes\b/, methods: ['GET'], permissions: ['VER_CLIENTES', 'VER_PACIENTES'] },
+    { pattern: /^\/api\/clientes\b/, methods: ['POST', 'PUT', 'DELETE'], permissions: ['VER_CLIENTES', 'GESTIONAR_PACIENTES'] },
     { pattern: /^\/api\/clientes\b/,                   permission: 'VER_CLIENTES'          },
     { pattern: /^\/api\/tutores\b/,                    permission: 'VER_PACIENTES'         },
     { pattern: /^\/api\/pacientes\b/,                  permission: 'VER_PACIENTES'         },

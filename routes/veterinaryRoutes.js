@@ -103,15 +103,33 @@ async function createAppointmentReminders(client, req, citaId) {
 // Patients
 router.get('/pacientes', authenticateToken, async (req, res) => {
     try {
-        const { q, id_tutor, estado = 'Activo' } = req.query;
+        const { q, id_tutor, estado = 'Activo', especie, sexo, alertas, limit = 60, offset = 0 } = req.query;
         const params = [req.tenantId];
         let where = 'WHERE p.tenant_id = $1';
         if (estado) { params.push(estado); where += ` AND p.estado = $${params.length}`; }
         if (id_tutor) { params.push(id_tutor); where += ` AND p.id_tutor = $${params.length}`; }
+        if (especie) { params.push(especie); where += ` AND LOWER(p.especie) = LOWER($${params.length})`; }
+        if (sexo) { params.push(sexo); where += ` AND LOWER(COALESCE(p.sexo, '')) = LOWER($${params.length})`; }
+        if (alertas === 'true') where += ` AND (COALESCE(p.alergias, '') <> '' OR COALESCE(p.condiciones_cronicas, '') <> '')`;
         if (q) {
             params.push(`%${String(q).replace(/[\\%_]/g, '\\$&')}%`);
-            where += ` AND (p.nombre ILIKE $${params.length} OR p.especie ILIKE $${params.length} OR p.raza ILIKE $${params.length} OR p.microchip ILIKE $${params.length})`;
+            where += ` AND (
+                p.nombre ILIKE $${params.length}
+                OR p.especie ILIKE $${params.length}
+                OR p.raza ILIKE $${params.length}
+                OR p.microchip ILIKE $${params.length}
+                OR cli.nombre ILIKE $${params.length}
+                OR cli.apellido ILIKE $${params.length}
+                OR cli.telefono ILIKE $${params.length}
+                OR cli.correo ILIKE $${params.length}
+            )`;
         }
+        const safeLimit = Math.min(Math.max(asInt(limit) || 60, 1), 200);
+        const safeOffset = Math.max(asInt(offset) || 0, 0);
+        params.push(safeLimit);
+        const limitParam = params.length;
+        params.push(safeOffset);
+        const offsetParam = params.length;
         const { rows } = await pool.query(`
             SELECT p.*,
                    cli.nombre || ' ' || COALESCE(cli.apellido, '') AS "tutorNombre",
@@ -122,7 +140,7 @@ router.get('/pacientes', authenticateToken, async (req, res) => {
             LEFT JOIN clientes cli ON cli.identidad = p.id_tutor AND cli.tenant_id = p.tenant_id
             ${where}
             ORDER BY p.nombre
-            LIMIT 300
+            LIMIT $${limitParam} OFFSET $${offsetParam}
         `, params);
         res.json(rows);
     } catch (e) { handleDbError(res, e); }
@@ -368,11 +386,32 @@ router.post('/citas/:id/check-in', authenticateToken, async (req, res) => {
 // Consultations
 router.get('/consultas', authenticateToken, async (req, res) => {
     try {
-        const { id_paciente, estado } = req.query;
+        const { id_paciente, estado, q, desde, hasta, limit = 60, offset = 0 } = req.query;
         const params = [req.tenantId];
         let where = 'WHERE co.tenant_id = $1';
         if (id_paciente) { params.push(id_paciente); where += ` AND co.id_paciente = $${params.length}`; }
         if (estado) { params.push(estado); where += ` AND co.estado = $${params.length}`; }
+        if (desde) { params.push(desde); where += ` AND co.fecha >= $${params.length}`; }
+        if (hasta) { params.push(hasta); where += ` AND co.fecha < ($${params.length}::date + INTERVAL '1 day')`; }
+        if (q) {
+            params.push(`%${String(q).replace(/[\\%_]/g, '\\$&')}%`);
+            where += ` AND (
+                co.motivo ILIKE $${params.length}
+                OR co.subjetivo ILIKE $${params.length}
+                OR co.objetivo ILIKE $${params.length}
+                OR co.evaluacion ILIKE $${params.length}
+                OR co.plan ILIKE $${params.length}
+                OR p.nombre ILIKE $${params.length}
+                OR cli.nombre ILIKE $${params.length}
+                OR cli.apellido ILIKE $${params.length}
+            )`;
+        }
+        const safeLimit = Math.min(Math.max(asInt(limit) || 60, 1), 200);
+        const safeOffset = Math.max(asInt(offset) || 0, 0);
+        params.push(safeLimit);
+        const limitParam = params.length;
+        params.push(safeOffset);
+        const offsetParam = params.length;
         const { rows } = await pool.query(`
             SELECT co.*, p.nombre AS "pacienteNombre", p.especie,
                    cli.nombre || ' ' || COALESCE(cli.apellido,'') AS "tutorNombre"
@@ -381,7 +420,7 @@ router.get('/consultas', authenticateToken, async (req, res) => {
             LEFT JOIN clientes cli ON cli.identidad = co.id_tutor AND cli.tenant_id = co.tenant_id
             ${where}
             ORDER BY co.fecha DESC
-            LIMIT 300
+            LIMIT $${limitParam} OFFSET $${offsetParam}
         `, params);
         res.json(rows);
     } catch (e) { handleDbError(res, e); }

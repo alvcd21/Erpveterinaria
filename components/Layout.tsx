@@ -186,6 +186,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
     {
       name: 'Clínica', icon: <HeartPulse size={20} />,
       subItems: [
+        { name: 'Tutores', path: '/clients', icon: <Users size={18} />, permission: 'VER_PACIENTES' },
         { name: 'Pacientes', path: '/pacientes', icon: <PawPrint size={18} />, permission: 'VER_PACIENTES', planFeature: 'modulo_pacientes', minimumPlan: 'basico' },
         { name: 'Agenda', path: '/agenda', icon: <CalendarDays size={18} />, permission: 'VER_CITAS', planFeature: 'modulo_citas', minimumPlan: 'basico' },
         { name: 'Expediente', path: '/expediente', icon: <FileHeart size={18} />, permission: 'VER_EXPEDIENTE', planFeature: 'modulo_expediente', minimumPlan: 'profesional' },

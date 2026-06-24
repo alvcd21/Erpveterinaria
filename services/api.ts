@@ -240,7 +240,7 @@ export const ClientService = {
 };
 
 export const PacientesService = {
-  getAll: (params?: { q?: string; id_tutor?: string; estado?: string }) => {
+  getAll: (params?: { q?: string; id_tutor?: string; estado?: string; especie?: string; sexo?: string; alertas?: string; limit?: number; offset?: number }) => {
     const qs = params ? '?' + new URLSearchParams(Object.entries(params).filter(([, v]) => v !== undefined && v !== '').map(([k, v]) => [k, String(v)])).toString() : '';
     return request<Paciente[]>(`/pacientes${qs}`);
   },
@@ -266,7 +266,7 @@ export const CitasService = {
 };
 
 export const ConsultasService = {
-  getAll: (params?: { id_paciente?: number; estado?: string }) => {
+  getAll: (params?: { id_paciente?: number; estado?: string; q?: string; desde?: string; hasta?: string; limit?: number; offset?: number }) => {
     const qs = params ? '?' + new URLSearchParams(Object.entries(params).filter(([, v]) => v !== undefined && v !== '').map(([k, v]) => [k, String(v)])).toString() : '';
     return request<Consulta[]>(`/consultas${qs}`);
   },
