@@ -9,12 +9,15 @@ const PERMISSION_RULES = [
     { pattern: /^\/api\/roles\b/,                      permission: 'GESTIONAR_ROLES'       },
     { pattern: /^\/api\/permisos\b/,                   permission: 'GESTIONAR_ROLES'       },
     { pattern: /^\/api\/cajas\b/,                      permission: 'GESTIONAR_PANEL_CAJAS' },
+    { pattern: /^\/api\/sucursales\b/, methods: ['GET'], permissions: ['GESTIONAR_PANEL_CAJAS', 'VER_CITAS', 'VER_INVENTARIO', 'VER_POS'] },
     { pattern: /^\/api\/sucursales\b/,                 permission: 'GESTIONAR_PANEL_CAJAS' },
     { pattern: /^\/api\/reports\b/,                    permission: 'VER_REPORTES'          },
     { pattern: /^\/api\/search\b/,                     permission: 'VER_REPORTES'          },
     { pattern: /^\/api\/schema\b/,                     permission: 'DISEÑAR_ETIQUETAS'     },
     { pattern: /^\/api\/labels\b/,                     permission: 'DISEÑAR_ETIQUETAS'     },
+    { pattern: /^\/api\/proveedores\b/, methods: ['GET'], permissions: ['VER_PROVEEDORES', 'VER_INVENTARIO'] },
     { pattern: /^\/api\/proveedores\b/,                permission: 'VER_PROVEEDORES'       },
+    { pattern: /^\/api\/clientes\b/, methods: ['GET'], permissions: ['VER_CLIENTES', 'VER_PACIENTES'] },
     { pattern: /^\/api\/clientes\b/,                   permission: 'VER_CLIENTES'          },
     { pattern: /^\/api\/tutores\b/,                    permission: 'VER_PACIENTES'         },
     { pattern: /^\/api\/pacientes\b/,                  permission: 'VER_PACIENTES'         },
@@ -52,18 +55,25 @@ const PERMISSION_RULES = [
 ];
 
 function endpointPermissionGuard(req, res, next) {
-    const rule = PERMISSION_RULES.find(r => r.pattern.test(req.originalUrl.split('?')[0]));
+    const method = String(req.method || '').toUpperCase();
+    const path = req.originalUrl.split('?')[0];
+    const rule = PERMISSION_RULES.find(r => {
+        if (!r.pattern.test(path)) return false;
+        if (!Array.isArray(r.methods)) return true;
+        return r.methods.includes(method);
+    });
     if (!rule) return next();
 
     const role = String(req.user?.rol || '').toLowerCase();
     if (role === 'administrador' || role === 'admin' || role === 'superadmin') return next();
 
     const permisos = Array.isArray(req.user?.permisos) ? req.user.permisos : [];
-    if (permisos.includes(rule.permission)) return next();
+    const acceptedPermissions = rule.permissions || [rule.permission];
+    if (acceptedPermissions.some(permission => permisos.includes(permission))) return next();
 
     return res.status(403).json({
         error: 'Acceso denegado: permiso insuficiente',
-        requiredPermission: rule.permission,
+        requiredPermission: rule.permission || acceptedPermissions.join('|'),
     });
 }
 
