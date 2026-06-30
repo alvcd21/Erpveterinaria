@@ -6,9 +6,22 @@ const { authenticateToken } = require('../middleware/auth');
 
 // --- ARQUEO Y CAJA ---
 
+async function getCurrentCashAssignment(codUsuario, tenantId) {
+    const { rows } = await pool.query(
+        `SELECT u.codUsuario, u.idCaja, u.id_sucursal, c.estado AS "estadoCaja", c.id_sucursal AS "idSucursalCaja"
+         FROM usuarios u
+         LEFT JOIN caja c ON c.idCaja = u.idCaja AND c.tenant_id = u.tenant_id
+         WHERE u.codUsuario = $1 AND u.tenant_id = $2`,
+        [codUsuario, tenantId]
+    );
+    return rows[0] || null;
+}
+
 router.get('/arqueo/active', authenticateToken, async (req, res) => {
     try {
-        const { idCaja } = req.user;
+        const assignment = await getCurrentCashAssignment(req.user.codUsuario, req.tenantId);
+        const idCaja = assignment?.idcaja || assignment?.idCaja;
+        if (!idCaja || idCaja === 'Sin Caja') return res.json(null);
         const query = `
             SELECT idArqueo as "idArqueo", idCaja as "idCaja", montoInicial as "montoInicial",
             montoFinal as "montoFinal", totalVentas as "totalVentas", TotalGastos as "TotalGastos", ganancia, estado,
@@ -27,7 +40,9 @@ router.post('/arqueo/open', authenticateToken, async (req, res) => {
             return res.status(403).json({ error: 'Permiso GESTIONAR_CAJA requerido', code: 'FORBIDDEN' });
         }
         const { montoInicial } = req.body;
-        const { codUsuario, idCaja } = req.user;
+        const { codUsuario } = req.user;
+        const assignment = await getCurrentCashAssignment(codUsuario, req.tenantId);
+        const idCaja = assignment?.idcaja || assignment?.idCaja;
         const hndTime = getLocalTimestamp();
         const cajaAsignada = idCaja && idCaja !== 'Sin Caja';
 
@@ -47,25 +62,19 @@ router.post('/arqueo/open', authenticateToken, async (req, res) => {
         }
 
         const idArqueo = await withTenantContext(req.tenantId, async (client) => {
-            const cajaRes = await client.query(
-                `SELECT c.idCaja, c.estado, c.id_sucursal
-                 FROM caja c
-                 WHERE c.idCaja = $1 AND c.tenant_id = $2`,
-                [idCaja, req.tenantId]
-            );
-            if (cajaRes.rows.length === 0) {
+            if (!assignment || !assignment.estadoCaja) {
                 const err = new Error('La caja asignada a su usuario ya no existe. Solicite al administrador revisar su asignacion.');
                 err.statusCode = 400;
                 err.code = 'ASSIGNED_CASH_REGISTER_NOT_FOUND';
                 throw err;
             }
-            if (cajaRes.rows[0].estado !== 'Activo') {
+            if (assignment.estadoCaja !== 'Activo') {
                 const err = new Error('La caja asignada a su usuario esta inactiva. Solicite al administrador activar o reasignar la caja.');
                 err.statusCode = 400;
                 err.code = 'ASSIGNED_CASH_REGISTER_INACTIVE';
                 throw err;
             }
-            if (!cajaRes.rows[0].id_sucursal) {
+            if (!assignment.idSucursalCaja && !assignment.idsucursalcaja) {
                 const err = new Error('La caja asignada no pertenece a ninguna sucursal. Configure la sucursal de la caja antes de iniciar turno.');
                 err.statusCode = 400;
                 err.code = 'CASH_REGISTER_WITHOUT_BRANCH';
@@ -106,7 +115,15 @@ router.post('/arqueo/close', authenticateToken, async (req, res) => {
             return res.status(403).json({ error: 'Permiso GESTIONAR_CAJA requerido', code: 'FORBIDDEN' });
         }
         const { idArqueo } = req.body;
-        const { idCaja, codUsuario } = req.user;
+        const { codUsuario } = req.user;
+        const assignment = await getCurrentCashAssignment(codUsuario, req.tenantId);
+        const idCaja = assignment?.idcaja || assignment?.idCaja;
+        if (!idCaja || idCaja === 'Sin Caja') {
+            return res.status(400).json({
+                error: 'No puede cerrar turno porque su usuario no tiene una caja asignada.',
+                code: 'USER_WITHOUT_CASH_REGISTER',
+            });
+        }
         const hndTime = getLocalTimestamp();
 
         const resArq = await withTenantContext(req.tenantId, async (client) => {

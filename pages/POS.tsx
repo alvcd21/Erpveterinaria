@@ -21,6 +21,8 @@ import CrossBranchModal  from '../components/POS/CrossBranchModal';
 import AIAssistantPanel  from '../components/POS/AIAssistantPanel';
 import QuickClientModal  from '../components/POS/QuickClientModal';
 import HoldPanel         from '../components/POS/HoldPanel';
+import * as ReactRouterDOM from 'react-router-dom';
+const { useNavigate } = ReactRouterDOM as any;
 
 // ── Session stats (local counter, resets on page reload) ─────────────────────
 const sessionStart = new Date();
@@ -33,6 +35,7 @@ function formatDuration(from: Date): string {
 
 const POS: React.FC = () => {
   const { user } = useAuth();
+  const navigate = useNavigate();
 
   const [products, setProducts]       = useState<ProductoFarmacia[]>([]);
   const [clients, setClients]         = useState<Cliente[]>([]);
@@ -553,8 +556,11 @@ const POS: React.FC = () => {
           <p className="mt-3 text-sm leading-relaxed text-slate-500">
             Para procesar ventas debes abrir caja primero. Caja asignada: <strong>{user?.idCaja}</strong>.
           </p>
-          <button onClick={() => loadInitialData()} className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 py-3 font-bold text-white transition-colors hover:bg-indigo-700">
-            <RefreshCw size={16} /> Ya abrí caja, verificar
+          <button onClick={() => navigate('/cash')} className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 py-3 font-bold text-white transition-colors hover:bg-indigo-700">
+            <Lock size={16} /> Abrir caja ahora
+          </button>
+          <button onClick={() => loadInitialData()} className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-slate-100 py-3 font-bold text-slate-700 transition-colors hover:bg-slate-200">
+            <RefreshCw size={16} /> Ya abri caja, verificar
           </button>
         </div>
       </div>
