@@ -9,6 +9,7 @@ import {
   Users, X,
 } from 'lucide-react';
 import Swal from 'sweetalert2';
+import { AttachmentList, AttachmentUploader, type ClinicalAttachment } from '../components/consultorio/ClinicalAttachments';
 import { FieldDef, MODULES, fieldsFor, fmtDate, initials, moduleFor, nowLocal, patientSubtitle } from '../components/consultorio/consultorioConfig';
 
 const PAGE_SIZE = 20;
@@ -22,6 +23,7 @@ type EventForm = {
   detalle: string;
   enviar_correo: boolean;
   payload: Record<string, any>;
+  adjuntos: ClinicalAttachment[];
 };
 
 export default function Expediente() {
@@ -93,6 +95,7 @@ export default function Expediente() {
       detalle: '',
       enviar_correo: tipo === 'mensaje',
       payload: {},
+      adjuntos: [],
     });
   };
 
@@ -110,6 +113,7 @@ export default function Expediente() {
         resumen,
         detalle,
         payload,
+        adjuntos: modal.adjuntos || [],
         enviar_correo: modal.enviar_correo,
       });
       setModal(null);
@@ -298,6 +302,7 @@ function TimelineCard({ item }: { item: ConsultorioEvento }) {
   const Icon = mod.icon;
   const payload = item.payload || {};
   const chips = Object.entries(payload).filter(([, v]) => v !== null && v !== undefined && String(v).trim() !== '').slice(0, 6);
+  const attachments = Array.isArray(item.adjuntos) ? item.adjuntos as ClinicalAttachment[] : [];
   return (
     <article className="rounded-2xl border border-slate-200 bg-white p-4 hover:border-teal-200 transition-colors">
       <div className="flex flex-col md:flex-row md:items-start justify-between gap-3">
@@ -319,6 +324,9 @@ function TimelineCard({ item }: { item: ConsultorioEvento }) {
           {chips.map(([k, v]) => <span key={k} className="rounded-full bg-slate-50 border border-slate-100 px-2.5 py-1 text-xs text-slate-500"><b>{k.replace(/_/g, ' ')}:</b> {String(v).slice(0, 45)}</span>)}
         </div>
       )}
+      {attachments.length > 0 && (
+        <AttachmentList attachments={attachments} compact />
+      )}
     </article>
   );
 }
@@ -329,7 +337,9 @@ function EventModal({ form, patient, setForm, onClose, onSubmit }: {
   const mod = moduleFor(form.tipo);
   const Icon = mod.icon;
   const fields = fieldsFor(form.tipo);
+  const hasFileField = fields.some(field => field.type === 'file');
   const updatePayload = (key: string, value: any) => setForm({ ...form, payload: { ...form.payload, [key]: value } });
+  const updateAttachments = (adjuntos: ClinicalAttachment[]) => setForm({ ...form, adjuntos });
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
       <form onSubmit={onSubmit} className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[92vh] overflow-auto">
@@ -352,9 +362,30 @@ function EventModal({ form, patient, setForm, onClose, onSubmit }: {
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             {fields.map(field => (
-              <Field key={field.key} field={field} value={form.payload[field.key] || ''} onChange={v => updatePayload(field.key, v)} />
+              <Field
+                key={field.key}
+                field={field}
+                value={form.payload[field.key] || ''}
+                onChange={v => updatePayload(field.key, v)}
+                patientId={patient.id_paciente}
+                tipo={form.tipo}
+                attachments={form.adjuntos}
+                onAttachmentsChange={updateAttachments}
+              />
             ))}
           </div>
+          {!hasFileField && (
+            <AttachmentUploader
+              label="Adjuntos del expediente"
+              helper="Agregue imagenes, resultados, PDF o documentos relacionados con este registro."
+              accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx,.xls,.xlsx,.csv,.txt,.dcm"
+              patientId={patient.id_paciente}
+              tipo={form.tipo}
+              categoria="adjunto"
+              attachments={form.adjuntos}
+              onChange={updateAttachments}
+            />
+          )}
           <Label label="Resumen visible en historial">
             <textarea value={form.resumen} onChange={e => setForm({ ...form, resumen: e.target.value })} placeholder="Resumen clínico corto para la línea de tiempo" className={`${INPUT_CLASS} min-h-[90px]`} />
           </Label>
@@ -368,7 +399,32 @@ function EventModal({ form, patient, setForm, onClose, onSubmit }: {
   );
 }
 
-function Field({ field, value, onChange }: { field: FieldDef; value: any; onChange: (v: any) => void }) {
+function Field({ field, value, onChange, patientId, tipo, attachments, onAttachmentsChange }: {
+  field: FieldDef;
+  value: any;
+  onChange: (v: any) => void;
+  patientId: number;
+  tipo: ConsultorioTipo;
+  attachments: ClinicalAttachment[];
+  onAttachmentsChange: (items: ClinicalAttachment[]) => void;
+}) {
+  if (field.type === 'file') {
+    return (
+      <div className={field.wide ? 'md:col-span-2' : ''}>
+        <AttachmentUploader
+          label={field.label}
+          helper={field.helper}
+          accept={field.accept}
+          patientId={patientId}
+          tipo={tipo}
+          categoria={field.key}
+          attachments={attachments}
+          onChange={onAttachmentsChange}
+        />
+      </div>
+    );
+  }
+
   return (
     <Label label={field.label} wide={field.wide}>
       {field.type === 'textarea' ? (

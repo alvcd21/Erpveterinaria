@@ -5,6 +5,22 @@ const router = express.Router();
 const { pool, handleDbError, withTenantContext } = require('../config/db');
 const { authenticateToken } = require('../middleware/auth');
 const emailService = require('../services/emailService');
+const { uploadFile, getSignedImageUrl } = require('../services/r2Storage');
+
+const SIGNED_URL_TTL = Number(process.env.R2_SIGNED_URL_TTL_SECONDS || 3600);
+const CLINICAL_ATTACHMENT_MAX_BYTES = Number(process.env.CLINICAL_ATTACHMENT_MAX_BYTES || 8 * 1024 * 1024);
+const CLINICAL_INLINE_MAX_BYTES = Number(process.env.CLINICAL_INLINE_MAX_BYTES || 1536 * 1024);
+const CLINICAL_ATTACHMENT_MIMES = new Set([
+    'image/jpeg', 'image/png', 'image/webp', 'image/gif',
+    'application/pdf',
+    'application/msword',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/vnd.ms-excel',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'text/plain', 'text/csv',
+    'application/dicom', 'application/octet-stream',
+]);
+const CLINICAL_ATTACHMENT_EXTENSIONS = new Set(['pdf', 'jpg', 'jpeg', 'png', 'webp', 'gif', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'txt', 'dcm']);
 
 function asInt(value) {
     const n = Number(value);
@@ -14,6 +30,105 @@ function asInt(value) {
 function cleanText(value, max = 500) {
     if (value == null) return null;
     return String(value).trim().substring(0, max) || null;
+}
+
+function cleanFilename(value) {
+    return String(value || 'archivo-clinico')
+        .trim()
+        .replace(/[<>:"/\\|?*\x00-\x1F]+/g, '-')
+        .replace(/\s+/g, ' ')
+        .substring(0, 160) || 'archivo-clinico';
+}
+
+function parseDataUrl(value, fallbackMime) {
+    const raw = String(value || '');
+    const match = raw.match(/^data:([^;]+);base64,(.+)$/);
+    if (match) return { mime: match[1], base64: match[2], dataUrl: raw };
+    return { mime: fallbackMime || 'application/octet-stream', base64: raw.replace(/^data:[^;]+;base64,/, ''), dataUrl: null };
+}
+
+function normalizeClinicalAttachments(value) {
+    if (!Array.isArray(value)) return [];
+    return value.slice(0, 12).map((att) => ({
+        id: cleanText(att.id, 80) || `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        nombre: cleanFilename(att.nombre || att.filename),
+        mime: cleanText(att.mime || att.content_type, 120) || 'application/octet-stream',
+        size: Number(att.size || 0),
+        categoria: cleanText(att.categoria || att.category, 80),
+        tipo_registro: cleanText(att.tipo_registro, 40),
+        r2_key: cleanText(att.r2_key, 500),
+        url: cleanText(att.url, 1000),
+        data_url: att.data_url && Number(att.size || 0) <= CLINICAL_INLINE_MAX_BYTES ? String(att.data_url) : undefined,
+        uploaded_at: cleanText(att.uploaded_at, 80) || new Date().toISOString(),
+    })).filter(att => att.r2_key || att.url || att.data_url);
+}
+
+async function hydrateClinicalAttachments(value) {
+    const attachments = normalizeClinicalAttachments(value);
+    return Promise.all(attachments.map(async (att) => {
+        if (!att.r2_key) return att;
+        const signedUrl = await getSignedImageUrl(att.r2_key, SIGNED_URL_TTL).catch(() => null);
+        return { ...att, signed_url: signedUrl, expires_in: signedUrl ? SIGNED_URL_TTL : undefined };
+    }));
+}
+
+async function hydrateClinicalEvent(row) {
+    if (!row) return row;
+    return { ...row, adjuntos: await hydrateClinicalAttachments(row.adjuntos) };
+}
+
+async function createClinicalAttachment(req, idPaciente, body = {}) {
+    const filename = cleanFilename(body.filename || body.nombre);
+    const parsed = parseDataUrl(body.base64 || body.data_url, body.mime);
+    const mime = cleanText(body.mime || parsed.mime, 120) || 'application/octet-stream';
+    const ext = String(filename || '').split('.').pop()?.toLowerCase() || '';
+    if (!parsed.base64) {
+        const err = new Error('Debe seleccionar un archivo valido.');
+        err.statusCode = 400;
+        throw err;
+    }
+    if ((!mime || mime === 'application/octet-stream' || !CLINICAL_ATTACHMENT_MIMES.has(mime)) && !CLINICAL_ATTACHMENT_EXTENSIONS.has(ext)) {
+        const err = new Error('Tipo de archivo no permitido para el expediente clinico.');
+        err.statusCode = 400;
+        throw err;
+    }
+    const sizeBytes = Number(body.size || Math.ceil(parsed.base64.length * 0.75));
+    if (sizeBytes > CLINICAL_ATTACHMENT_MAX_BYTES) {
+        const err = new Error(`El archivo supera el limite de ${Math.round(CLINICAL_ATTACHMENT_MAX_BYTES / 1024 / 1024)} MB.`);
+        err.statusCode = 400;
+        throw err;
+    }
+
+    const attachment = {
+        id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        nombre: filename,
+        mime,
+        size: sizeBytes,
+        categoria: cleanText(body.categoria || 'adjunto', 80),
+        tipo_registro: cleanText(body.tipo || body.tipo_registro || 'general', 40),
+        uploaded_at: new Date().toISOString(),
+    };
+
+    if (process.env.R2_ACCOUNT_ID && process.env.R2_BUCKET_NAME) {
+        const folder = `consultorio/${attachment.tipo_registro || 'general'}`;
+        attachment.r2_key = await uploadFile({
+            base64: parsed.base64,
+            mime,
+            tenantId: req.tenantId,
+            folder,
+            ownerId: idPaciente,
+            filename,
+        });
+        const signedUrl = await getSignedImageUrl(attachment.r2_key, SIGNED_URL_TTL).catch(() => null);
+        return { ...attachment, signed_url: signedUrl, expires_in: signedUrl ? SIGNED_URL_TTL : undefined };
+    }
+
+    if (sizeBytes > CLINICAL_INLINE_MAX_BYTES) {
+        const err = new Error('Cloudflare R2 no esta configurado y el archivo es demasiado grande para almacenamiento temporal.');
+        err.statusCode = 503;
+        throw err;
+    }
+    return { ...attachment, data_url: parsed.dataUrl || `data:${mime};base64,${parsed.base64}` };
 }
 
 function appointmentSelect() {
@@ -1091,7 +1206,8 @@ router.get('/consultorio/pacientes/:id/eventos', authenticateToken, async (req, 
             ORDER BY fecha_evento DESC
             LIMIT $${limitParam} OFFSET $${offsetParam}
         `, params);
-        res.json(rows.map(r => ({ ...r, tipoLabel: consultorioTypeLabel(r.tipo) })));
+        const hydrated = await Promise.all(rows.map(r => hydrateClinicalEvent({ ...r, tipoLabel: consultorioTypeLabel(r.tipo) })));
+        res.json(hydrated);
     } catch (e) { handleDbError(res, e); }
 });
 
@@ -1152,8 +1268,23 @@ router.get('/consultorio/pacientes/:id/timeline', authenticateToken, async (req,
             .sort((a, b) => new Date(b.fecha_evento).getTime() - new Date(a.fecha_evento).getTime());
         const l = safeLimit(limit, 40, 120);
         const o = Math.max(asInt(offset) || 0, 0);
-        res.json(items.slice(o, o + l));
+        const hydrated = await Promise.all(items.slice(o, o + l).map(hydrateClinicalEvent));
+        res.json(hydrated);
     } catch (e) { handleDbError(res, e); }
+});
+
+router.post('/consultorio/pacientes/:id/adjuntos', authenticateToken, async (req, res) => {
+    try {
+        const id = asInt(req.params.id);
+        if (!id) return res.status(400).json({ error: 'id_paciente invalido' });
+        const patient = await loadConsultorioPatient(pool, req.tenantId, id);
+        if (!patient) return res.status(404).json({ error: 'Paciente no encontrado' });
+        const attachment = await createClinicalAttachment(req, id, req.body || {});
+        res.status(201).json(attachment);
+    } catch (e) {
+        if (e.statusCode) return res.status(e.statusCode).json({ error: e.message });
+        handleDbError(res, e);
+    }
 });
 
 router.post('/consultorio/pacientes/:id/eventos', authenticateToken, async (req, res) => {
@@ -1172,7 +1303,7 @@ router.post('/consultorio/pacientes/:id/eventos', authenticateToken, async (req,
             const resumen = cleanText(b.resumen || eventSummary(tipo, payload, b.detalle), 6000);
             const detalle = cleanText(b.detalle || payload.detalle || payload.observaciones, 8000);
             const fechaEvento = b.fecha_evento || payload.fecha || new Date().toISOString();
-            const adjuntos = Array.isArray(b.adjuntos) ? b.adjuntos : [];
+            const adjuntos = normalizeClinicalAttachments(b.adjuntos);
             const correoDestino = b.correo_destino || patient.tutorCorreo || null;
             const shouldEmail = Boolean(b.enviar_correo || tipo === 'mensaje');
             const { rows } = await client.query(`
@@ -1252,7 +1383,8 @@ router.post('/consultorio/pacientes/:id/eventos', authenticateToken, async (req,
 
             return event;
         });
-        res.status(201).json({ ...created, tipoLabel: consultorioTypeLabel(created.tipo) });
+        const hydrated = await hydrateClinicalEvent({ ...created, tipoLabel: consultorioTypeLabel(created.tipo) });
+        res.status(201).json(hydrated);
     } catch (e) {
         if (e.statusCode) return res.status(e.statusCode).json({ error: e.message });
         handleDbError(res, e);
@@ -1265,7 +1397,7 @@ router.put('/consultorio/eventos/:id', authenticateToken, async (req, res) => {
         if (!id) return res.status(400).json({ error: 'id_evento inválido' });
         const b = req.body || {};
         const payload = b.payload && typeof b.payload === 'object' ? b.payload : {};
-        const adjuntos = Array.isArray(b.adjuntos) ? b.adjuntos : [];
+        const adjuntos = normalizeClinicalAttachments(b.adjuntos);
         const { rows } = await pool.query(`
             UPDATE paciente_eventos_clinicos SET
                 titulo = COALESCE($1, titulo),
@@ -1290,7 +1422,8 @@ router.put('/consultorio/eventos/:id', authenticateToken, async (req, res) => {
             req.tenantId,
         ]);
         if (!rows.length) return res.status(404).json({ error: 'Registro clínico no encontrado' });
-        res.json({ ...rows[0], tipoLabel: consultorioTypeLabel(rows[0].tipo) });
+        const hydrated = await hydrateClinicalEvent({ ...rows[0], tipoLabel: consultorioTypeLabel(rows[0].tipo) });
+        res.json(hydrated);
     } catch (e) { handleDbError(res, e); }
 });
 

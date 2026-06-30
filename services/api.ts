@@ -330,6 +330,8 @@ export const ConsultorioService = {
     request<ConsultorioEvento>(`/consultorio/pacientes/${id}/eventos`, { method: 'POST', body: JSON.stringify(data) }),
   updateEvento: (id: number, data: Partial<ConsultorioEvento>) =>
     request<ConsultorioEvento>(`/consultorio/eventos/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  uploadAdjunto: (id: number, data: { filename: string; mime: string; size: number; base64: string; tipo?: string; categoria?: string }) =>
+    request<any>(`/consultorio/pacientes/${id}/adjuntos`, { method: 'POST', body: JSON.stringify(data) }),
 };
 
 export const ServiciosVeterinariosService = {

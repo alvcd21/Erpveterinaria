@@ -29,11 +29,23 @@ function getBucket() {
     return bucket;
 }
 
+function safeExtension(filename, fallback = 'jpg') {
+    const ext = String(filename || '').split('.').pop()?.toLowerCase() || fallback;
+    const safe = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'txt', 'dcm'].includes(ext) ? ext : fallback;
+    return safe;
+}
+
 function generateKey(tenantId, medicamentoId, filename) {
-    const ext = String(filename || '').split('.').pop()?.toLowerCase() || 'jpg';
-    const safe = ['jpg', 'jpeg', 'png', 'webp', 'gif'].includes(ext) ? ext : 'jpg';
+    const safe = ['jpg', 'jpeg', 'png', 'webp', 'gif'].includes(safeExtension(filename)) ? safeExtension(filename) : 'jpg';
     const uid = crypto.randomBytes(12).toString('hex');
     return `medicamentos/${tenantId}/${medicamentoId}/${uid}.${safe}`;
+}
+
+function generateFileKey({ tenantId, folder = 'archivos', ownerId = 'general', filename }) {
+    const safeFolder = String(folder || 'archivos').replace(/[^a-zA-Z0-9/_-]+/g, '-').replace(/^\/+|\/+$/g, '');
+    const safeOwner = String(ownerId || 'general').replace(/[^a-zA-Z0-9_-]+/g, '-');
+    const uid = crypto.randomBytes(12).toString('hex');
+    return `${safeFolder}/${tenantId}/${safeOwner}/${uid}.${safeExtension(filename, 'bin')}`;
 }
 
 async function uploadImage({ base64, mime, tenantId, medicamentoId, filename }) {
@@ -47,6 +59,21 @@ async function uploadImage({ base64, mime, tenantId, medicamentoId, filename }) 
         Body: buffer,
         ContentType: mime || 'image/jpeg',
         CacheControl: 'public, max-age=31536000',
+    }));
+    return key;
+}
+
+async function uploadFile({ base64, mime, tenantId, folder, ownerId, filename }) {
+    const client = getClient();
+    const bucket = getBucket();
+    const buffer = Buffer.from(String(base64 || '').replace(/^data:[^;]+;base64,/, ''), 'base64');
+    const key = generateFileKey({ tenantId, folder, ownerId, filename });
+    await client.send(new PutObjectCommand({
+        Bucket: bucket,
+        Key: key,
+        Body: buffer,
+        ContentType: mime || 'application/octet-stream',
+        CacheControl: 'private, max-age=3600',
     }));
     return key;
 }
@@ -74,4 +101,4 @@ async function downloadImage(key) {
     };
 }
 
-module.exports = { uploadImage, deleteImage, getSignedImageUrl, downloadImage };
+module.exports = { uploadImage, uploadFile, deleteImage, getSignedImageUrl, downloadImage };

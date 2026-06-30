@@ -6,8 +6,17 @@ import {
 } from 'lucide-react';
 import { ConsultorioTipo, Paciente } from '../../types';
 
-export type FieldType = 'text' | 'textarea' | 'date' | 'select' | 'number';
-export type FieldDef = { key: string; label: string; type?: FieldType; options?: string[]; wide?: boolean; placeholder?: string };
+export type FieldType = 'text' | 'textarea' | 'date' | 'select' | 'number' | 'file';
+export type FieldDef = {
+  key: string;
+  label: string;
+  type?: FieldType;
+  options?: string[];
+  wide?: boolean;
+  placeholder?: string;
+  accept?: string;
+  helper?: string;
+};
 export type ConsultorioModule = { tipo: ConsultorioTipo; label: string; icon: React.ElementType; accent: string; creatable?: boolean };
 
 export const MODULES: ConsultorioModule[] = [
@@ -129,7 +138,14 @@ export function fieldsFor(tipo: ConsultorioTipo): FieldDef[] {
       { key: 'profesional', label: 'Profesional' },
       { key: 'prueba', label: 'Prueba/examen' },
       { key: 'cantidad', label: 'Cantidad', type: 'number' },
-      { key: 'resultado', label: 'Resultado/adjunto' },
+      {
+        key: 'resultado_adjunto',
+        label: 'Resultado/adjunto',
+        type: 'file',
+        wide: true,
+        accept: '.pdf,.jpg,.jpeg,.png,.webp,.doc,.docx,.xls,.xlsx,.csv,.txt',
+        helper: 'Suba resultados de laboratorio, fotografias, PDF o documentos del examen.',
+      },
       { key: 'diagnostico', label: 'Diagnóstico presuntivo', type: 'textarea', wide: true },
     ],
     imagenologia: [
@@ -140,6 +156,14 @@ export function fieldsFor(tipo: ConsultorioTipo): FieldDef[] {
       { key: 'signos_clinicos', label: 'Signos clínicos', type: 'textarea', wide: true },
       { key: 'diagnostico', label: 'Diagnóstico presuntivo', type: 'textarea', wide: true },
       { key: 'tipo_estudio', label: 'Tipo de estudio', type: 'textarea', wide: true },
+      {
+        key: 'imagenes_resultados',
+        label: 'Adjuntos/resultados',
+        type: 'file',
+        wide: true,
+        accept: '.pdf,.jpg,.jpeg,.png,.webp,.dcm,.doc,.docx',
+        helper: 'Adjunte radiografias, ecografias, imagenes diagnosticas, DICOM o informe PDF.',
+      },
     ],
     seguimiento: [
       { key: 'tipo_seguimiento', label: 'Tipo de seguimiento', type: 'select', options: ['Revisión de consulta', 'Postoperatorio', 'Tratamiento', 'Vacuna', 'Otro'] },
@@ -153,6 +177,14 @@ export function fieldsFor(tipo: ConsultorioTipo): FieldDef[] {
       { key: 'nombre_documento', label: 'Nombre del documento' },
       { key: 'requiere_firma', label: 'Requiere firma', type: 'select', options: ['Sí', 'No'] },
       { key: 'contenido', label: 'Contenido', type: 'textarea', wide: true },
+      {
+        key: 'archivo_documento',
+        label: 'Documento firmado/soporte',
+        type: 'file',
+        wide: true,
+        accept: '.pdf,.jpg,.jpeg,.png,.webp,.doc,.docx',
+        helper: 'Suba consentimientos firmados, altas medicas o documentos externos.',
+      },
     ],
     remision: [
       { key: 'profesional', label: 'Profesional que remite' },
