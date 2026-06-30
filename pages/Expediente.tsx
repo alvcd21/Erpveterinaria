@@ -5,11 +5,14 @@ import { ConsultorioService } from '../services/api';
 import { ConsultorioBusquedaItem, ConsultorioEvento, ConsultorioPacienteDetalle, ConsultorioTipo, Paciente } from '../types';
 import {
   ChevronLeft, ChevronRight, PawPrint,
-  Plus, RefreshCw, Search, Send,
+  FileDown, Plus, RefreshCw, Search, Send,
   Users, X,
 } from 'lucide-react';
 import Swal from 'sweetalert2';
+import { ClinicalHistoryExportModal } from '../components/consultorio/ClinicalHistoryExportModal';
 import { AttachmentList, AttachmentUploader, type ClinicalAttachment } from '../components/consultorio/ClinicalAttachments';
+import { LaboratoryTestsEditor } from '../components/consultorio/LaboratoryTestsEditor';
+import { ProfessionalSelect } from '../components/consultorio/ProfessionalSelect';
 import { FieldDef, MODULES, fieldsFor, fmtDate, initials, moduleFor, nowLocal, patientSubtitle } from '../components/consultorio/consultorioConfig';
 
 const PAGE_SIZE = 20;
@@ -39,6 +42,7 @@ export default function Expediente() {
   const [loadingSearch, setLoadingSearch] = useState(false);
   const [loadingRecord, setLoadingRecord] = useState(false);
   const [modal, setModal] = useState<EventForm | null>(null);
+  const [exportOpen, setExportOpen] = useState(false);
 
   const patient = detail?.paciente;
   const activeModule = useMemo(() => moduleFor(active), [active]);
@@ -103,7 +107,7 @@ export default function Expediente() {
     e.preventDefault();
     if (!modal || !patient) return;
     const payload = modal.payload || {};
-    const resumen = modal.resumen || payload.mensaje || payload.motivo || payload.diagnostico || payload.observaciones || payload.detalles || '';
+    const resumen = modal.resumen || payloadSummary(modal.tipo, payload);
     const detalle = modal.detalle || payload.contenido || payload.descripcion || payload.plan || payload.notas || payload.observaciones || '';
     try {
       await ConsultorioService.createEvento(patient.id_paciente, {
@@ -157,6 +161,7 @@ export default function Expediente() {
                   <input value={q} onChange={e => setQ(e.target.value)} onKeyDown={e => e.key === 'Enter' && refreshSection(0)} placeholder="Buscar en esta sección" className="w-full sm:w-64 pl-9 pr-3 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm" />
                 </div>
                 <button onClick={() => refreshSection(0)} className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-50"><RefreshCw size={16} /> Filtrar</button>
+                <button onClick={() => setExportOpen(true)} className="inline-flex items-center justify-center gap-2 rounded-xl border border-indigo-200 px-3 py-2.5 text-sm font-semibold text-indigo-700 hover:bg-indigo-50"><FileDown size={16} /> Exportar</button>
                 {activeModule.creatable && (
                   <button onClick={() => openCreate()} className="inline-flex items-center justify-center gap-2 rounded-xl bg-teal-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-teal-700">
                     <Plus size={17} /> Registrar
@@ -190,6 +195,9 @@ export default function Expediente() {
 
       {modal && patient && (
         <EventModal form={modal} patient={patient} setForm={setModal} onClose={() => setModal(null)} onSubmit={saveEvent} />
+      )}
+      {exportOpen && patient && (
+        <ClinicalHistoryExportModal patient={patient} onClose={() => setExportOpen(false)} />
       )}
     </div>
   );
@@ -301,7 +309,7 @@ function TimelineCard({ item }: { item: ConsultorioEvento }) {
   const mod = moduleFor(item.tipo);
   const Icon = mod.icon;
   const payload = item.payload || {};
-  const chips = Object.entries(payload).filter(([, v]) => v !== null && v !== undefined && String(v).trim() !== '').slice(0, 6);
+  const chips = Object.entries(payload).filter(([, v]) => v !== null && v !== undefined && displayPayloadValue(v).trim() !== '').slice(0, 6);
   const attachments = Array.isArray(item.adjuntos) ? item.adjuntos as ClinicalAttachment[] : [];
   return (
     <article className="rounded-2xl border border-slate-200 bg-white p-4 hover:border-teal-200 transition-colors">
@@ -321,7 +329,7 @@ function TimelineCard({ item }: { item: ConsultorioEvento }) {
       {(item.resumen || item.detalle) && <p className="mt-3 text-sm text-slate-600 whitespace-pre-wrap">{item.resumen || item.detalle}</p>}
       {chips.length > 0 && (
         <div className="mt-3 flex flex-wrap gap-2">
-          {chips.map(([k, v]) => <span key={k} className="rounded-full bg-slate-50 border border-slate-100 px-2.5 py-1 text-xs text-slate-500"><b>{k.replace(/_/g, ' ')}:</b> {String(v).slice(0, 45)}</span>)}
+          {chips.map(([k, v]) => <span key={k} className="rounded-full bg-slate-50 border border-slate-100 px-2.5 py-1 text-xs text-slate-500"><b>{k.replace(/_/g, ' ')}:</b> {displayPayloadValue(v).slice(0, 45)}</span>)}
         </div>
       )}
       {attachments.length > 0 && (
@@ -337,7 +345,8 @@ function EventModal({ form, patient, setForm, onClose, onSubmit }: {
   const mod = moduleFor(form.tipo);
   const Icon = mod.icon;
   const fields = fieldsFor(form.tipo);
-  const hasFileField = fields.some(field => field.type === 'file');
+  const visibleFields = form.tipo === 'laboratorio' ? fields.filter(field => field.key === 'diagnostico') : fields;
+  const hasFileField = form.tipo === 'laboratorio' || visibleFields.some(field => field.type === 'file');
   const updatePayload = (key: string, value: any) => setForm({ ...form, payload: { ...form.payload, [key]: value } });
   const updateAttachments = (adjuntos: ClinicalAttachment[]) => setForm({ ...form, adjuntos });
   return (
@@ -361,7 +370,17 @@ function EventModal({ form, patient, setForm, onClose, onSubmit }: {
             </label>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-            {fields.map(field => (
+            {form.tipo === 'laboratorio' && (
+              <LaboratoryTestsEditor
+                value={Array.isArray(form.payload.pruebas) ? form.payload.pruebas : []}
+                onChange={value => updatePayload('pruebas', value)}
+                patientId={patient.id_paciente}
+                tipo={form.tipo}
+                attachments={form.adjuntos}
+                onAttachmentsChange={updateAttachments}
+              />
+            )}
+            {visibleFields.map(field => (
               <Field
                 key={field.key}
                 field={field}
@@ -386,9 +405,6 @@ function EventModal({ form, patient, setForm, onClose, onSubmit }: {
               onChange={updateAttachments}
             />
           )}
-          <Label label="Resumen visible en historial">
-            <textarea value={form.resumen} onChange={e => setForm({ ...form, resumen: e.target.value })} placeholder="Resumen clínico corto para la línea de tiempo" className={`${INPUT_CLASS} min-h-[90px]`} />
-          </Label>
         </div>
         <div className="sticky bottom-0 bg-white border-t border-slate-100 px-6 py-5 flex gap-3">
           <button type="button" onClick={onClose} className="flex-1 px-4 py-3 rounded-xl bg-slate-100 font-semibold text-slate-600">Cancelar</button>
@@ -424,7 +440,13 @@ function Field({ field, value, onChange, patientId, tipo, attachments, onAttachm
       </div>
     );
   }
-
+  if (field.type === 'professional') {
+    return (
+      <Label label={field.label} wide={field.wide}>
+        <ProfessionalSelect value={value} onChange={onChange} />
+      </Label>
+    );
+  }
   return (
     <Label label={field.label} wide={field.wide}>
       {field.type === 'textarea' ? (
@@ -442,7 +464,7 @@ function Field({ field, value, onChange, patientId, tipo, attachments, onAttachm
 }
 
 function Label({ label, children, wide }: { label: string; children: React.ReactNode; wide?: boolean }) {
-  return <label className={`block text-sm font-semibold text-indigo-900/70 ${wide ? 'md:col-span-2' : ''}`}><span>{label}</span><div className="mt-2">{children}</div></label>;
+  return <label className={`block text-sm font-normal text-indigo-900/70 ${wide ? 'md:col-span-2' : ''}`}><span>{label}</span><div className="mt-2">{children}</div></label>;
 }
 
 function Info({ label, value }: { label: string; value?: React.ReactNode }) {
@@ -458,4 +480,18 @@ function EmptyState({ label, onCreate }: { label: string; onCreate?: () => void 
       {onCreate && <button onClick={onCreate} className="mt-4 inline-flex items-center gap-2 rounded-xl bg-teal-600 px-4 py-2.5 text-sm font-semibold text-white"><Plus size={16} /> Registrar</button>}
     </div>
   );
+}
+
+function payloadSummary(tipo: ConsultorioTipo, payload: Record<string, any>) {
+  if (tipo === 'laboratorio' && Array.isArray(payload.pruebas)) {
+    const pruebas = payload.pruebas.map((item: any) => item.prueba).filter(Boolean).join(', ');
+    if (pruebas) return `Pruebas solicitadas: ${pruebas}`;
+  }
+  return payload.mensaje || payload.motivo || payload.diagnostico || payload.observaciones || payload.detalles || '';
+}
+
+function displayPayloadValue(value: any): string {
+  if (Array.isArray(value)) return value.map(displayPayloadValue).filter(Boolean).join('; ');
+  if (value && typeof value === 'object') return value.nombre || value.prueba || value.titulo || JSON.stringify(value);
+  return String(value ?? '');
 }

@@ -40,6 +40,8 @@ type AttachmentUploaderProps = {
   label: string;
   helper?: string;
   accept?: string;
+  compact?: boolean;
+  buttonLabel?: string;
   patientId: number;
   tipo: ConsultorioTipo;
   categoria?: string;
@@ -47,7 +49,7 @@ type AttachmentUploaderProps = {
   onChange: (items: ClinicalAttachment[]) => void;
 };
 
-export function AttachmentUploader({ label, helper, accept, patientId, tipo, categoria = 'adjunto', attachments, onChange }: AttachmentUploaderProps) {
+export function AttachmentUploader({ label, helper, accept, compact = false, buttonLabel = 'Agregar', patientId, tipo, categoria = 'adjunto', attachments, onChange }: AttachmentUploaderProps) {
   const [uploading, setUploading] = useState(false);
   const inputId = useMemo(() => `clinical-file-${tipo}-${categoria}-${Math.random().toString(16).slice(2)}`, [tipo, categoria]);
   const visibleAttachments = attachments.filter(att => (att.categoria || 'adjunto') === categoria);
@@ -88,6 +90,36 @@ export function AttachmentUploader({ label, helper, accept, patientId, tipo, cat
     onChange(attachments.filter(att => attachmentKey(att) !== attachmentKey(attachment)));
   };
 
+  const fileInput = (
+    <input
+      id={inputId}
+      type="file"
+      accept={accept}
+      multiple
+      className="hidden"
+      onChange={e => {
+        handleFiles(e.target.files);
+        e.currentTarget.value = '';
+      }}
+    />
+  );
+
+  if (compact) {
+    return (
+      <div>
+        {fileInput}
+        <label
+          htmlFor={inputId}
+          className={`inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-sm font-medium text-indigo-700 hover:bg-indigo-100 ${uploading ? 'pointer-events-none opacity-60' : ''}`}
+        >
+          <Upload size={16} />
+          {uploading ? 'Subiendo...' : buttonLabel}
+        </label>
+        <AttachmentList attachments={visibleAttachments} onRemove={removeAttachment} compact />
+      </div>
+    );
+  }
+
   return (
     <section className="rounded-2xl border border-teal-100 bg-teal-50/30 p-4">
       <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
@@ -96,23 +128,13 @@ export function AttachmentUploader({ label, helper, accept, patientId, tipo, cat
           {helper && <p className="mt-1 text-xs text-slate-500">{helper}</p>}
         </div>
         <div>
-          <input
-            id={inputId}
-            type="file"
-            accept={accept}
-            multiple
-            className="hidden"
-            onChange={e => {
-              handleFiles(e.target.files);
-              e.currentTarget.value = '';
-            }}
-          />
+          {fileInput}
           <label
             htmlFor={inputId}
             className={`inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-indigo-200 bg-white px-4 py-2.5 text-sm font-medium text-indigo-700 shadow-sm hover:bg-indigo-50 ${uploading ? 'pointer-events-none opacity-60' : ''}`}
           >
             <Upload size={16} />
-            {uploading ? 'Subiendo...' : 'Agregar'}
+            {uploading ? 'Subiendo...' : buttonLabel}
           </label>
         </div>
       </div>

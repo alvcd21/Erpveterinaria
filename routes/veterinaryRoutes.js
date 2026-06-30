@@ -1060,6 +1060,93 @@ router.post('/recordatorios/:id/enviar', authenticateToken, async (req, res) => 
 });
 
 // Consultorio clínico
+router.get('/consultorio/catalogos/profesionales', authenticateToken, async (req, res) => {
+    try {
+        const { q, limit = 30 } = req.query;
+        const params = [req.tenantId];
+        let where = `
+            WHERE COALESCE(e.tenant_id, u.tenant_id) = $1
+              AND COALESCE(e.estado, u.estado, 'Activo') = 'Activo'
+        `;
+        if (q) {
+            params.push(likeTerm(q));
+            where += ` AND (
+                e.identidad ILIKE $${params.length}
+                OR e.nombre ILIKE $${params.length}
+                OR e.apellido ILIKE $${params.length}
+                OR e.correo ILIKE $${params.length}
+                OR e.telefono ILIKE $${params.length}
+                OR u.usuario ILIKE $${params.length}
+            )`;
+        }
+        const l = safeLimit(limit, 30, 80);
+        params.push(l);
+        const { rows } = await pool.query(`
+            SELECT DISTINCT ON (COALESCE(u.codUsuario::text, e.identidad))
+                   COALESCE(u.codUsuario::text, e.identidad) AS id,
+                   COALESCE(NULLIF(TRIM(COALESCE(e.nombre, '') || ' ' || COALESCE(e.apellido, '')), ''), u.usuario, e.identidad) AS nombre,
+                   u.usuario,
+                   e.identidad,
+                   e.telefono,
+                   e.correo,
+                   u.id_sucursal,
+                   r.nombre AS rol
+            FROM empleado e
+            FULL OUTER JOIN usuarios u ON u.identidad = e.identidad AND u.tenant_id = e.tenant_id
+            LEFT JOIN roles r ON r.idrol = u.idrol AND r.tenant_id = u.tenant_id
+            ${where}
+            ORDER BY COALESCE(u.codUsuario::text, e.identidad), nombre
+            LIMIT $${params.length}
+        `, params);
+        res.json(rows);
+    } catch (e) { handleDbError(res, e); }
+});
+
+router.get('/consultorio/catalogos/laboratorio-pruebas', authenticateToken, async (req, res) => {
+    try {
+        const { q, limit = 40 } = req.query;
+        const params = [req.tenantId];
+        let where = 'WHERE tenant_id = $1 AND activo = TRUE';
+        if (q) {
+            params.push(likeTerm(q));
+            where += ` AND (nombre ILIKE $${params.length} OR categoria ILIKE $${params.length} OR descripcion ILIKE $${params.length})`;
+        }
+        const l = safeLimit(limit, 40, 100);
+        params.push(l);
+        const { rows } = await pool.query(`
+            SELECT id_prueba AS id, categoria, nombre, descripcion, activo
+            FROM laboratorio_pruebas
+            ${where}
+            ORDER BY categoria NULLS LAST, nombre
+            LIMIT $${params.length}
+        `, params);
+        res.json(rows);
+    } catch (e) { handleDbError(res, e); }
+});
+
+router.post('/consultorio/catalogos/laboratorio-pruebas', authenticateToken, async (req, res) => {
+    try {
+        const nombre = cleanText(req.body?.nombre, 180);
+        if (!nombre) return res.status(400).json({ error: 'El nombre de la prueba es requerido' });
+        const categoria = cleanText(req.body?.categoria, 120);
+        const descripcion = cleanText(req.body?.descripcion, 1000);
+        const existing = await pool.query(`
+            SELECT id_prueba AS id, categoria, nombre, descripcion, activo
+            FROM laboratorio_pruebas
+            WHERE tenant_id = $1 AND lower(nombre) = lower($2)
+            LIMIT 1
+        `, [req.tenantId, nombre]);
+        if (existing.rows.length) return res.json(existing.rows[0]);
+
+        const { rows } = await pool.query(`
+            INSERT INTO laboratorio_pruebas (tenant_id, categoria, nombre, descripcion)
+            VALUES ($1,$2,$3,$4)
+            RETURNING id_prueba AS id, categoria, nombre, descripcion, activo
+        `, [req.tenantId, categoria, nombre, descripcion]);
+        res.status(201).json(rows[0]);
+    } catch (e) { handleDbError(res, e); }
+});
+
 router.get('/consultorio/search', authenticateToken, async (req, res) => {
     try {
         const { q, limit = 20, offset = 0 } = req.query;

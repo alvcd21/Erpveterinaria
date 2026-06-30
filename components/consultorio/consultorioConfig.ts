@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { ConsultorioTipo, Paciente } from '../../types';
 
-export type FieldType = 'text' | 'textarea' | 'date' | 'select' | 'number' | 'file';
+export type FieldType = 'text' | 'textarea' | 'date' | 'select' | 'number' | 'file' | 'professional' | 'lab_tests';
 export type FieldDef = {
   key: string;
   label: string;
@@ -135,7 +135,7 @@ export function fieldsFor(tipo: ConsultorioTipo): FieldDef[] {
       { key: 'notas', label: 'Notas', type: 'textarea', wide: true },
     ],
     laboratorio: [
-      { key: 'profesional', label: 'Profesional' },
+      { key: 'profesional', label: 'Profesional', type: 'professional' },
       { key: 'prueba', label: 'Prueba/examen' },
       { key: 'cantidad', label: 'Cantidad', type: 'number' },
       {
@@ -149,7 +149,7 @@ export function fieldsFor(tipo: ConsultorioTipo): FieldDef[] {
       { key: 'diagnostico', label: 'Diagnóstico presuntivo', type: 'textarea', wide: true },
     ],
     imagenologia: [
-      { key: 'profesional', label: 'Profesional' },
+      { key: 'profesional', label: 'Profesional', type: 'professional' },
       { key: 'ayuda_diagnostica', label: 'Ayuda diagnóstica', type: 'select', options: ['Ecografía', 'Radiografía', 'Tomografía', 'Endoscopia', 'Otro'] },
       { key: 'modalidad', label: 'Protocolo/modalidad' },
       { key: 'requiere_sedacion', label: 'Requiere sedación', type: 'select', options: ['No', 'Sí'] },
@@ -187,7 +187,7 @@ export function fieldsFor(tipo: ConsultorioTipo): FieldDef[] {
       },
     ],
     remision: [
-      { key: 'profesional', label: 'Profesional que remite' },
+      { key: 'profesional', label: 'Profesional que remite', type: 'professional' },
       { key: 'centro_destino', label: 'Centro veterinario destino' },
       { key: 'procedimiento', label: 'Procedimiento/razón', type: 'textarea', wide: true },
       commonObs,

@@ -317,6 +317,16 @@ export const ConsultorioService = {
     const qs = params ? '?' + new URLSearchParams(Object.entries(params).filter(([, v]) => v !== undefined && v !== '').map(([k, v]) => [k, String(v)])).toString() : '';
     return request<ConsultorioBusquedaItem[]>(`/consultorio/search${qs}`);
   },
+  getProfesionales: (params?: { q?: string; limit?: number }) => {
+    const qs = params ? '?' + new URLSearchParams(Object.entries(params).filter(([, v]) => v !== undefined && v !== '').map(([k, v]) => [k, String(v)])).toString() : '';
+    return request<any[]>(`/consultorio/catalogos/profesionales${qs}`);
+  },
+  getLaboratorioPruebas: (params?: { q?: string; limit?: number }) => {
+    const qs = params ? '?' + new URLSearchParams(Object.entries(params).filter(([, v]) => v !== undefined && v !== '').map(([k, v]) => [k, String(v)])).toString() : '';
+    return request<any[]>(`/consultorio/catalogos/laboratorio-pruebas${qs}`);
+  },
+  createLaboratorioPrueba: (data: { nombre: string; categoria?: string; descripcion?: string }) =>
+    request<any>('/consultorio/catalogos/laboratorio-pruebas', { method: 'POST', body: JSON.stringify(data) }),
   getPaciente: (id: number) => request<ConsultorioPacienteDetalle>(`/consultorio/pacientes/${id}`),
   getTimeline: (id: number, params?: { tipo?: ConsultorioTipo; q?: string; limit?: number; offset?: number }) => {
     const qs = params ? '?' + new URLSearchParams(Object.entries(params).filter(([, v]) => v !== undefined && v !== '').map(([k, v]) => [k, String(v)])).toString() : '';
