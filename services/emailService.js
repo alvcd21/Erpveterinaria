@@ -569,7 +569,7 @@ async function sendAppointmentConfirmationEmail(to, appointment) {
         const patient = appointment.paciente || appointment.pacienteNombre || 'su mascota';
         const tutor = appointment.tutor || appointment.tutorNombre || '';
         const type = appointment.tipoCitaNombre || appointment.tipo || 'Cita veterinaria';
-        const vet = appointment.veterinarioNombre || appointment.veterinario || 'Equipo clinico';
+        const vet = appointment.veterinarioNombre || appointment.veterinario || 'Equipo clínico';
         const when = fmtDateTime(appointment.fecha_inicio);
         const html = wrapHtml(
             `Cita programada para ${patient}`,
@@ -645,6 +645,52 @@ async function sendAppointmentAgendaEmail(to, { fecha, citas = [], resumen = {} 
         return { success: true };
     } catch (err) {
         console.error('[emailService] sendAppointmentAgendaEmail error:', err.message);
+        throw err;
+    }
+}
+
+async function sendClinicalOwnerNotificationEmail(to, data = {}) {
+    await warmEmailConfig();
+    try {
+        const company = getCOMPANY();
+        const patient = data.paciente || data.pacienteNombre || 'su mascota';
+        const tutor = data.tutor || data.tutorNombre || '';
+        const type = data.tipoLabel || data.tipo || 'Seguimiento clínico';
+        const title = data.titulo || `Actualización clínica de ${patient}`;
+        const when = fmtDateTime(data.fecha_evento || data.fecha || new Date());
+        const message = data.mensaje || data.resumen || data.detalle || 'Tiene una actualización en el expediente clínico de su mascota.';
+        const nextControl = data.proximo_control ? fmtDateTime(data.proximo_control) : '';
+        const html = wrapHtml(
+            title,
+            '#0f766e',
+            `${hero(title, `${company} - Consultorio clínico`, '#0f766e')}
+             <div class="body">
+               <p style="font-size:15px;color:#334155;line-height:1.65;">Hola ${escapeHtml(tutor || '')}, compartimos una actualización del expediente clínico de <strong>${escapeHtml(patient)}</strong>.</p>
+               <div class="grid" style="margin:20px 0;">
+                 ${metricCard('Paciente', patient, '#0f766e', type)}
+                 ${metricCard('Fecha de registro', when || 'Reciente', '#2563eb', 'Hora local Honduras')}
+               </div>
+               <div class="card">
+                 <div class="label">Mensaje del equipo clínico</div>
+                 <div class="value" style="font-size:14px;font-weight:500;line-height:1.65;">${escapeHtml(message)}</div>
+               </div>
+               ${nextControl ? `<div class="success-box"><strong>Próximo control:</strong> ${escapeHtml(nextControl)}. Puede responder este correo si necesita coordinar la cita.</div>` : ''}
+               <div class="alert-box">
+                 Este correo es informativo y no sustituye la evaluación presencial de un médico veterinario. Si observa signos de urgencia, comuníquese de inmediato con la clínica.
+               </div>
+               <p class="muted"><strong>${escapeHtml(company)}</strong> mantiene este seguimiento como parte del expediente clínico de ${escapeHtml(patient)}.</p>
+             </div>`,
+            { preheader: `${type} - ${patient}` }
+        );
+        await getResend().emails.send({
+            from: getFROM(),
+            to,
+            subject: `${type} de ${patient} - ${company}`,
+            html,
+        });
+        return { success: true };
+    } catch (err) {
+        console.error('[emailService] sendClinicalOwnerNotificationEmail error:', err.message);
         throw err;
     }
 }
@@ -845,6 +891,7 @@ module.exports = {
     sendVeterinaryReminderEmail: sendVeterinaryReminderEmailV2,
     sendAppointmentConfirmationEmail,
     sendAppointmentAgendaEmail,
+    sendClinicalOwnerNotificationEmail,
     sendMonthlyReportEmail,
     sendMonthlyManagementReportEmail,
     sendFollowUpEmail,

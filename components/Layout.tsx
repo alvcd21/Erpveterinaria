@@ -190,7 +190,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
         { name: 'Agenda General', path: '/agenda', icon: <CalendarDays size={18} />, permission: 'VER_CITAS', planFeature: 'modulo_citas', minimumPlan: 'basico' },
         { name: 'Agenda Personal', path: '/agenda-personal', icon: <Stethoscope size={18} />, permission: 'VER_AGENDA_PERSONAL', planFeature: 'modulo_citas', minimumPlan: 'basico' },
         { name: 'Disponibilidad', path: '/agenda/disponibilidad', icon: <CalendarClock size={18} />, permission: 'VER_DISPONIBILIDAD_AGENDA', planFeature: 'modulo_citas', minimumPlan: 'basico' },
-        { name: 'Expediente', path: '/expediente', icon: <FileHeart size={18} />, permission: 'VER_EXPEDIENTE', planFeature: 'modulo_expediente', minimumPlan: 'profesional' },
+        { name: 'Consultorio', path: '/consultorio', icon: <FileHeart size={18} />, permission: 'VER_EXPEDIENTE', planFeature: 'modulo_expediente', minimumPlan: 'profesional' },
         { name: 'Vacunas', path: '/vacunas', icon: <Syringe size={18} />, permission: 'VER_VACUNAS', planFeature: 'modulo_vacunas', minimumPlan: 'profesional' },
         { name: 'Flowboard', path: '/flowboard', icon: <Activity size={18} />, permission: 'VER_FLOWBOARD', planFeature: 'modulo_hospitalizacion', minimumPlan: 'enterprise' },
       ]
@@ -233,7 +233,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
 
   const getPageTitle = () => {
     const allItems = navigationStructure.flatMap(i => i.subItems ? i.subItems : [i]);
-    const item = allItems.find(i => i.path === location.pathname);
+    const item = allItems.find(i => i.path === location.pathname || (i.path !== '/' && location.pathname.startsWith(`${i.path}/`)));
     return item ? item.name : theme.appName;
   };
 
@@ -241,7 +241,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   const getActiveIcon = () => {
     for (const item of navigationStructure) {
       if (item.subItems) {
-        const sub = item.subItems.find(s => s.path === location.pathname);
+        const sub = item.subItems.find(s => s.path === location.pathname || (s.path !== '/' && location.pathname.startsWith(`${s.path}/`)));
         if (sub) return sub.icon;
       } else if (item.path === location.pathname) return item.icon;
     }
@@ -259,7 +259,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       }
     }
     return flatItems.map(item => {
-      const isActive = location.pathname === item.path;
+      const isActive = location.pathname === item.path || (item.path !== '/' && location.pathname.startsWith(`${item.path}/`));
       return (
         <div key={item.path} className="relative group mb-1">
           <Link
@@ -291,7 +291,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
 
         const isExpanded = expandedMenus.includes(item.name);
         const hasActiveChild = subItemsToRender.some(sub =>
-          sub.path === location.pathname && (!sub.planFeature || hasPlanFeature(sub.planFeature))
+          (sub.path === location.pathname || (sub.path !== '/' && location.pathname.startsWith(`${sub.path}/`))) && (!sub.planFeature || hasPlanFeature(sub.planFeature))
         );
 
         return (
@@ -318,7 +318,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                       </li>
                     );
                   }
-                  const isActive = location.pathname === subItem.path;
+                  const isActive = location.pathname === subItem.path || (subItem.path !== '/' && location.pathname.startsWith(`${subItem.path}/`));
                   return (
                     <li key={subItem.path}>
                       <Link

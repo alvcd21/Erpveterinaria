@@ -128,6 +128,70 @@ function appointmentOverlapsSlot(cita, slotStart, slotEnd) {
     return start < slotEnd.getTime() && end > slotStart.getTime();
 }
 
+const CONSULTORIO_TYPES = {
+    historia: 'Historia',
+    consulta: 'Consulta',
+    vacuna: 'Vacunación',
+    formula: 'Fórmula médica',
+    desparasitacion: 'Desparasitación',
+    hospitalizacion: 'Hospitalización/ambulatorio',
+    cirugia: 'Cirugía/procedimiento',
+    orden: 'Orden',
+    laboratorio: 'Examen de laboratorio',
+    imagenologia: 'Imagen diagnóstica',
+    grooming: 'Peluquería y spa',
+    guarderia: 'Guardería',
+    seguimiento: 'Seguimiento',
+    documento: 'Documento/consentimiento',
+    remision: 'Remisión',
+    cita: 'Cita',
+    mensaje: 'Mensaje al propietario',
+};
+
+function consultorioTypeLabel(tipo) {
+    return CONSULTORIO_TYPES[tipo] || 'Registro clínico';
+}
+
+function safeLimit(value, fallback = 40, max = 200) {
+    return Math.min(Math.max(asInt(value) || fallback, 1), max);
+}
+
+function likeTerm(value) {
+    return `%${String(value || '').replace(/[\\%_]/g, '\\$&')}%`;
+}
+
+function eventSummary(tipo, payload = {}, fallback = '') {
+    if (payload.mensaje) return payload.mensaje;
+    if (payload.diagnostico) return payload.diagnostico;
+    if (payload.motivo) return payload.motivo;
+    if (payload.observaciones) return payload.observaciones;
+    if (payload.subjetivo || payload.objetivo || payload.evaluacion || payload.plan) {
+        return [payload.subjetivo, payload.objetivo, payload.evaluacion, payload.plan].filter(Boolean).join(' | ').substring(0, 1200);
+    }
+    return fallback || consultorioTypeLabel(tipo);
+}
+
+async function loadConsultorioPatient(client, tenantId, idPaciente) {
+    const { rows } = await client.query(`
+        SELECT p.*,
+               cli.identidad AS "tutorId",
+               TRIM(cli.nombre || ' ' || COALESCE(cli.apellido, '')) AS "tutorNombre",
+               cli.telefono AS "tutorTelefono",
+               cli.telefono_alternativo AS "tutorTelefonoAlternativo",
+               cli.correo AS "tutorCorreo",
+               cli.sin_correo AS "tutorSinCorreo",
+               cli.direccion AS "tutorDireccion",
+               cli.ciudad_municipio AS "tutorCiudad",
+               cli.departamento AS "tutorDepartamento",
+               cli.contacto_autorizado_nombre AS "contactoAutorizadoNombre",
+               cli.contacto_autorizado_telefono AS "contactoAutorizadoTelefono"
+        FROM pacientes p
+        LEFT JOIN clientes cli ON cli.identidad = p.id_tutor AND cli.tenant_id = p.tenant_id
+        WHERE p.id_paciente = $1 AND p.tenant_id = $2
+    `, [idPaciente, tenantId]);
+    return rows[0] || null;
+}
+
 // Patients
 router.get('/pacientes', authenticateToken, async (req, res) => {
     try {
@@ -192,7 +256,7 @@ router.get('/tutores/:id/pacientes', authenticateToken, async (req, res) => {
 router.get('/pacientes/:id', authenticateToken, async (req, res) => {
     try {
         const id = asInt(req.params.id);
-        if (!id) return res.status(400).json({ error: 'id_paciente invalido' });
+        if (!id) return res.status(400).json({ error: 'id_paciente inválido' });
         const [patient, weights, appointments, consultations, vaccines] = await Promise.all([
             pool.query(`
                 SELECT p.*, cli.nombre || ' ' || COALESCE(cli.apellido, '') AS "tutorNombre",
@@ -250,7 +314,7 @@ router.post('/pacientes', authenticateToken, async (req, res) => {
 router.put('/pacientes/:id', authenticateToken, async (req, res) => {
     try {
         const id = asInt(req.params.id);
-        if (!id) return res.status(400).json({ error: 'id_paciente invalido' });
+        if (!id) return res.status(400).json({ error: 'id_paciente inválido' });
         const b = req.body || {};
         await pool.query(`
             UPDATE pacientes SET
@@ -877,6 +941,356 @@ router.post('/recordatorios/:id/enviar', authenticateToken, async (req, res) => 
         await emailService.sendVeterinaryReminderEmail(rows[0].correo_destino, rows[0]).catch(err => { throw err; });
         await pool.query("UPDATE recordatorios SET estado='Enviado', fecha_envio=NOW(), intentos=intentos+1, ultimo_error=NULL WHERE id_recordatorio=$1 AND tenant_id=$2", [id, req.tenantId]);
         res.json({ ok: true });
+    } catch (e) { handleDbError(res, e); }
+});
+
+// Consultorio clínico
+router.get('/consultorio/search', authenticateToken, async (req, res) => {
+    try {
+        const { q, limit = 20, offset = 0 } = req.query;
+        const params = [req.tenantId];
+        let where = 'WHERE cli.tenant_id = $1';
+        if (q) {
+            params.push(likeTerm(q));
+            where += ` AND (
+                cli.identidad ILIKE $${params.length}
+                OR cli.nombre ILIKE $${params.length}
+                OR cli.apellido ILIKE $${params.length}
+                OR cli.telefono ILIKE $${params.length}
+                OR cli.correo ILIKE $${params.length}
+                OR EXISTS (
+                    SELECT 1 FROM pacientes p
+                    WHERE p.tenant_id = cli.tenant_id
+                      AND p.id_tutor = cli.identidad
+                      AND (
+                        p.nombre ILIKE $${params.length}
+                        OR p.especie ILIKE $${params.length}
+                        OR p.raza ILIKE $${params.length}
+                        OR p.microchip ILIKE $${params.length}
+                      )
+                )
+            )`;
+        }
+        const l = safeLimit(limit, 20, 80);
+        const o = Math.max(asInt(offset) || 0, 0);
+        params.push(l);
+        const limitParam = params.length;
+        params.push(o);
+        const offsetParam = params.length;
+        const { rows } = await pool.query(`
+            SELECT cli.identidad,
+                   TRIM(cli.nombre || ' ' || COALESCE(cli.apellido, '')) AS nombre,
+                   cli.telefono,
+                   cli.correo,
+                   cli.direccion,
+                   cli.ciudad_municipio AS ciudad,
+                   cli.fechaCreacion AS "fechaCreacion",
+                   (
+                     SELECT COUNT(*)::int
+                     FROM pacientes p
+                     WHERE p.tenant_id = cli.tenant_id AND p.id_tutor = cli.identidad AND p.estado = 'Activo'
+                   ) AS "totalPacientes",
+                   (
+                     SELECT COALESCE(json_agg(json_build_object(
+                       'id_paciente', p.id_paciente,
+                       'nombre', p.nombre,
+                       'especie', p.especie,
+                       'raza', p.raza,
+                       'sexo', p.sexo,
+                       'foto_base64', p.foto_base64,
+                       'microchip', p.microchip
+                     ) ORDER BY p.nombre), '[]'::json)
+                     FROM pacientes p
+                     WHERE p.tenant_id = cli.tenant_id AND p.id_tutor = cli.identidad AND p.estado = 'Activo'
+                   ) AS pacientes,
+                   GREATEST(
+                     COALESCE((
+                       SELECT MAX(e.fecha_evento)
+                       FROM paciente_eventos_clinicos e
+                       JOIN pacientes p ON p.id_paciente = e.id_paciente AND p.tenant_id = e.tenant_id
+                       WHERE p.tenant_id = cli.tenant_id AND p.id_tutor = cli.identidad
+                     ), '1970-01-01'::timestamptz),
+                     COALESCE((
+                       SELECT MAX(c.fecha_inicio)
+                       FROM citas c
+                       WHERE c.tenant_id = cli.tenant_id AND c.id_tutor = cli.identidad
+                     ), '1970-01-01'::timestamptz),
+                     COALESCE(cli.fechaCreacion, '1970-01-01'::timestamptz)
+                   ) AS "ultimaGestion"
+            FROM clientes cli
+            ${where}
+            ORDER BY "ultimaGestion" DESC, nombre ASC
+            LIMIT $${limitParam} OFFSET $${offsetParam}
+        `, params);
+        res.json(rows);
+    } catch (e) { handleDbError(res, e); }
+});
+
+router.get('/consultorio/pacientes/:id', authenticateToken, async (req, res) => {
+    try {
+        const id = asInt(req.params.id);
+        if (!id) return res.status(400).json({ error: 'id_paciente inválido' });
+        const patient = await loadConsultorioPatient(pool, req.tenantId, id);
+        if (!patient) return res.status(404).json({ error: 'Paciente no encontrado' });
+        const [events, consultations, vaccines, appointments, reminders] = await Promise.all([
+            pool.query(`
+                SELECT tipo, COUNT(*)::int AS total
+                FROM paciente_eventos_clinicos
+                WHERE tenant_id = $1 AND id_paciente = $2 AND estado <> 'Anulado'
+                GROUP BY tipo
+            `, [req.tenantId, id]),
+            pool.query(`SELECT COUNT(*)::int AS total FROM consultas WHERE tenant_id=$1 AND id_paciente=$2 AND estado <> 'Anulada'`, [req.tenantId, id]),
+            pool.query(`SELECT COUNT(*)::int AS total FROM vacunas_aplicadas WHERE tenant_id=$1 AND id_paciente=$2`, [req.tenantId, id]),
+            pool.query(`${appointmentSelect()} WHERE c.tenant_id=$1 AND c.id_paciente=$2 ORDER BY c.fecha_inicio DESC LIMIT 10`, [req.tenantId, id]),
+            pool.query(`
+                SELECT *
+                FROM recordatorios
+                WHERE tenant_id=$1 AND id_paciente=$2 AND estado='Pendiente'
+                ORDER BY fecha_programada ASC
+                LIMIT 10
+            `, [req.tenantId, id]),
+        ]);
+        const conteos = Object.keys(CONSULTORIO_TYPES).reduce((acc, key) => ({ ...acc, [key]: 0 }), {});
+        events.rows.forEach(r => { conteos[r.tipo] = Number(r.total || 0); });
+        conteos.consulta += Number(consultations.rows[0]?.total || 0);
+        conteos.vacuna += Number(vaccines.rows[0]?.total || 0);
+        conteos.cita += appointments.rows.length;
+        res.json({
+            paciente: patient,
+            conteos,
+            citas: appointments.rows,
+            recordatorios: reminders.rows,
+        });
+    } catch (e) { handleDbError(res, e); }
+});
+
+router.get('/consultorio/pacientes/:id/eventos', authenticateToken, async (req, res) => {
+    try {
+        const id = asInt(req.params.id);
+        if (!id) return res.status(400).json({ error: 'id_paciente invalido' });
+        const { tipo, q, desde, hasta, limit = 30, offset = 0 } = req.query;
+        const params = [req.tenantId, id];
+        let where = `WHERE tenant_id = $1 AND id_paciente = $2 AND estado <> 'Anulado'`;
+        if (tipo && tipo !== 'historia') { params.push(tipo); where += ` AND tipo = $${params.length}`; }
+        if (desde) { params.push(desde); where += ` AND fecha_evento >= $${params.length}`; }
+        if (hasta) { params.push(hasta); where += ` AND fecha_evento <= $${params.length}`; }
+        if (q) {
+            params.push(likeTerm(q));
+            where += ` AND (titulo ILIKE $${params.length} OR resumen ILIKE $${params.length} OR detalle ILIKE $${params.length} OR payload::text ILIKE $${params.length})`;
+        }
+        const l = safeLimit(limit, 30, 100);
+        const o = Math.max(asInt(offset) || 0, 0);
+        params.push(l);
+        const limitParam = params.length;
+        params.push(o);
+        const offsetParam = params.length;
+        const { rows } = await pool.query(`
+            SELECT *, tipo AS "tipoLabel"
+            FROM paciente_eventos_clinicos
+            ${where}
+            ORDER BY fecha_evento DESC
+            LIMIT $${limitParam} OFFSET $${offsetParam}
+        `, params);
+        res.json(rows.map(r => ({ ...r, tipoLabel: consultorioTypeLabel(r.tipo) })));
+    } catch (e) { handleDbError(res, e); }
+});
+
+router.get('/consultorio/pacientes/:id/timeline', authenticateToken, async (req, res) => {
+    try {
+        const id = asInt(req.params.id);
+        if (!id) return res.status(400).json({ error: 'id_paciente invalido' });
+        const { tipo, q, limit = 40, offset = 0 } = req.query;
+        const [events, consultations, vaccines, appointments, reminders] = await Promise.all([
+            pool.query(`
+                SELECT id_evento AS id, tipo, titulo, fecha_evento, estado, resumen, detalle, payload, adjuntos, 'evento' AS source
+                FROM paciente_eventos_clinicos
+                WHERE tenant_id=$1 AND id_paciente=$2 AND estado <> 'Anulado'
+                ORDER BY fecha_evento DESC LIMIT 250
+            `, [req.tenantId, id]),
+            pool.query(`
+                SELECT id_consulta AS id, 'consulta' AS tipo, COALESCE(NULLIF(motivo,''),'Consulta clínica') AS titulo,
+                       fecha AS fecha_evento, estado, evaluacion AS resumen, plan AS detalle,
+                       json_build_object('subjetivo', subjetivo, 'objetivo', objetivo, 'evaluacion', evaluacion, 'plan', plan, 'peso', peso, 'temperatura', temperatura) AS payload,
+                       'consulta' AS source
+                FROM consultas
+                WHERE tenant_id=$1 AND id_paciente=$2 AND estado <> 'Anulada'
+                ORDER BY fecha DESC LIMIT 120
+            `, [req.tenantId, id]),
+            pool.query(`
+                SELECT id_vacuna_aplicada AS id, 'vacuna' AS tipo, nombre_vacuna AS titulo,
+                       fecha_aplicacion::timestamptz AS fecha_evento, 'Aplicada' AS estado,
+                       notas AS resumen, NULL::text AS detalle,
+                       json_build_object('proxima_dosis', proxima_dosis, 'veterinario', veterinario, 'id_lote', id_lote) AS payload,
+                       'vacuna' AS source
+                FROM vacunas_aplicadas
+                WHERE tenant_id=$1 AND id_paciente=$2
+                ORDER BY fecha_aplicacion DESC LIMIT 120
+            `, [req.tenantId, id]),
+            pool.query(`
+                SELECT id_cita AS id, 'cita' AS tipo, COALESCE("tipoCitaNombre", 'Cita veterinaria') AS titulo,
+                       fecha_inicio AS fecha_evento, estado, motivo AS resumen, notas AS detalle,
+                       json_build_object('fecha_fin', fecha_fin, 'veterinario', "veterinarioNombre", 'sucursal', "sucursalNombre") AS payload,
+                       'cita' AS source
+                FROM (${appointmentSelect()} WHERE c.tenant_id=$1 AND c.id_paciente=$2) a
+                ORDER BY fecha_inicio DESC LIMIT 120
+            `, [req.tenantId, id]),
+            pool.query(`
+                SELECT id_recordatorio AS id, 'seguimiento' AS tipo, asunto AS titulo,
+                       fecha_programada AS fecha_evento, estado, cuerpo AS resumen, ultimo_error AS detalle,
+                       json_build_object('correo_destino', correo_destino, 'fecha_envio', fecha_envio, 'tipo_recordatorio', tipo) AS payload,
+                       'recordatorio' AS source
+                FROM recordatorios
+                WHERE tenant_id=$1 AND id_paciente=$2
+                ORDER BY fecha_programada DESC LIMIT 120
+            `, [req.tenantId, id]),
+        ]);
+        const term = String(q || '').toLowerCase();
+        const items = [...events.rows, ...consultations.rows, ...vaccines.rows, ...appointments.rows, ...reminders.rows]
+            .map(item => ({ ...item, tipoLabel: consultorioTypeLabel(item.tipo) }))
+            .filter(item => !tipo || tipo === 'historia' || item.tipo === tipo)
+            .filter(item => !term || [item.titulo, item.resumen, item.detalle, JSON.stringify(item.payload || {})].join(' ').toLowerCase().includes(term))
+            .sort((a, b) => new Date(b.fecha_evento).getTime() - new Date(a.fecha_evento).getTime());
+        const l = safeLimit(limit, 40, 120);
+        const o = Math.max(asInt(offset) || 0, 0);
+        res.json(items.slice(o, o + l));
+    } catch (e) { handleDbError(res, e); }
+});
+
+router.post('/consultorio/pacientes/:id/eventos', authenticateToken, async (req, res) => {
+    try {
+        const id = asInt(req.params.id);
+        if (!id) return res.status(400).json({ error: 'id_paciente inválido' });
+        const b = req.body || {};
+        const tipo = String(b.tipo || '').trim();
+        if (!CONSULTORIO_TYPES[tipo]) return res.status(400).json({ error: 'Tipo de registro clínico inválido' });
+
+        const created = await withTenantContext(req.tenantId, async (client) => {
+            const patient = await loadConsultorioPatient(client, req.tenantId, id);
+            if (!patient) throw Object.assign(new Error('Paciente no encontrado'), { statusCode: 404 });
+            const payload = b.payload && typeof b.payload === 'object' ? b.payload : {};
+            const titulo = cleanText(b.titulo || payload.titulo || consultorioTypeLabel(tipo), 180);
+            const resumen = cleanText(b.resumen || eventSummary(tipo, payload, b.detalle), 6000);
+            const detalle = cleanText(b.detalle || payload.detalle || payload.observaciones, 8000);
+            const fechaEvento = b.fecha_evento || payload.fecha || new Date().toISOString();
+            const adjuntos = Array.isArray(b.adjuntos) ? b.adjuntos : [];
+            const correoDestino = b.correo_destino || patient.tutorCorreo || null;
+            const shouldEmail = Boolean(b.enviar_correo || tipo === 'mensaje');
+            const { rows } = await client.query(`
+                INSERT INTO paciente_eventos_clinicos (
+                    tenant_id, id_paciente, id_tutor, id_cita, tipo, titulo, fecha_evento,
+                    estado, resumen, detalle, payload, adjuntos, enviar_correo,
+                    correo_destino, creado_por
+                )
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12::jsonb,$13,$14,$15)
+                RETURNING *
+            `, [
+                req.tenantId,
+                id,
+                patient.id_tutor,
+                b.id_cita || payload.id_cita || null,
+                tipo,
+                titulo,
+                fechaEvento,
+                cleanText(b.estado || 'Registrado', 30),
+                resumen,
+                detalle,
+                JSON.stringify(payload),
+                JSON.stringify(adjuntos),
+                shouldEmail,
+                correoDestino,
+                req.user?.codUsuario || req.user?.usuario || null,
+            ]);
+
+            const event = rows[0];
+            const nextDate = payload.proximo_control || payload.proxima_dosis || b.proximo_control || null;
+            if (nextDate && correoDestino) {
+                await client.query(`
+                    INSERT INTO recordatorios (
+                        tenant_id, tipo, referencia_tabla, referencia_id, id_tutor, id_paciente,
+                        correo_destino, asunto, cuerpo, fecha_programada
+                    )
+                    VALUES ($1,$2,'paciente_eventos_clinicos',$3,$4,$5,$6,$7,$8,$9)
+                    ON CONFLICT DO NOTHING
+                `, [
+                    req.tenantId,
+                    tipo === 'vacuna' ? 'vacuna_proxima' : 'seguimiento_clinico',
+                    event.id_evento,
+                    patient.id_tutor,
+                    id,
+                    correoDestino,
+                    `Seguimiento de ${patient.nombre}`,
+                    resumen || `Tiene un seguimiento pendiente para ${patient.nombre}.`,
+                    nextDate,
+                ]);
+            }
+
+            if (payload.peso && Number(payload.peso) > 0) {
+                await client.query(`
+                    INSERT INTO paciente_pesos (tenant_id, id_paciente, peso, registrado_por, notas)
+                    VALUES ($1,$2,$3,$4,$5)
+                `, [req.tenantId, id, Number(payload.peso), req.user?.codUsuario || req.user?.usuario || null, `Registro ${consultorioTypeLabel(tipo)}`]);
+                await client.query('UPDATE pacientes SET peso_actual=$1, updated_at=NOW() WHERE tenant_id=$2 AND id_paciente=$3', [Number(payload.peso), req.tenantId, id]);
+            }
+
+            if (shouldEmail && correoDestino) {
+                await emailService.sendClinicalOwnerNotificationEmail(correoDestino, {
+                    tutor: patient.tutorNombre,
+                    paciente: patient.nombre,
+                    tipo,
+                    tipoLabel: consultorioTypeLabel(tipo),
+                    titulo,
+                    mensaje: payload.mensaje || resumen || detalle,
+                    fecha_evento: fechaEvento,
+                    proximo_control: nextDate,
+                }).then(async () => {
+                    await client.query('UPDATE paciente_eventos_clinicos SET correo_enviado=TRUE, updated_at=NOW() WHERE id_evento=$1 AND tenant_id=$2', [event.id_evento, req.tenantId]);
+                    event.correo_enviado = true;
+                }).catch(err => {
+                    console.error('[veterinaryRoutes] clinical owner email error:', err.message);
+                });
+            }
+
+            return event;
+        });
+        res.status(201).json({ ...created, tipoLabel: consultorioTypeLabel(created.tipo) });
+    } catch (e) {
+        if (e.statusCode) return res.status(e.statusCode).json({ error: e.message });
+        handleDbError(res, e);
+    }
+});
+
+router.put('/consultorio/eventos/:id', authenticateToken, async (req, res) => {
+    try {
+        const id = asInt(req.params.id);
+        if (!id) return res.status(400).json({ error: 'id_evento inválido' });
+        const b = req.body || {};
+        const payload = b.payload && typeof b.payload === 'object' ? b.payload : {};
+        const adjuntos = Array.isArray(b.adjuntos) ? b.adjuntos : [];
+        const { rows } = await pool.query(`
+            UPDATE paciente_eventos_clinicos SET
+                titulo = COALESCE($1, titulo),
+                fecha_evento = COALESCE($2, fecha_evento),
+                estado = COALESCE($3, estado),
+                resumen = COALESCE($4, resumen),
+                detalle = COALESCE($5, detalle),
+                payload = CASE WHEN $6::jsonb = '{}'::jsonb THEN payload ELSE $6::jsonb END,
+                adjuntos = CASE WHEN $7::jsonb = '[]'::jsonb THEN adjuntos ELSE $7::jsonb END,
+                updated_at = NOW()
+            WHERE id_evento = $8 AND tenant_id = $9
+            RETURNING *
+        `, [
+            cleanText(b.titulo, 180),
+            b.fecha_evento || null,
+            cleanText(b.estado, 30),
+            cleanText(b.resumen, 6000),
+            cleanText(b.detalle, 8000),
+            JSON.stringify(payload),
+            JSON.stringify(adjuntos),
+            id,
+            req.tenantId,
+        ]);
+        if (!rows.length) return res.status(404).json({ error: 'Registro clínico no encontrado' });
+        res.json({ ...rows[0], tipoLabel: consultorioTypeLabel(rows[0].tipo) });
     } catch (e) { handleDbError(res, e); }
 });
 

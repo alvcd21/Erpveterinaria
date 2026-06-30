@@ -32,7 +32,7 @@ export type PlanFeatureKey =
     | 'modulo_ordenes_compra' | 'modulo_vencimientos' | 'modulo_proveedores'
     | 'modulo_contabilidad' | 'modulo_etiquetas' | 'reportes_exportar' | 'ia_avanzada'
     | 'modulo_sucursales' | 'modulo_transferencias' | 'modulo_entregas' | 'modulo_panel_cajas'
-    | 'modulo_pacientes' | 'modulo_citas' | 'modulo_expediente' | 'modulo_recordatorios'
+    | 'modulo_pacientes' | 'modulo_citas' | 'modulo_expediente' | 'modulo_consultorio' | 'modulo_recordatorios'
     | 'modulo_vacunas' | 'modulo_hospitalizacion';
 
 export const PERMISSIONS = {
@@ -51,6 +51,7 @@ export const PERMISSIONS = {
     VER_CITAS: 'VER_CITAS', GESTIONAR_CITAS: 'GESTIONAR_CITAS',
     VER_FLOWBOARD: 'VER_FLOWBOARD',
     VER_EXPEDIENTE: 'VER_EXPEDIENTE', EDITAR_EXPEDIENTE: 'EDITAR_EXPEDIENTE',
+    VER_CONSULTORIO: 'VER_CONSULTORIO', GESTIONAR_CONSULTORIO: 'GESTIONAR_CONSULTORIO',
     VER_VACUNAS: 'VER_VACUNAS', GESTIONAR_VACUNAS: 'GESTIONAR_VACUNAS',
     VER_AGENDA_PERSONAL: 'VER_AGENDA_PERSONAL',
     VER_DISPONIBILIDAD_AGENDA: 'VER_DISPONIBILIDAD_AGENDA',
@@ -784,6 +785,75 @@ export interface RecordatorioVet {
   intentos: number;
   pacienteNombre?: string;
   tutorNombre?: string;
+}
+
+export type ConsultorioTipo =
+  | 'historia'
+  | 'consulta'
+  | 'vacuna'
+  | 'formula'
+  | 'desparasitacion'
+  | 'hospitalizacion'
+  | 'cirugia'
+  | 'orden'
+  | 'laboratorio'
+  | 'imagenologia'
+  | 'grooming'
+  | 'guarderia'
+  | 'seguimiento'
+  | 'documento'
+  | 'remision'
+  | 'cita'
+  | 'mensaje';
+
+export interface ConsultorioEvento {
+  id_evento?: number;
+  id?: number | string;
+  source?: string;
+  id_paciente?: number;
+  id_tutor?: string;
+  id_cita?: number;
+  tipo: ConsultorioTipo;
+  tipoLabel?: string;
+  titulo: string;
+  fecha_evento: string;
+  estado?: string;
+  resumen?: string;
+  detalle?: string;
+  payload?: Record<string, any>;
+  adjuntos?: any[];
+  enviar_correo?: boolean;
+  correo_enviado?: boolean;
+  correo_destino?: string;
+}
+
+export interface ConsultorioBusquedaItem {
+  identidad: string;
+  nombre: string;
+  telefono?: string;
+  correo?: string;
+  direccion?: string;
+  ciudad?: string;
+  fechaCreacion?: string;
+  totalPacientes: number;
+  pacientes: Paciente[];
+  ultimaGestion?: string;
+}
+
+export interface ConsultorioPacienteDetalle {
+  paciente: Paciente & {
+    tutorId?: string;
+    tutorTelefonoAlternativo?: string;
+    tutorDireccion?: string;
+    tutorCiudad?: string;
+    tutorDepartamento?: string;
+    tutorSinCorreo?: boolean;
+    contactoAutorizadoNombre?: string;
+    contactoAutorizadoTelefono?: string;
+  };
+  conteos: Record<ConsultorioTipo, number>;
+  citas: Cita[];
+  recordatorios: RecordatorioVet[];
 }
 
 export interface ServicioVeterinario {

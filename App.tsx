@@ -98,6 +98,16 @@ const App: React.FC = () => {
               <Layout><Expediente /></Layout>
             </ProtectedRoute>
           } />
+          <Route path="/consultorio" element={
+            <ProtectedRoute requiredPermission="VER_EXPEDIENTE" requiredFeature="modulo_expediente">
+              <Layout><Expediente /></Layout>
+            </ProtectedRoute>
+          } />
+          <Route path="/consultorio/:idPaciente" element={
+            <ProtectedRoute requiredPermission="VER_EXPEDIENTE" requiredFeature="modulo_expediente">
+              <Layout><Expediente /></Layout>
+            </ProtectedRoute>
+          } />
           <Route path="/vacunas" element={
             <ProtectedRoute requiredPermission="VER_VACUNAS" requiredFeature="modulo_vacunas">
               <Layout><Vacunas /></Layout>

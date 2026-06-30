@@ -33,6 +33,10 @@ import {
   VacunaAplicada,
   RecordatorioVet,
   ServicioVeterinario,
+  ConsultorioBusquedaItem,
+  ConsultorioEvento,
+  ConsultorioPacienteDetalle,
+  ConsultorioTipo,
 } from '../types';
 import { offlineDB } from './offlineDB';
 import { getAccessToken, getCurrentSucursalId, getCurrentTenantId, setAccessToken, setStoredUser } from './authSession';
@@ -307,6 +311,26 @@ export const RecordatoriosService = {
     return request<RecordatorioVet[]>(`/recordatorios${qs}`);
   },
   enviar: (id: number) => request(`/recordatorios/${id}/enviar`, { method: 'POST' }),
+};
+
+export const ConsultorioService = {
+  search: (params?: { q?: string; limit?: number; offset?: number }) => {
+    const qs = params ? '?' + new URLSearchParams(Object.entries(params).filter(([, v]) => v !== undefined && v !== '').map(([k, v]) => [k, String(v)])).toString() : '';
+    return request<ConsultorioBusquedaItem[]>(`/consultorio/search${qs}`);
+  },
+  getPaciente: (id: number) => request<ConsultorioPacienteDetalle>(`/consultorio/pacientes/${id}`),
+  getTimeline: (id: number, params?: { tipo?: ConsultorioTipo; q?: string; limit?: number; offset?: number }) => {
+    const qs = params ? '?' + new URLSearchParams(Object.entries(params).filter(([, v]) => v !== undefined && v !== '').map(([k, v]) => [k, String(v)])).toString() : '';
+    return request<ConsultorioEvento[]>(`/consultorio/pacientes/${id}/timeline${qs}`);
+  },
+  getEventos: (id: number, params?: { tipo?: ConsultorioTipo; q?: string; desde?: string; hasta?: string; limit?: number; offset?: number }) => {
+    const qs = params ? '?' + new URLSearchParams(Object.entries(params).filter(([, v]) => v !== undefined && v !== '').map(([k, v]) => [k, String(v)])).toString() : '';
+    return request<ConsultorioEvento[]>(`/consultorio/pacientes/${id}/eventos${qs}`);
+  },
+  createEvento: (id: number, data: Partial<ConsultorioEvento>) =>
+    request<ConsultorioEvento>(`/consultorio/pacientes/${id}/eventos`, { method: 'POST', body: JSON.stringify(data) }),
+  updateEvento: (id: number, data: Partial<ConsultorioEvento>) =>
+    request<ConsultorioEvento>(`/consultorio/eventos/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
 };
 
 export const ServiciosVeterinariosService = {
