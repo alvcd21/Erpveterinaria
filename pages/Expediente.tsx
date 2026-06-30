@@ -4,7 +4,7 @@ const { useParams, useNavigate } = ReactRouterDOM as any;
 import { ConsultorioService } from '../services/api';
 import { ConsultorioBusquedaItem, ConsultorioEvento, ConsultorioPacienteDetalle, ConsultorioTipo, Paciente } from '../types';
 import {
-  ChevronLeft, ChevronRight, FileHeart, PawPrint,
+  ChevronLeft, ChevronRight, PawPrint,
   Plus, RefreshCw, Search, Send,
   Users, X,
 } from 'lucide-react';
@@ -12,7 +12,7 @@ import Swal from 'sweetalert2';
 import { FieldDef, MODULES, fieldsFor, fmtDate, initials, moduleFor, nowLocal, patientSubtitle } from '../components/consultorio/consultorioConfig';
 
 const PAGE_SIZE = 20;
-const INPUT_CLASS = 'w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-400';
+const INPUT_CLASS = 'w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-normal text-slate-800 outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-300';
 
 type EventForm = {
   tipo: ConsultorioTipo;
@@ -143,7 +143,7 @@ export default function Expediente() {
                   <ActiveIcon size={22} />
                 </span>
                 <div>
-                  <h3 className="text-lg font-black text-slate-900">{activeModule.label} de <span className="text-teal-600">{patient.nombre}</span></h3>
+                  <h3 className="text-lg font-bold text-slate-900">{activeModule.label} de <span className="text-teal-600">{patient.nombre}</span></h3>
                   <p className="text-xs text-slate-500">Historia clínica con filtros y paginación por sección.</p>
                 </div>
               </div>
@@ -154,7 +154,7 @@ export default function Expediente() {
                 </div>
                 <button onClick={() => refreshSection(0)} className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-50"><RefreshCw size={16} /> Filtrar</button>
                 {activeModule.creatable && (
-                  <button onClick={() => openCreate()} className="inline-flex items-center justify-center gap-2 rounded-xl bg-teal-600 px-4 py-2.5 text-sm font-black text-white hover:bg-teal-700">
+                  <button onClick={() => openCreate()} className="inline-flex items-center justify-center gap-2 rounded-xl bg-teal-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-teal-700">
                     <Plus size={17} /> Registrar
                   </button>
                 )}
@@ -192,13 +192,10 @@ export default function Expediente() {
 }
 
 function Header({ patient, onBack }: { patient?: Paciente; onBack: () => void }) {
+  if (!patient) return null;
   return (
-    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-      <div>
-        <h2 className="text-2xl font-black text-slate-900 flex items-center gap-2"><FileHeart className="text-teal-600" /> Consultorio clínico</h2>
-        <p className="text-sm text-slate-500">Expediente integral de tutores, pacientes, consultas, órdenes, vacunas y seguimientos.</p>
-      </div>
-      {patient && <button onClick={onBack} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-bold text-slate-600 bg-white">Volver al buscador</button>}
+    <div className="flex justify-end">
+      <button onClick={onBack} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-600 bg-white">Volver al buscador</button>
     </div>
   );
 }
@@ -215,7 +212,7 @@ function SearchPanel({ search, setSearch, loading, results, onSearch, onOpen }: 
             <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
             <input value={search} onChange={e => setSearch(e.target.value)} onKeyDown={e => e.key === 'Enter' && onSearch()} placeholder="Buscar por tutor, teléfono, correo, mascota, especie, raza o microchip" className="w-full pl-12 pr-4 py-4 rounded-2xl bg-slate-50 border border-slate-200 text-sm outline-none focus:ring-2 focus:ring-teal-500" />
           </div>
-          <button onClick={onSearch} className="rounded-2xl bg-slate-900 px-6 py-4 text-sm font-black text-white">{loading ? 'Buscando...' : 'Buscar'}</button>
+          <button onClick={onSearch} className="rounded-2xl bg-slate-900 px-6 py-4 text-sm font-semibold text-white">{loading ? 'Buscando...' : 'Buscar'}</button>
         </div>
       </div>
       <div className="p-5 grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -223,9 +220,9 @@ function SearchPanel({ search, setSearch, loading, results, onSearch, onOpen }: 
           <article key={owner.identidad} className="rounded-2xl border border-slate-200 bg-slate-50/60 p-4">
             <div className="flex items-start justify-between gap-3">
               <div className="flex gap-3 min-w-0">
-                <div className="w-12 h-12 rounded-2xl bg-teal-100 text-teal-700 grid place-items-center font-black">{initials(owner.nombre)}</div>
+                <div className="w-12 h-12 rounded-2xl bg-teal-100 text-teal-700 grid place-items-center font-semibold">{initials(owner.nombre)}</div>
                 <div className="min-w-0">
-                  <h3 className="font-black text-slate-900 truncate">{owner.nombre}</h3>
+                  <h3 className="font-semibold text-slate-900 truncate">{owner.nombre}</h3>
                   <p className="text-xs text-slate-500 truncate">{owner.telefono || 'Sin teléfono'} {owner.correo ? `- ${owner.correo}` : ''}</p>
                   <p className="text-xs text-slate-400">{owner.totalPacientes} paciente(s) registrados</p>
                 </div>
@@ -236,9 +233,9 @@ function SearchPanel({ search, setSearch, loading, results, onSearch, onOpen }: 
               {(owner.pacientes || []).map(p => (
                 <button key={p.id_paciente} onClick={() => onOpen(p)} className="w-full rounded-xl bg-white border border-slate-200 p-3 text-left hover:border-teal-300 hover:bg-teal-50 transition-colors">
                   <div className="flex items-center gap-3">
-                    {p.foto_base64 ? <img src={p.foto_base64} alt={p.nombre} className="w-11 h-11 rounded-xl object-cover" /> : <div className="w-11 h-11 rounded-xl bg-teal-100 text-teal-700 grid place-items-center font-black">{initials(p.nombre)}</div>}
+                    {p.foto_base64 ? <img src={p.foto_base64} alt={p.nombre} className="w-11 h-11 rounded-xl object-cover" /> : <div className="w-11 h-11 rounded-xl bg-teal-100 text-teal-700 grid place-items-center font-semibold">{initials(p.nombre)}</div>}
                     <div className="min-w-0">
-                      <p className="font-black text-slate-900 truncate">{p.nombre}</p>
+                      <p className="font-semibold text-slate-900 truncate">{p.nombre}</p>
                       <p className="text-xs text-slate-500 truncate">{patientSubtitle(p)}</p>
                     </div>
                   </div>
@@ -248,7 +245,7 @@ function SearchPanel({ search, setSearch, loading, results, onSearch, onOpen }: 
             </div>
           </article>
         ))}
-        {!loading && results.length === 0 && <div className="lg:col-span-2 p-12 text-center text-slate-400 font-bold">Sin resultados. Busque por tutor o mascota para abrir el consultorio.</div>}
+        {!loading && results.length === 0 && <div className="lg:col-span-2 p-12 text-center text-slate-400 font-medium">Sin resultados. Busque por tutor o mascota para abrir el consultorio.</div>}
       </div>
     </div>
   );
@@ -259,9 +256,9 @@ function PatientSidebar({ patient, conteos, active, onChange }: { patient: any; 
     <aside className="space-y-4">
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
         <div className="flex gap-4">
-          {patient.foto_base64 ? <img src={patient.foto_base64} alt={patient.nombre} className="h-20 w-20 rounded-2xl object-cover" /> : <div className="h-20 w-20 rounded-2xl bg-teal-100 text-teal-700 grid place-items-center font-black text-xl">{initials(patient.nombre)}</div>}
+          {patient.foto_base64 ? <img src={patient.foto_base64} alt={patient.nombre} className="h-20 w-20 rounded-2xl object-cover" /> : <div className="h-20 w-20 rounded-2xl bg-teal-100 text-teal-700 grid place-items-center font-semibold text-xl">{initials(patient.nombre)}</div>}
           <div className="min-w-0">
-            <h3 className="font-black text-xl text-slate-900 truncate">{patient.nombre}</h3>
+            <h3 className="font-bold text-xl text-slate-900 truncate">{patient.nombre}</h3>
             <p className="text-sm text-slate-500">{patientSubtitle(patient)}</p>
             <p className="text-xs text-slate-400 mt-1">Peso: {patient.peso_actual ? `${patient.peso_actual} kg` : 'No registrado'}</p>
           </div>
@@ -284,10 +281,10 @@ function PatientSidebar({ patient, conteos, active, onChange }: { patient: any; 
           const Icon = m.icon;
           const selected = active === m.tipo;
           return (
-            <button key={m.tipo} onClick={() => onChange(m.tipo)} className={`w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition-colors ${selected ? 'bg-teal-50 text-teal-700 font-black' : 'text-slate-600 hover:bg-slate-50'}`}>
+            <button key={m.tipo} onClick={() => onChange(m.tipo)} className={`w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition-colors ${selected ? 'bg-teal-50 text-teal-700 font-semibold' : 'text-slate-600 hover:bg-slate-50'}`}>
               <Icon size={18} className={selected ? 'text-teal-600' : m.accent} />
               <span className="flex-1 truncate">{m.label}</span>
-              <span className={`text-[11px] rounded-full px-2 py-0.5 font-black ${selected ? 'bg-teal-600 text-white' : 'bg-slate-100 text-slate-500'}`}>{conteos[m.tipo] || 0}</span>
+              <span className={`text-[11px] rounded-full px-2 py-0.5 font-semibold ${selected ? 'bg-teal-600 text-white' : 'bg-slate-100 text-slate-500'}`}>{conteos[m.tipo] || 0}</span>
             </button>
           );
         })}
@@ -308,13 +305,13 @@ function TimelineCard({ item }: { item: ConsultorioEvento }) {
           <span className={`w-10 h-10 rounded-2xl bg-slate-50 grid place-items-center ${mod.accent}`}><Icon size={20} /></span>
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <h4 className="font-black text-slate-900">{item.titulo || mod.label}</h4>
-              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-black text-slate-500">{item.tipoLabel || mod.label}</span>
+              <h4 className="font-semibold text-slate-900">{item.titulo || mod.label}</h4>
+              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-500">{item.tipoLabel || mod.label}</span>
             </div>
             <p className="text-xs text-slate-400 mt-0.5">{fmtDate(item.fecha_evento)} {item.estado ? `- ${item.estado}` : ''}</p>
           </div>
         </div>
-        {item.correo_enviado && <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-black text-emerald-700"><Send size={12} /> Enviado</span>}
+        {item.correo_enviado && <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700"><Send size={12} /> Enviado</span>}
       </div>
       {(item.resumen || item.detalle) && <p className="mt-3 text-sm text-slate-600 whitespace-pre-wrap">{item.resumen || item.detalle}</p>}
       {chips.length > 0 && (
@@ -334,26 +331,26 @@ function EventModal({ form, patient, setForm, onClose, onSubmit }: {
   const fields = fieldsFor(form.tipo);
   const updatePayload = (key: string, value: any) => setForm({ ...form, payload: { ...form.payload, [key]: value } });
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-3">
-      <form onSubmit={onSubmit} className="bg-white rounded-2xl shadow-2xl w-full max-w-6xl max-h-[92vh] overflow-auto">
-        <div className="sticky top-0 z-10 bg-white border-b border-slate-100 px-5 py-4 flex items-center justify-between">
-          <h3 className="font-black text-lg text-slate-900 flex items-center gap-2"><Icon className={mod.accent} size={22} /> Registro de {mod.label} - {patient.nombre}</h3>
+    <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+      <form onSubmit={onSubmit} className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[92vh] overflow-auto">
+        <div className="sticky top-0 z-10 bg-white border-b border-slate-100 px-6 py-5 flex items-center justify-between">
+          <h3 className="font-bold text-xl text-slate-800 flex items-center gap-2"><Icon className={mod.accent} size={22} /> Registro de {mod.label} - {patient.nombre}</h3>
           <button type="button" onClick={onClose} className="p-2 rounded-xl hover:bg-slate-100 text-slate-400"><X size={20} /></button>
         </div>
-        <div className="p-5 space-y-5">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div className="p-6 space-y-5">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
             <Label label="Fecha y hora">
               <input type="datetime-local" value={form.fecha_evento} onChange={e => setForm({ ...form, fecha_evento: e.target.value })} className={INPUT_CLASS} />
             </Label>
             <Label label="Título">
               <input value={form.titulo} onChange={e => setForm({ ...form, titulo: e.target.value })} className={INPUT_CLASS} />
             </Label>
-            <label className="flex items-center gap-3 rounded-2xl bg-slate-50 border border-slate-200 px-4 py-3 mt-5">
+            <label className="flex items-center gap-3 rounded-xl bg-white border border-slate-200 px-4 py-3 mt-5">
               <input type="checkbox" checked={form.enviar_correo} onChange={e => setForm({ ...form, enviar_correo: e.target.checked })} className="h-4 w-4" />
-              <span className="text-sm font-bold text-slate-700">Enviar correo al tutor</span>
+              <span className="text-sm font-semibold text-slate-700">Enviar correo al tutor</span>
             </label>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             {fields.map(field => (
               <Field key={field.key} field={field} value={form.payload[field.key] || ''} onChange={v => updatePayload(field.key, v)} />
             ))}
@@ -362,9 +359,9 @@ function EventModal({ form, patient, setForm, onClose, onSubmit }: {
             <textarea value={form.resumen} onChange={e => setForm({ ...form, resumen: e.target.value })} placeholder="Resumen clínico corto para la línea de tiempo" className={`${INPUT_CLASS} min-h-[90px]`} />
           </Label>
         </div>
-        <div className="sticky bottom-0 bg-white border-t border-slate-100 px-5 py-4 flex justify-end gap-2">
-          <button type="button" onClick={onClose} className="px-4 py-2.5 rounded-xl bg-slate-100 font-bold text-slate-600">Cancelar</button>
-          <button className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-teal-600 font-black text-white"><Plus size={16} /> Guardar registro</button>
+        <div className="sticky bottom-0 bg-white border-t border-slate-100 px-6 py-5 flex gap-3">
+          <button type="button" onClick={onClose} className="flex-1 px-4 py-3 rounded-xl bg-slate-100 font-semibold text-slate-600">Cancelar</button>
+          <button className="flex-1 inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-indigo-600 font-semibold text-white shadow-lg shadow-indigo-600/20"><Plus size={16} /> Guardar registro</button>
         </div>
       </form>
     </div>
@@ -389,20 +386,20 @@ function Field({ field, value, onChange }: { field: FieldDef; value: any; onChan
 }
 
 function Label({ label, children, wide }: { label: string; children: React.ReactNode; wide?: boolean }) {
-  return <label className={`block text-xs font-black text-slate-500 uppercase tracking-wide ${wide ? 'md:col-span-2' : ''}`}><span>{label}</span><div className="mt-1">{children}</div></label>;
+  return <label className={`block text-sm font-semibold text-indigo-900/70 ${wide ? 'md:col-span-2' : ''}`}><span>{label}</span><div className="mt-2">{children}</div></label>;
 }
 
 function Info({ label, value }: { label: string; value?: React.ReactNode }) {
-  return <div className="rounded-xl bg-slate-50 border border-slate-100 p-3 min-w-0"><p className="font-black text-slate-400 uppercase">{label}</p><p className="mt-1 font-bold text-slate-800 truncate">{value || 'No registrado'}</p></div>;
+  return <div className="rounded-xl bg-slate-50 border border-slate-100 p-3 min-w-0"><p className="text-xs font-semibold text-slate-400 uppercase">{label}</p><p className="mt-1 font-medium text-slate-800 truncate">{value || 'No registrado'}</p></div>;
 }
 
 function EmptyState({ label, onCreate }: { label: string; onCreate?: () => void }) {
   return (
     <div className="p-12 text-center rounded-2xl border border-dashed border-slate-200 bg-slate-50/60">
       <PawPrint className="mx-auto text-slate-300" size={44} />
-      <h4 className="mt-3 font-black text-slate-700">No hay registros de {label.toLowerCase()}</h4>
+      <h4 className="mt-3 font-semibold text-slate-700">No hay registros de {label.toLowerCase()}</h4>
       <p className="text-sm text-slate-400 mt-1">Cuando se registre información clínica, aparecerá aquí con fecha, estado y detalle.</p>
-      {onCreate && <button onClick={onCreate} className="mt-4 inline-flex items-center gap-2 rounded-xl bg-teal-600 px-4 py-2.5 text-sm font-black text-white"><Plus size={16} /> Registrar</button>}
+      {onCreate && <button onClick={onCreate} className="mt-4 inline-flex items-center gap-2 rounded-xl bg-teal-600 px-4 py-2.5 text-sm font-semibold text-white"><Plus size={16} /> Registrar</button>}
     </div>
   );
 }

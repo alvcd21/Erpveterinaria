@@ -7,7 +7,7 @@ import Swal from 'sweetalert2';
 
 const PAGE_SIZE = 24;
 const emptyPatient: Partial<Paciente> = { especie: 'Canino', estado: 'Activo' };
-const inputClass = 'w-full p-2.5 rounded-xl border bg-slate-50';
+const inputClass = 'w-full p-3 rounded-xl border border-slate-200 bg-white font-normal outline-none focus:ring-2 focus:ring-indigo-200';
 
 function ageLabel(date?: string) {
   if (!date) return 'Edad no registrada';
@@ -111,16 +111,12 @@ export default function Pacientes() {
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-black text-slate-900">Pacientes</h2>
-          <p className="text-sm text-slate-500">Busca por mascota, tutor, telefono, correo, especie, raza o microchip.</p>
-        </div>
+      <div className="flex flex-col md:flex-row md:items-end justify-end gap-4">
         <div className="flex flex-wrap gap-2">
-          <button onClick={() => navigate('/clients')} className="inline-flex items-center gap-2 rounded-xl bg-white border border-slate-200 px-4 py-3 text-sm font-black text-slate-700 hover:bg-slate-50">
+          <button onClick={() => navigate('/clients')} className="inline-flex items-center gap-2 rounded-xl bg-white border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50">
             <UserPlus size={18} /> Nuevo tutor
           </button>
-          <button onClick={openNew} className="inline-flex items-center gap-2 rounded-xl bg-teal-600 px-4 py-3 text-sm font-black text-white hover:bg-teal-700">
+          <button onClick={openNew} className="inline-flex items-center gap-2 rounded-xl bg-teal-600 px-4 py-3 text-sm font-semibold text-white hover:bg-teal-700">
             <Plus size={18} /> Nuevo paciente
           </button>
         </div>
@@ -142,7 +138,7 @@ export default function Pacientes() {
           <select value={filters.alertas} onChange={e => setFilters({ ...filters, alertas: e.target.value })} className="rounded-xl bg-slate-50 border border-slate-200 px-3 py-2.5 text-sm">
             <option value="">Con/sin alertas</option><option value="true">Solo con alertas</option>
           </select>
-          <button onClick={applyFilters} className="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-black text-white">Buscar</button>
+          <button onClick={applyFilters} className="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white">Buscar</button>
           <select value={filters.id_tutor} onChange={e => setFilters({ ...filters, id_tutor: e.target.value })} className="md:col-span-2 rounded-xl bg-slate-50 border border-slate-200 px-3 py-2.5 text-sm">
             <option value="">Todos los tutores</option>
             {clientOptions.map(c => <option key={c.id} value={c.id}>{c.name} - {c.phone || c.email || c.id}</option>)}
@@ -162,12 +158,12 @@ export default function Pacientes() {
                 {p.foto_base64 ? (
                   <img src={p.foto_base64} alt={p.nombre} className="h-16 w-16 rounded-2xl object-cover border border-white shadow-sm" />
                 ) : (
-                  <div className="h-16 w-16 rounded-2xl bg-teal-100 text-teal-700 grid place-items-center font-black text-lg">{initials(p.nombre)}</div>
+                  <div className="h-16 w-16 rounded-2xl bg-teal-100 text-teal-700 grid place-items-center font-semibold text-lg">{initials(p.nombre)}</div>
                 )}
                 <div className="min-w-0 flex-1">
                   <div className="flex justify-between gap-2">
-                    <h3 className="font-black text-slate-900 truncate">{p.nombre}</h3>
-                    <span className="rounded-full bg-white px-2 py-1 text-[10px] font-black text-teal-700 border border-teal-100">{p.estado}</span>
+                    <h3 className="font-semibold text-slate-900 truncate">{p.nombre}</h3>
+                    <span className="rounded-full bg-white px-2 py-1 text-[10px] font-semibold text-teal-700 border border-teal-100">{p.estado}</span>
                   </div>
                   <p className="text-xs text-slate-500">{p.especie}{p.raza ? ` - ${p.raza}` : ''} - {ageLabel(p.fecha_nacimiento)}</p>
                   <p className="text-xs text-slate-500 truncate">Tutor: {p.tutorNombre || 'Sin tutor'} {p.tutorTelefono ? `- ${p.tutorTelefono}` : ''}</p>
@@ -198,45 +194,47 @@ export default function Pacientes() {
       </div>
 
       {showModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 flex items-center justify-center p-4">
-          <form onSubmit={save} className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl p-6 space-y-4 max-h-[92vh] overflow-auto">
-            <div className="flex justify-between items-center border-b border-slate-100 pb-3">
-              <h3 className="font-black text-lg text-slate-900">{editing ? 'Editar paciente' : 'Nuevo paciente'}</h3>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm">
+          <form onSubmit={save} className="w-full max-w-5xl max-h-[92vh] overflow-auto rounded-2xl bg-white shadow-2xl">
+            <div className="flex justify-between items-center border-b border-slate-100 px-6 py-5">
+              <h3 className="text-xl font-bold text-slate-800">{editing ? 'Editar paciente' : 'Registro de Paciente'}</h3>
               <button type="button" onClick={() => setShowModal(false)} className="text-slate-400 hover:text-red-500">Cerrar</button>
             </div>
-            <div className="flex gap-4 items-center">
-              {form.foto_base64 ? <img src={form.foto_base64} alt="Paciente" className="h-24 w-24 rounded-2xl object-cover border" /> : <div className="h-24 w-24 rounded-2xl bg-slate-100 grid place-items-center font-black text-slate-400">{initials(form.nombre)}</div>}
-              <label className="cursor-pointer inline-flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50">
-                <ImagePlus size={18} /> Agregar foto
-                <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={e => setPhoto(e.target.files?.[0])} />
-              </label>
+            <div className="space-y-5 p-6">
+              <div className="flex gap-4 items-center">
+                {form.foto_base64 ? <img src={form.foto_base64} alt="Paciente" className="h-24 w-24 rounded-2xl object-cover border" /> : <div className="h-24 w-24 rounded-2xl bg-slate-100 grid place-items-center font-semibold text-slate-400">{initials(form.nombre)}</div>}
+                <label className="cursor-pointer inline-flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                  <ImagePlus size={18} /> Agregar foto
+                  <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={e => setPhoto(e.target.files?.[0])} />
+                </label>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                <Field label="Tutor">
+                  <select required value={form.id_tutor || ''} onChange={e => setForm({ ...form, id_tutor: e.target.value })} className={inputClass}>
+                    <option value="">Seleccione tutor</option>
+                    {clientOptions.map(c => <option key={c.id} value={c.id}>{c.name} - {c.phone || c.email || c.id}</option>)}
+                  </select>
+                </Field>
+                <Text label="Nombre" required value={form.nombre || ''} onChange={v => setForm({ ...form, nombre: v })} />
+                <Text label="Especie" required value={form.especie || ''} onChange={v => setForm({ ...form, especie: v })} />
+                <Text label="Raza" value={form.raza || ''} onChange={v => setForm({ ...form, raza: v })} />
+                <Field label="Sexo">
+                  <select value={form.sexo || ''} onChange={e => setForm({ ...form, sexo: e.target.value })} className={inputClass}>
+                    <option value="">No especificado</option><option>Macho</option><option>Hembra</option>
+                  </select>
+                </Field>
+                <Text label="Color" value={form.color || ''} onChange={v => setForm({ ...form, color: v })} />
+                <Field label="Peso actual kg"><input type="number" step="0.001" value={form.peso_actual || ''} onChange={e => setForm({ ...form, peso_actual: e.target.value ? Number(e.target.value) : undefined })} className={inputClass} /></Field>
+                <Field label="Nacimiento"><input type="date" value={form.fecha_nacimiento || ''} onChange={e => setForm({ ...form, fecha_nacimiento: e.target.value })} className={inputClass} /></Field>
+                <Text label="Microchip" value={form.microchip || ''} onChange={v => setForm({ ...form, microchip: v })} />
+                <Text label="Estado reproductivo" value={form.estado_reproductivo || ''} onChange={v => setForm({ ...form, estado_reproductivo: v })} />
+              </div>
+              <TextArea label="Alergias" value={form.alergias || ''} onChange={v => setForm({ ...form, alergias: v })} />
+              <TextArea label="Condiciones cronicas" value={form.condiciones_cronicas || ''} onChange={v => setForm({ ...form, condiciones_cronicas: v })} />
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <Field label="Tutor">
-                <select required value={form.id_tutor || ''} onChange={e => setForm({ ...form, id_tutor: e.target.value })} className={inputClass}>
-                  <option value="">Seleccione tutor</option>
-                  {clientOptions.map(c => <option key={c.id} value={c.id}>{c.name} - {c.phone || c.email || c.id}</option>)}
-                </select>
-              </Field>
-              <Text label="Nombre" required value={form.nombre || ''} onChange={v => setForm({ ...form, nombre: v })} />
-              <Text label="Especie" required value={form.especie || ''} onChange={v => setForm({ ...form, especie: v })} />
-              <Text label="Raza" value={form.raza || ''} onChange={v => setForm({ ...form, raza: v })} />
-              <Field label="Sexo">
-                <select value={form.sexo || ''} onChange={e => setForm({ ...form, sexo: e.target.value })} className={inputClass}>
-                  <option value="">No especificado</option><option>Macho</option><option>Hembra</option>
-                </select>
-              </Field>
-              <Text label="Color" value={form.color || ''} onChange={v => setForm({ ...form, color: v })} />
-              <Field label="Peso actual kg"><input type="number" step="0.001" value={form.peso_actual || ''} onChange={e => setForm({ ...form, peso_actual: e.target.value ? Number(e.target.value) : undefined })} className={inputClass} /></Field>
-              <Field label="Nacimiento"><input type="date" value={form.fecha_nacimiento || ''} onChange={e => setForm({ ...form, fecha_nacimiento: e.target.value })} className={inputClass} /></Field>
-              <Text label="Microchip" value={form.microchip || ''} onChange={v => setForm({ ...form, microchip: v })} />
-              <Text label="Estado reproductivo" value={form.estado_reproductivo || ''} onChange={v => setForm({ ...form, estado_reproductivo: v })} />
-            </div>
-            <TextArea label="Alergias" value={form.alergias || ''} onChange={v => setForm({ ...form, alergias: v })} />
-            <TextArea label="Condiciones cronicas" value={form.condiciones_cronicas || ''} onChange={v => setForm({ ...form, condiciones_cronicas: v })} />
-            <div className="flex justify-end gap-2 pt-2">
-              <button type="button" onClick={() => setShowModal(false)} className="px-4 py-2 rounded-xl bg-slate-100 font-bold text-slate-600">Cancelar</button>
-              <button className="px-4 py-2 rounded-xl bg-teal-600 font-black text-white">Guardar</button>
+            <div className="flex gap-3 border-t border-slate-100 p-6">
+              <button type="button" onClick={() => setShowModal(false)} className="flex-1 px-4 py-3 rounded-xl bg-slate-100 font-semibold text-slate-600 hover:bg-slate-200">Cancelar</button>
+              <button className="flex-1 px-4 py-3 rounded-xl bg-indigo-600 font-semibold text-white hover:bg-indigo-700 shadow-lg shadow-indigo-600/20">Guardar</button>
             </div>
           </form>
         </div>
@@ -246,7 +244,7 @@ export default function Pacientes() {
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return <label className="text-xs font-bold text-slate-500">{label}<div className="mt-1">{children}</div></label>;
+  return <label className="text-sm font-semibold text-indigo-900/70">{label}<div className="mt-2">{children}</div></label>;
 }
 
 function Text({ label, value, onChange, required }: { label: string; value: string; required?: boolean; onChange: (value: string) => void }) {
@@ -254,5 +252,5 @@ function Text({ label, value, onChange, required }: { label: string; value: stri
 }
 
 function TextArea({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
-  return <label className="block text-xs font-bold text-slate-500">{label}<textarea value={value} onChange={e => onChange(e.target.value)} className="mt-1 w-full p-2.5 rounded-xl border bg-slate-50 min-h-[82px]" /></label>;
+  return <label className="block text-sm font-semibold text-indigo-900/70">{label}<textarea value={value} onChange={e => onChange(e.target.value)} className="mt-2 w-full p-3 rounded-xl border bg-white min-h-[82px] outline-none focus:ring-2 focus:ring-indigo-200" /></label>;
 }

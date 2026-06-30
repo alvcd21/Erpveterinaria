@@ -231,25 +231,18 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
     }
   ];
 
-  const getPageTitle = () => {
-    const allItems = navigationStructure.flatMap(i => i.subItems ? i.subItems : [i]);
-    const item = [...allItems]
-      .filter(i => i.path)
-      .sort((a, b) => (b.path?.length || 0) - (a.path?.length || 0))
-      .find(i => i.path === location.pathname || (i.path !== '/' && location.pathname.startsWith(`${i.path}/`)));
-    return item ? item.name : theme.appName;
-  };
+  const allNavItems = navigationStructure.flatMap(i => i.subItems ? i.subItems : [i]);
+  const activeNavItem = [...allNavItems]
+    .filter(i => i.path)
+    .sort((a, b) => (b.path?.length || 0) - (a.path?.length || 0))
+    .find(i => i.path === location.pathname || (i.path !== '/' && location.pathname.startsWith(`${i.path}/`)));
+  const activePath = activeNavItem?.path;
+  const isActivePath = (path?: string) => Boolean(path && activePath === path);
+
+  const getPageTitle = () => activeNavItem ? activeNavItem.name : theme.appName;
 
   // Icono del módulo activo para el header cuando el nav está colapsado
-  const getActiveIcon = () => {
-    for (const item of navigationStructure) {
-      if (item.subItems) {
-        const sub = item.subItems.find(s => s.path === location.pathname || (s.path !== '/' && location.pathname.startsWith(`${s.path}/`)));
-        if (sub) return sub.icon;
-      } else if (item.path === location.pathname) return item.icon;
-    }
-    return null;
-  };
+  const getActiveIcon = () => activeNavItem?.icon || null;
 
   // Modo colapsado: todos los ítems individuales en lista plana (sin grupos)
   const renderCollapsedItems = () => {
@@ -262,7 +255,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       }
     }
     return flatItems.map(item => {
-      const isActive = location.pathname === item.path || (item.path !== '/' && location.pathname.startsWith(`${item.path}/`));
+      const isActive = isActivePath(item.path);
       return (
         <div key={item.path} className="relative group mb-1">
           <Link
@@ -293,9 +286,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
         if (subItemsToRender.length === 0) return null;
 
         const isExpanded = expandedMenus.includes(item.name);
-        const hasActiveChild = subItemsToRender.some(sub =>
-          (sub.path === location.pathname || (sub.path !== '/' && location.pathname.startsWith(`${sub.path}/`))) && (!sub.planFeature || hasPlanFeature(sub.planFeature))
-        );
+        const hasActiveChild = subItemsToRender.some(sub => isActivePath(sub.path) && (!sub.planFeature || hasPlanFeature(sub.planFeature)));
 
         return (
           <div key={item.name} className="mb-2">
@@ -321,7 +312,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                       </li>
                     );
                   }
-                  const isActive = location.pathname === subItem.path || (subItem.path !== '/' && location.pathname.startsWith(`${subItem.path}/`));
+                  const isActive = isActivePath(subItem.path);
                   return (
                     <li key={subItem.path}>
                       <Link
@@ -344,7 +335,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       }
 
       if (item.permission && !hasPermission(item.permission)) return null;
-      const isActive = location.pathname === item.path;
+      const isActive = isActivePath(item.path);
 
       return (
         <li key={item.path} className="mb-2">

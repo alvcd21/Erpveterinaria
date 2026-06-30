@@ -24,6 +24,31 @@
   }
   input, textarea, select {
     border-color: #e5e7eb;
+    font-weight: 400;
+  }
+}
+
+@layer components {
+  .fixed form label,
+  .fixed form label span {
+    font-weight: 500 !important;
+  }
+
+  .fixed form input,
+  .fixed form textarea,
+  .fixed form select,
+  .fixed form option {
+    font-weight: 400 !important;
+  }
+
+  .fixed form button {
+    font-weight: 600 !important;
+  }
+
+  .fixed form h1,
+  .fixed form h2,
+  .fixed form h3 {
+    font-weight: 700 !important;
   }
 }
 

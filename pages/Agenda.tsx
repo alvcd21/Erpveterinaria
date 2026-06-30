@@ -3,7 +3,7 @@ import { CitasService, PacientesService } from '../services/api';
 import { AgendaVeterinario, Cita, EstadoCita, Paciente, TipoCita } from '../types';
 import { useAuth } from '../context/AuthContext';
 import {
-  CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, Clock,
+  CheckCircle2, ChevronLeft, ChevronRight, Clock,
   Mail, Plus, RefreshCw, Search, UserRound, X,
 } from 'lucide-react';
 import Swal from 'sweetalert2';
@@ -161,19 +161,19 @@ export function AgendaBoard({ personal = false }: AgendaBoardProps) {
 
   const renderMiniCalendar = () => (
     <div className="rounded-2xl border border-slate-100 bg-white p-4 shadow-sm">
-      <div className="flex items-center justify-between text-sm font-black text-slate-700">
+      <div className="flex items-center justify-between text-sm font-semibold text-slate-700">
         <button onClick={() => setDate(addDays(date, -30))} className="p-1 rounded-lg hover:bg-slate-100">«</button>
         {new Date(`${date}T12:00:00`).toLocaleDateString('es-HN', { month: 'long', year: 'numeric' })}
         <button onClick={() => setDate(addDays(date, 30))} className="p-1 rounded-lg hover:bg-slate-100">»</button>
       </div>
       <div className="mt-4 grid grid-cols-7 gap-1 text-center text-xs text-slate-500">
-        {['Lu', 'Ma', 'Mi', 'Ju', 'Vi', 'Sa', 'Do'].map(d => <span key={d} className="font-bold">{d}</span>)}
+        {['Lu', 'Ma', 'Mi', 'Ju', 'Vi', 'Sa', 'Do'].map(d => <span key={d} className="font-medium">{d}</span>)}
         {monthDays(date).map(d => {
           const value = d.toISOString().slice(0, 10);
           const active = value === date;
           const muted = d.getMonth() !== new Date(`${date}T12:00:00`).getMonth();
           return (
-            <button key={value} onClick={() => setDate(value)} className={`h-8 rounded-lg text-xs ${active ? 'bg-indigo-600 text-white font-black' : muted ? 'text-slate-300 hover:bg-slate-50' : 'text-slate-600 hover:bg-indigo-50'}`}>
+            <button key={value} onClick={() => setDate(value)} className={`h-8 rounded-lg text-xs ${active ? 'bg-indigo-600 text-white font-semibold' : muted ? 'text-slate-300 hover:bg-slate-50' : 'text-slate-600 hover:bg-indigo-50'}`}>
               {d.getDate()}
             </button>
           );
@@ -199,15 +199,15 @@ export function AgendaBoard({ personal = false }: AgendaBoardProps) {
         <div className="lg:hidden">{renderAgendaList()}</div>
         <div className="hidden min-w-0 overflow-hidden rounded-3xl border border-slate-100 bg-white shadow-sm lg:block">
           <div className="grid border-b border-slate-100 bg-slate-50/80" style={{ gridTemplateColumns: template }}>
-            <div className="p-2.5 text-xs font-black uppercase tracking-wide text-slate-500">Equipo</div>
-            {hours.map(h => <div key={h} className="border-l border-slate-100 px-1 py-2.5 text-center text-[11px] font-black text-slate-500">{hourLabel(h)}</div>)}
+            <div className="p-2.5 text-xs font-semibold uppercase tracking-wide text-slate-500">Equipo</div>
+            {hours.map(h => <div key={h} className="border-l border-slate-100 px-1 py-2.5 text-center text-[11px] font-semibold text-slate-500">{hourLabel(h)}</div>)}
           </div>
           {schedulerVets.map(vet => (
             <div key={vet.id_veterinario} className="grid min-h-[84px] border-b border-slate-100 last:border-b-0" style={{ gridTemplateColumns: template }}>
               <div className="flex min-w-0 items-center gap-2 bg-white p-2.5">
                 <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600"><UserRound size={17} /></div>
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-black text-slate-800">{vet.nombre}</p>
+                  <p className="truncate text-sm font-semibold text-slate-800">{vet.nombre}</p>
                   <p className="truncate text-[11px] text-slate-400">{vet.sucursalNombre || 'Agenda clínica'}</p>
                 </div>
               </div>
@@ -227,7 +227,7 @@ export function AgendaBoard({ personal = false }: AgendaBoardProps) {
                         <span className="block truncate">{c.pacienteNombre || c.motivo || 'Reserva'}</span>
                       </div>
                     ))}
-                    {cellCitas.length > visible.length && <span className="text-[10px] font-black text-indigo-500">+{cellCitas.length - visible.length}</span>}
+                    {cellCitas.length > visible.length && <span className="text-[10px] font-semibold text-indigo-500">+{cellCitas.length - visible.length}</span>}
                   </button>
                 );
               })}
@@ -245,17 +245,17 @@ export function AgendaBoard({ personal = false }: AgendaBoardProps) {
           <div key={c.id_cita} className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">
             <div>
               <div className="flex flex-wrap items-center gap-2">
-                <span className="inline-flex items-center gap-1 text-sm font-black text-slate-900"><Clock size={14} />{formatTime(c.fecha_inicio)} - {formatTime(c.fecha_fin)}</span>
-                <span className={`rounded-full border px-2 py-1 text-[10px] font-black ${statusTone[c.estado] || statusTone.Programada}`}>{c.estado}</span>
-                {c.tutorCorreo && <span className="inline-flex items-center gap-1 rounded-full bg-violet-50 px-2 py-1 text-[10px] font-black text-violet-700"><Mail size={12} />Recordatorios</span>}
+                <span className="inline-flex items-center gap-1 text-sm font-semibold text-slate-900"><Clock size={14} />{formatTime(c.fecha_inicio)} - {formatTime(c.fecha_fin)}</span>
+                <span className={`rounded-full border px-2 py-1 text-[10px] font-semibold ${statusTone[c.estado] || statusTone.Programada}`}>{c.estado}</span>
+                {c.tutorCorreo && <span className="inline-flex items-center gap-1 rounded-full bg-violet-50 px-2 py-1 text-[10px] font-semibold text-violet-700"><Mail size={12} />Recordatorios</span>}
               </div>
-              <p className="mt-1 font-black text-slate-800">{c.pacienteNombre || 'Reserva sin paciente'} · {c.tipoCitaNombre || 'Cita médica'}</p>
+              <p className="mt-1 font-semibold text-slate-800">{c.pacienteNombre || 'Reserva sin paciente'} · {c.tipoCitaNombre || 'Cita médica'}</p>
               <p className="text-xs text-slate-500">{c.tutorNombre || 'Sin tutor'} · {c.veterinarioNombre || 'Sin veterinario'}{c.motivo ? ` · ${c.motivo}` : ''}</p>
             </div>
             <div className="flex flex-wrap gap-2">
-              <button onClick={() => changeStatus(c, 'Confirmada')} className="rounded-xl bg-emerald-50 px-3 py-2 text-xs font-black text-emerald-700">Confirmar</button>
-              <button onClick={() => CitasService.checkIn(c.id_cita).then(load)} className="rounded-xl bg-amber-50 px-3 py-2 text-xs font-black text-amber-700">Check-in</button>
-              <button onClick={() => changeStatus(c, 'Completada')} className="rounded-xl bg-slate-100 px-3 py-2 text-xs font-black text-slate-700"><CheckCircle2 size={13} className="mr-1 inline" />Completar</button>
+              <button onClick={() => changeStatus(c, 'Confirmada')} className="rounded-xl bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700">Confirmar</button>
+              <button onClick={() => CitasService.checkIn(c.id_cita).then(load)} className="rounded-xl bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700">Check-in</button>
+              <button onClick={() => changeStatus(c, 'Completada')} className="rounded-xl bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-700"><CheckCircle2 size={13} className="mr-1 inline" />Completar</button>
             </div>
           </div>
         ))}
@@ -266,14 +266,8 @@ export function AgendaBoard({ personal = false }: AgendaBoardProps) {
 
   return (
     <div className="space-y-5 font-sans">
-      <div className="flex flex-col justify-between gap-4 xl:flex-row xl:items-center">
-        <div>
-          <h2 className="flex items-center gap-2 text-2xl font-black text-slate-900">
-            <CalendarDays className="text-cyan-500" /> {personal ? 'Agenda personal' : 'Agenda general'}
-          </h2>
-          <p className="text-sm text-slate-500">Programación clínica, búsqueda de pacientes, recordatorios por correo y estados de atención.</p>
-        </div>
-        <button onClick={() => openNew()} className="inline-flex items-center justify-center gap-2 rounded-2xl bg-indigo-600 px-5 py-3 text-sm font-black text-white shadow-lg shadow-indigo-100">
+      <div className="flex justify-end">
+        <button onClick={() => openNew()} className="inline-flex items-center justify-center gap-2 rounded-2xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-indigo-100">
           <Plus size={18} /> Crear
         </button>
       </div>
@@ -282,7 +276,7 @@ export function AgendaBoard({ personal = false }: AgendaBoardProps) {
         <aside className="space-y-4">
           {renderMiniCalendar()}
           <div className="rounded-2xl border border-slate-100 bg-white p-4 shadow-sm">
-            <p className="mb-3 text-xs font-black uppercase text-slate-400">Resumen del dia</p>
+            <p className="mb-3 text-xs font-semibold uppercase text-slate-400">Resumen del dia</p>
             {statuses.slice(0, 5).map(s => (
               <div key={s} className="flex justify-between py-2 text-sm">
                 <span className="text-slate-500">{s}</span>
@@ -298,15 +292,15 @@ export function AgendaBoard({ personal = false }: AgendaBoardProps) {
               <div className="flex items-center gap-2">
                 <button onClick={() => setDate(addDays(date, view === 'Semana' ? -7 : -1))} className="rounded-xl border border-slate-200 p-2 text-slate-500"><ChevronLeft size={18} /></button>
                 <button onClick={() => setDate(addDays(date, view === 'Semana' ? 7 : 1))} className="rounded-xl border border-slate-200 p-2 text-slate-500"><ChevronRight size={18} /></button>
-                <button onClick={() => setDate(today())} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-bold text-slate-500">Hoy</button>
+                <button onClick={() => setDate(today())} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-500">Hoy</button>
               </div>
-              <div className="text-center text-sm font-black text-indigo-700">
+              <div className="text-center text-sm font-semibold text-indigo-700">
                 {view === 'Semana' ? `${formatLong(visibleDates[0])} AL ${formatLong(visibleDates[6])}` : formatLong(date)}
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <div className="grid grid-cols-2 overflow-hidden rounded-xl border border-slate-200 sm:flex">
                   {views.map(v => (
-                    <button key={v} onClick={() => setView(v)} className={`px-4 py-2 text-sm font-bold ${view === v ? 'bg-indigo-600 text-white' : 'bg-white text-slate-500'}`}>{v}</button>
+                    <button key={v} onClick={() => setView(v)} className={`px-4 py-2 text-sm font-medium ${view === v ? 'bg-indigo-600 text-white' : 'bg-white text-slate-500'}`}>{v}</button>
                   ))}
                 </div>
                 <button onClick={load} className="rounded-xl border border-slate-200 p-2 text-slate-500"><RefreshCw size={18} className={loading ? 'animate-spin' : ''} /></button>
@@ -324,51 +318,51 @@ export function AgendaBoard({ personal = false }: AgendaBoardProps) {
 
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-start justify-center overflow-auto bg-slate-900/60 p-4">
-          <form onSubmit={save} className="my-6 w-full max-w-4xl rounded-2xl bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-100 p-6">
-              <h3 className="text-xl font-black text-slate-800">Crear evento</h3>
+          <form onSubmit={save} className="my-6 w-full max-w-5xl overflow-hidden rounded-2xl bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-100 px-6 py-5">
+              <h3 className="text-xl font-bold text-slate-800">Crear evento</h3>
               <button type="button" onClick={() => setShowModal(false)} className="rounded-xl p-2 text-slate-400 hover:bg-slate-100"><X size={20} /></button>
             </div>
             <div className="grid gap-5 p-6 md:grid-cols-2">
-              <label className="md:col-span-2 flex items-center gap-3 text-sm font-bold text-slate-600">
+              <label className="md:col-span-2 flex items-center gap-3 text-sm font-semibold text-indigo-900/70">
                 <input type="checkbox" checked={reserveOnly} onChange={e => setReserveOnly(e.target.checked)} className="h-5 w-5 rounded border-slate-300" />
                 Solo reservar el espacio
               </label>
               {!reserveOnly && (
-                <label className="text-sm font-bold text-slate-600">Mascota
-                  <select required={!reserveOnly} value={form.id_paciente || ''} onChange={e => setForm({ ...form, id_paciente: Number(e.target.value) })} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-3">
+                <label className="text-sm font-semibold text-indigo-900/70">Mascota
+                  <select required={!reserveOnly} value={form.id_paciente || ''} onChange={e => setForm({ ...form, id_paciente: Number(e.target.value) })} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-3 font-normal">
                     <option value="">Seleccione una mascota</option>
                     {patients.map(p => <option key={p.id_paciente} value={p.id_paciente}>{p.nombre} - {p.tutorNombre || p.tutorTelefono}</option>)}
                   </select>
                 </label>
               )}
-              <label className="text-sm font-bold text-slate-600">Tipo
+              <label className="text-sm font-semibold text-indigo-900/70">Tipo
                 <select value={form.id_tipo_cita || ''} onChange={e => {
                   const type = types.find(t => t.id_tipo_cita === Number(e.target.value));
                   const start = form.fecha_inicio ? new Date(form.fecha_inicio) : new Date();
                   const end = new Date(start.getTime() + (type?.duracion_minutos || 30) * 60000);
                   setForm({ ...form, id_tipo_cita: Number(e.target.value), fecha_fin: toLocalInput(end) });
-                }} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-3">
+                }} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-3 font-normal">
                   <option value="">Cita general</option>
                   {types.map(t => <option key={t.id_tipo_cita} value={t.id_tipo_cita}>{t.nombre} ({t.duracion_minutos} min)</option>)}
                 </select>
               </label>
-              <label className="text-sm font-bold text-slate-600">Encargado
-                <select value={form.id_veterinario || ''} onChange={e => setForm({ ...form, id_veterinario: e.target.value })} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-3">
+              <label className="text-sm font-semibold text-indigo-900/70">Encargado
+                <select value={form.id_veterinario || ''} onChange={e => setForm({ ...form, id_veterinario: e.target.value })} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-3 font-normal">
                   <option value="">Sin asignar</option>
                   {vets.map(v => <option key={v.id_veterinario} value={v.id_veterinario}>{v.nombre}</option>)}
                 </select>
               </label>
-              <label className="text-sm font-bold text-slate-600">Inicia
+              <label className="text-sm font-semibold text-indigo-900/70">Inicia
                 <input type="datetime-local" required value={form.fecha_inicio || ''} onChange={e => setForm({ ...form, fecha_inicio: e.target.value })} className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-3" />
               </label>
-              <label className="text-sm font-bold text-slate-600">Finaliza
+              <label className="text-sm font-semibold text-indigo-900/70">Finaliza
                 <input type="datetime-local" required value={form.fecha_fin || ''} onChange={e => setForm({ ...form, fecha_fin: e.target.value })} className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-3" />
               </label>
-              <label className="md:col-span-2 text-sm font-bold text-slate-600">Título / motivo
+              <label className="md:col-span-2 text-sm font-semibold text-indigo-900/70">Título / motivo
                 <input value={form.motivo || ''} onChange={e => setForm({ ...form, motivo: e.target.value })} placeholder="Consulta, vacuna, control, cirugía, grooming..." className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-3" />
               </label>
-              <label className="md:col-span-2 text-sm font-bold text-slate-600">Descripción
+              <label className="md:col-span-2 text-sm font-semibold text-indigo-900/70">Descripción
                 <textarea value={form.notas || ''} onChange={e => setForm({ ...form, notas: e.target.value })} placeholder="Detalles visibles para el equipo clínico" className="mt-2 min-h-[110px] w-full rounded-xl border border-slate-200 px-3 py-3" />
               </label>
               <div className="md:col-span-2 rounded-xl border border-violet-100 bg-violet-50 p-4 text-sm text-violet-700">
@@ -376,9 +370,9 @@ export function AgendaBoard({ personal = false }: AgendaBoardProps) {
                 Al guardar, el sistema programa recordatorios por correo 24 horas y 2 horas antes si el tutor tiene email registrado.
               </div>
             </div>
-            <div className="flex justify-end gap-3 border-t border-slate-100 p-6">
-              <button type="button" onClick={() => setShowModal(false)} className="rounded-xl bg-slate-100 px-5 py-3 font-bold text-slate-600">Cancelar</button>
-              <button className="rounded-xl bg-indigo-600 px-6 py-3 font-black text-white">Guardar evento</button>
+            <div className="flex gap-3 border-t border-slate-100 p-6">
+              <button type="button" onClick={() => setShowModal(false)} className="flex-1 rounded-xl bg-slate-100 px-5 py-3 font-semibold text-slate-600">Cancelar</button>
+              <button className="flex-1 rounded-xl bg-indigo-600 px-6 py-3 font-semibold text-white shadow-lg shadow-indigo-600/20">Guardar evento</button>
             </div>
           </form>
         </div>
