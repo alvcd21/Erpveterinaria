@@ -134,6 +134,15 @@ async function _getRequestClient(store) {
     return store.clientPromise;
 }
 
+function _queueRequestClientQuery(store, client, args) {
+    const previous = store.queryQueue || Promise.resolve();
+    const queryPromise = previous
+        .catch(() => {})
+        .then(() => client.query(...args));
+    store.queryQueue = queryPromise.catch(() => {});
+    return queryPromise;
+}
+
 async function _releaseRequestClient(store) {
     if (!store || store.releaseStarted) return;
     store.releaseStarted = true;
@@ -147,6 +156,7 @@ async function _releaseRequestClient(store) {
     if (!client) return;
 
     try {
+        if (store.queryQueue) await store.queryQueue.catch(() => {});
         // Reset ambas variables de contexto a vacío (no RESET, que fallaría si la
         // GUC nunca se seteó en esta conexión) para que la conexión vuelva limpia
         // al pool y no arrastre bypass/tenant a la siguiente petición.
@@ -164,7 +174,7 @@ pool.query = async function tenantAwareQuery(...args) {
     const store = _getTenantStore();
     if (store?.tenantId || store?.bypass) {
         const client = await _getRequestClient(store);
-        return client.query(...args);
+        return _queueRequestClientQuery(store, client, args);
     }
 
     let client;

@@ -52,6 +52,29 @@ describe('endpointPermissionGuard', () => {
     expect(result.res.statusCode).toBe(null);
   });
 
+  it('cubre rutas globales del shell sin registrarlas como faltantes', () => {
+    const cases = [
+      { path: '/api/notifications/unread-count', permisos: ['VER_POS'] },
+      { path: '/api/notifications', permisos: ['VER_POS'] },
+      { path: '/api/config', permisos: ['VER_POS'] },
+      { path: '/api/dashboard/me', permisos: ['VER_POS'] },
+      { path: '/api/dashboard/admin', permisos: ['VER_REPORTES'] },
+      { path: '/api/ai/quota/status', permisos: ['VER_IA_CUOTAS'] },
+    ];
+
+    for (const item of cases) {
+      const result = runGuard({
+        path: item.path,
+        user: { rol: 'Recepcionista', permisos: item.permisos },
+      });
+
+      expect(result.nextCalled).toBe(true);
+      expect(result.res.statusCode).toBe(null);
+    }
+
+    expect(getPermissionGuardStats().unmatchedRequests).toBe(0);
+  });
+
   it('registra pero permite endpoints sin regla en modo auditoria', () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
 
