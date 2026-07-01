@@ -195,9 +195,10 @@ pool.query = async function tenantAwareQuery(...args) {
     }
 };
 
-// Manual-transaction path: intercept the caller's BEGIN on every checked-out
-// client and inject set_config immediately after it, within the same transaction.
-// Routes that use pool.connect() + client.query('BEGIN') get RLS context for free.
+// Manual-client path: any checked-out client in a tenant-scoped request must
+// receive the RLS context immediately. Some routes use pool.connect() without
+// BEGIN, so waiting until a transaction starts makes RLS hide tenant rows.
+// When a transaction does start we also set the LOCAL context for consistency.
 pool.connect = async function tenantAwareConnect() {
     // Retry once on recoverable connection errors; enforce wall-clock timeout.
     let client;
@@ -217,6 +218,15 @@ pool.connect = async function tenantAwareConnect() {
     const origQuery   = client.query.bind(client);
     const origRelease = client.release.bind(client);
     let injected = false;
+    let released = false;
+
+    try {
+        if (store.tenantId) await _setTenantContext({ query: origQuery }, store.tenantId, false);
+        if (store.bypass) await origQuery("SELECT set_config('app.bypass_rls', 'true', false)");
+    } catch (err) {
+        origRelease(err);
+        throw err;
+    }
 
     client.query = async function tenantInterceptQuery(...args) {
         if (!injected) {
@@ -234,9 +244,21 @@ pool.connect = async function tenantAwareConnect() {
 
     // Restore the original functions before the connection goes back to the pool.
     client.release = function tenantAwareRelease(err) {
+        if (released) return;
+        released = true;
         client.query   = origQuery;
         client.release = origRelease;
-        origRelease(err);
+        if (err) {
+            origRelease(err);
+            return;
+        }
+
+        origQuery("SELECT set_config('app.current_tenant_id','',false), set_config('app.bypass_rls','',false)")
+            .then(() => origRelease())
+            .catch(cleanupErr => {
+                console.error('[DB] Error limpiando contexto tenant:', cleanupErr.message);
+                origRelease(cleanupErr);
+            });
     };
 
     return client;

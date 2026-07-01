@@ -4,7 +4,7 @@ const ROUTE_PLAN_FEATURES = [
     { pattern: /^\/api\/loyalty\b/, feature: 'modulo_lealtad' },
     { pattern: /^\/api\/transferencias\b/, feature: 'modulo_transferencias' },
     { pattern: /^\/api\/entregas\b/, feature: 'modulo_entregas' },
-    { pattern: /^\/api\/sucursales\b/, feature: 'modulo_sucursales' },
+    { pattern: /^\/api\/sucursales\b/, methods: ['POST'], feature: 'modulo_sucursales' },
     { pattern: /^\/api\/ordenes-compra\b/, feature: 'modulo_ordenes_compra' },
     { pattern: /^\/api\/accounting\b/, feature: 'modulo_contabilidad' },
     { pattern: /^\/api\/labels\b/, feature: 'modulo_etiquetas' },
@@ -27,7 +27,11 @@ const PLAN_ORDER = ['basico', 'profesional', 'enterprise'];
 
 async function planFeatureGuard(req, res, next) {
     const url = req.originalUrl.split('?')[0];
-    const rule = ROUTE_PLAN_FEATURES.find(r => r.pattern.test(url));
+    const method = String(req.method || '').toUpperCase();
+    const rule = ROUTE_PLAN_FEATURES.find(r =>
+        r.pattern.test(url)
+        && (!Array.isArray(r.methods) || r.methods.map(m => String(m).toUpperCase()).includes(method))
+    );
     if (!rule) return next();
     if (req.user?.isSuperAdmin) return next();
 

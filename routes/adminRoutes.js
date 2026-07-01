@@ -31,6 +31,17 @@ function normalizeOptional(value) {
     return value === undefined || value === null || value === '' || value === 'Sin Caja' ? null : value;
 }
 
+function formatDateInput(value) {
+    if (!value) return '';
+    if (typeof value === 'string') {
+        const isoMatch = value.match(/^\d{4}-\d{2}-\d{2}/);
+        if (isoMatch) return isoMatch[0];
+    }
+    const date = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(date.getTime())) return '';
+    return date.toISOString().slice(0, 10);
+}
+
 async function getRoleProfile(client, tenantId, idrol) {
     const roleRes = await client.query(
         'SELECT idrol, nombre FROM roles WHERE idrol = $1 AND tenant_id = $2',
@@ -165,7 +176,7 @@ const mapConfigRow = (row) => ({
     cai:              row.cai              || '',
     rangoInicial:     row.rangoinicial     || '',
     rangoFinal:       row.rangofinal       || '',
-    fechaLimite:      row.fechalimite ? String(row.fechalimite).substring(0, 10) : '',
+    fechaLimite:      formatDateInput(row.fechalimite),
     facturaCorrelativoActual: Number(row.factura_correlativo_actual) || 1,
     isv:              Number(row.isv)      || 15,
     mensajeFinal:     row.mensajefinal     || 'LA FACTURA ES BENEFICIO DE TODOS, EXIJALA',
