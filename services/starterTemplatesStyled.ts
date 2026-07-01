@@ -1,29 +1,49 @@
 import { LabelTemplate } from '../types';
 import { a4Cols, invoiceSummaryRows, el } from './starterTemplateUtils';
 
+const MI_FONT = "'Poppins', sans-serif";
+
 export const FACTURA_MINIMALISTA: Omit<LabelTemplate, 'id'> = {
   name: 'Minimalista Índigo', type: 'DOCUMENT', category: 'INVOICE', dataSource: 'SALES',
   isDefault: false, width: 21, height: 29.7, snapEnabled: false, gridSize: 0.5, showGrid: false, backgroundColor: '#ffffff',
   elements: [
     el('mi_bar',   'SHAPE',          0,    0,   21,  0.5,  { shapeType: 'RECTANGLE', fill: '#4f46e5', stroke: 'transparent', strokeWidth: 0 }),
-    el('mi_ch',    'COMPANY_HEADER', 1,    0.8, 12,  2.8,  { fontSize: 10, color: '#1e293b', companyStyle: 'PLAIN', companyAlign: 'left', companyShowRTN: true, companyShowPhone: true, companyShowEmail: false }),
-    el('mi_title', 'TEXT',           14,   0.8, 6.5, 1.5,  { content: 'FACTURA', fontSize: 28, fontWeight: '900', color: '#4f46e5', textAlign: 'right', letterSpacing: 3, fontFamily: "'Poppins', sans-serif" }),
-    el('mi_sub',   'TEXT',           14,   2.4, 6.5, 0.7,  { content: '{{venta.codVenta}}', fontSize: 10, color: '#94a3b8', textAlign: 'right' }),
+    el('mi_ch',    'COMPANY_HEADER', 1,    0.8, 12,  2.8,  { fontSize: 10, color: '#1e293b', fontFamily: MI_FONT, companyStyle: 'PLAIN', companyAlign: 'left', companyShowRTN: true, companyShowPhone: true, companyShowEmail: false }),
+    el('mi_title', 'TEXT',           14,   0.8, 6.5, 1.5,  { content: 'FACTURA', fontSize: 28, fontWeight: '900', color: '#4f46e5', textAlign: 'right', letterSpacing: 3, fontFamily: MI_FONT }),
+    el('mi_sub',   'TEXT',           14,   2.4, 6.5, 0.7,  { content: '{{venta.codVenta}}', fontSize: 10, color: '#94a3b8', textAlign: 'right', fontFamily: MI_FONT }),
     el('mi_div1',  'SHAPE',          1,    3.9, 19,  0.06, { shapeType: 'LINE', stroke: '#4f46e5', strokeWidth: 1.5 }),
-    el('mi_m1',    'TEXT',           1,    4.2, 5,   0.55, { content: 'Fecha:',         fontSize: 9, color: '#64748b', fontWeight: 'bold' }),
-    el('mi_m2',    'TEXT',           6,    4.2, 7,   0.55, { content: '{{venta.fecha}}', fontSize: 9 }),
-    el('mi_m3',    'TEXT',           13,   4.2, 4,   0.55, { content: 'CAI:', fontSize: 9, color: '#64748b', fontWeight: 'bold' }),
-    el('mi_m4',    'TEXT',           17,   4.2, 3.7, 0.55, { content: '{{empresa.cai}}', fontSize: 8 }),
-    el('mi_m5',    'TEXT',           1,    4.9, 5,   0.55, { content: 'Rango:', fontSize: 9, color: '#64748b', fontWeight: 'bold' }),
-    el('mi_m6',    'TEXT',           6,    4.9, 14,  0.55, { content: '{{empresa.rangoInicial}} - {{empresa.rangoFinal}}', fontSize: 8 }),
-    el('mi_cl',    'TEXT',           1,    5.8, 19,  0.5,  { content: 'FACTURAR A', fontSize: 8, fontWeight: 'bold', color: '#4f46e5' }),
-    el('mi_cn',    'TEXT',           1,    6.3, 19,  0.75, { content: '{{cliente.nombre}}', fontSize: 13, fontWeight: 'bold', color: '#1e293b' }),
-    el('mi_ci',    'TEXT',           1,    7.1, 10,  0.55, { content: 'RTN: {{cliente.identidad}}', fontSize: 9, color: '#64748b' }),
-    el('mi_ca',    'TEXT',           1,    7.7, 10,  0.55, { content: '{{cliente.direccion}}', fontSize: 9, color: '#64748b' }),
-    el('mi_tb',    'INVOICE_TABLE',  1,    8.6, 19,  12,   { tableColumns: a4Cols, tableHeaderBg: '#4f46e5', tableHeaderColor: '#ffffff', tableRowHeight: 0.9, tableAlternateRows: true, tableAlternateBg: '#eef2ff', tableFontSize: 9 }),
-    el('mi_sb',    'SUMMARY_BOX',    13,   22,  7,   3,    { summaryRows: invoiceSummaryRows, summaryFontSize: 10, summaryLabelColor: '#1e293b', summaryValueColor: '#4f46e5', summaryBg: '#f8faff' }),
-    el('mi_div2',  'SHAPE',          1,    26.5, 19, 0.06, { shapeType: 'LINE', stroke: '#4f46e5', strokeWidth: 1 }),
-    el('mi_ft',    'TEXT',           1,    26.7, 19, 1,    { content: '{{empresa.mensajeFinal}} · Límite: {{empresa.fechaLimite}}', textAlign: 'center', fontSize: 8, color: '#94a3b8', isMultiline: true }),
+
+    // Columna izquierda: Facturar a
+    el('mi_cl',    'TEXT',           1,    4.3, 9,   0.5,  { content: 'FACTURAR A', fontSize: 8, fontWeight: 'bold', color: '#4f46e5', fontFamily: MI_FONT }),
+    el('mi_cn',    'TEXT',           1,    4.9, 9,   0.75, { content: '{{cliente.nombre}}', fontSize: 13, fontWeight: 'bold', color: '#1e293b', fontFamily: MI_FONT }),
+    el('mi_ci',    'TEXT',           1,    5.7, 9,   0.55, { content: 'RTN/DNI: {{cliente.identidad}}', fontSize: 9, color: '#64748b', fontFamily: MI_FONT }),
+    el('mi_ca',    'TEXT',           1,    6.3, 9,   0.55, { content: '{{cliente.direccion}}', fontSize: 9, color: '#64748b', fontFamily: MI_FONT }),
+
+    // Columna derecha: datos del comprobante
+    el('mi_m1',    'TEXT',           11.5, 4.3, 8.5, 0.55, { content: 'Fecha Emisión: {{venta.fecha}}',        fontSize: 9, color: '#1e293b', fontFamily: MI_FONT }),
+    el('mi_m2',    'TEXT',           11.5, 4.9, 8.5, 0.55, { content: 'RTN Emisor: {{empresa.rtn}}',           fontSize: 9, color: '#1e293b', fontFamily: MI_FONT }),
+    el('mi_m3',    'TEXT',           11.5, 5.5, 8.5, 0.55, { content: 'CAI: {{empresa.cai}}',                  fontSize: 8, color: '#1e293b', fontFamily: MI_FONT }),
+    el('mi_m4',    'TEXT',           11.5, 6.1, 8.5, 0.55, { content: 'Vendedor: {{venta.nombreVendedor}}',    fontSize: 9, color: '#1e293b', fontFamily: MI_FONT }),
+
+    el('mi_tb',    'INVOICE_TABLE',  1,    7.4, 19,  13,   { tableColumns: a4Cols, tableHeaderBg: '#4f46e5', tableHeaderColor: '#ffffff', tableRowHeight: 1.1, tableAlternateRows: true, tableAlternateBg: '#eef2ff', tableFontSize: 12, fontFamily: MI_FONT }),
+    el('mi_sb',    'SUMMARY_BOX',    13,   20.8, 7,   3.2,  { summaryRows: invoiceSummaryRows, summaryFontSize: 11, summaryLabelColor: '#1e293b', summaryValueColor: '#4f46e5', summaryBg: '#f8faff', fontFamily: MI_FONT }),
+
+    // Pie fiscal: rango autorizado, fecha límite, original/copia y código de barras
+    el('mi_div2',  'SHAPE',          1,    24.4, 19, 0.06, { shapeType: 'LINE', stroke: '#4f46e5', strokeWidth: 1 }),
+    el('mi_b1',    'TEXT',           1,    24.8, 11, 0.5,  { content: 'Rango Autorizado: {{empresa.rangoInicial}} - {{empresa.rangoFinal}}', fontSize: 8, color: '#64748b', fontFamily: MI_FONT }),
+    el('mi_b2',    'TEXT',           1,    25.3, 11, 0.5,  { content: 'Fecha Límite de Emisión: {{empresa.fechaLimite}}', fontSize: 8, color: '#64748b', fontFamily: MI_FONT }),
+    el('mi_b3',    'TEXT',           1,    25.8, 11, 0.5,  { content: 'Original Cliente | Copia Emisor', fontSize: 8, color: '#94a3b8', fontFamily: MI_FONT }),
+    el('mi_bc',    'BARCODE',        13,   24.7, 7,  2,    { content: '{{venta.codVenta}}', fontSize: 8 }),
+
+    el('mi_ft',    'TEXT',           1,    27,   19, 0.7,  { content: '{{empresa.mensajeFinal}}', textAlign: 'center', fontSize: 8, color: '#94a3b8', isMultiline: true, fontFamily: MI_FONT }),
+
+    // Redes sociales: icono (a subir por el usuario) + texto editable, uno por red
+    el('mi_ic1',   'IMAGE',          6,    27.9, 0.5, 0.5,  { content: '', imageObjectFit: 'contain', elementLabel: 'Icono WhatsApp' }),
+    el('mi_tx1',   'TEXT',           6.6,  27.9, 4.5, 0.5,  { content: '+504 0000-0000', fontSize: 8, color: '#64748b', fontFamily: MI_FONT, elementLabel: 'Texto WhatsApp' }),
+    el('mi_ic2',   'IMAGE',          11.5, 27.9, 0.5, 0.5,  { content: '', imageObjectFit: 'contain', elementLabel: 'Icono Facebook' }),
+    el('mi_tx2',   'TEXT',           12.1, 27.9, 4.5, 0.5,  { content: 'Tu Empresa', fontSize: 8, color: '#64748b', fontFamily: MI_FONT, elementLabel: 'Texto Facebook' }),
+    el('mi_ic3',   'IMAGE',          17,   27.9, 0.5, 0.5,  { content: '', imageObjectFit: 'contain', elementLabel: 'Icono Instagram' }),
+    el('mi_tx3',   'TEXT',           17.6, 27.9, 2.4, 0.5,  { content: '@tuempresa', fontSize: 8, color: '#64748b', fontFamily: MI_FONT, elementLabel: 'Texto Instagram' }),
   ],
 };
 

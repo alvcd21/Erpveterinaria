@@ -91,8 +91,9 @@ export function elementToHTML(
   }
 
   if (el.type === 'COMPANY_HEADER') {
-    const emp = ctx.empresa || {};
-    const fs  = el.fontSize || 9;
+    const emp  = ctx.empresa || {};
+    const fs   = el.fontSize || 9;
+    const font = el.fontFamily || 'Arial,sans-serif';
 
     if (el.companyStyle === 'GEOMETRIC') {
       const logoSrc  = emp.logoBase64 || getLogoSync();
@@ -109,7 +110,7 @@ export function elementToHTML(
         ? `<div style="text-align:right;color:#fff;flex-shrink:0;padding-left:10px;line-height:1;">` +
           `<div style="font-size:${fs + 12}pt;font-weight:900;letter-spacing:3px;">${docTitle}</div></div>`
         : '';
-      return `<div style="${base}overflow:hidden;background:#1e3a8a;">` +
+      return `<div style="${base}overflow:hidden;background:#1e3a8a;font-family:${font};">` +
         `<div style="position:absolute;inset:0;background:#3b82f6;clip-path:polygon(0 0, 48% 0, 0 100%);"></div>` +
         `<div style="position:absolute;inset:0;display:flex;align-items:center;padding:8px 16px;box-sizing:border-box;">` +
           logoHtml +
@@ -126,7 +127,7 @@ export function elementToHTML(
       (emp.direccion ? `<div style="font-size:${fs}pt;color:${col};">${escapeHtml(String(emp.direccion))}</div>` : '') +
       (el.companyShowPhone !== false && emp.telefono ? `<div style="font-size:${fs}pt;color:${col};">Tel: ${escapeHtml(String(emp.telefono))}</div>` : '') +
       (el.companyShowEmail && emp.correo ? `<div style="font-size:${fs}pt;color:${col};">${escapeHtml(String(emp.correo))}</div>` : '');
-    return `<div style="${base}text-align:${align};line-height:1.5;padding:2px;">${inner}</div>`;
+    return `<div style="${base}text-align:${align};line-height:1.5;padding:2px;font-family:${font};">${inner}</div>`;
   }
 
   if (el.type === 'SUMMARY_BOX') {
@@ -135,14 +136,16 @@ export function elementToHTML(
     const lCol  = el.summaryLabelColor || '#000';
     const vCol  = el.summaryValueColor || '#000';
     const bgCol = el.summaryBg || 'transparent';
+    const font  = el.fontFamily || 'Arial,sans-serif';
+    const rowPad = Math.max(4, Math.round(fSize * 0.45));
     const rowsHTML = rows.map((row: SummaryRow) => {
-      const sepLine = row.separator ? `<div style="border-top:1px solid #cbd5e1;margin:2px 0;"></div>` : '';
+      const sepLine = row.separator ? `<div style="border-top:1px solid #cbd5e1;margin:4px 0;"></div>` : '';
       const resolved = resolveContent(row.field, ctx);
       const formatted = formatValue(resolved, row.format);
       return sepLine +
-        `<div style="display:flex;justify-content:space-between;padding:1px 4px;font-weight:${row.bold ? 'bold' : 'normal'};font-size:${fSize}pt;">` +
+        `<div style="display:flex;justify-content:space-between;align-items:center;padding:${rowPad}px 4px;font-weight:${row.bold ? 'bold' : 'normal'};font-size:${fSize}pt;font-family:${font};line-height:1.3;">` +
         `<span style="color:${lCol};">${escapeHtml(row.label)}</span>` +
-        `<span style="color:${vCol};font-family:monospace;">${escapeHtml(formatted)}</span>` +
+        `<span style="color:${vCol};">${escapeHtml(formatted)}</span>` +
         `</div>`;
     }).join('');
     return `<div style="${base}background-color:${bgCol};">${rowsHTML}</div>`;
@@ -170,10 +173,12 @@ export function elementToHTML(
     const hCol  = el.tableHeaderColor || '#ffffff';
     const fSize = el.tableFontSize || 8;
     const altBg = el.tableAlternateBg || '#f8fafc';
-    const lineHeight = 1.28;
+    const font  = el.fontFamily || 'Arial,sans-serif';
+    const lineHeight = 1.4;
+    const cellPad = Math.max(5, Math.round(fSize * 0.55));
 
     const thCells = cols.map(col =>
-      `<th style="width:${col.widthPct}%;text-align:${col.align};padding:4px 4px;font-size:${fSize}px;line-height:${lineHeight};font-weight:bold;overflow:hidden;white-space:normal;overflow-wrap:anywhere;border-right:1px solid rgba(255,255,255,0.2);vertical-align:middle;">${escapeHtml(col.header)}</th>`
+      `<th style="width:${col.widthPct}%;text-align:${col.align};padding:${cellPad}px 6px;font-size:${fSize}px;line-height:${lineHeight};font-family:${font};font-weight:bold;overflow:hidden;white-space:normal;overflow-wrap:anywhere;border-right:1px solid rgba(255,255,255,0.2);vertical-align:middle;">${escapeHtml(col.header)}</th>`
     ).join('');
 
     const rows = tableItems && tableItems.length > 0
@@ -185,14 +190,14 @@ export function elementToHTML(
             const formatted = formatValue(rawVal, col.format);
             const whiteSpace = col.format === 'TEXT' ? 'normal' : 'nowrap';
             const wrap = col.format === 'TEXT' ? 'overflow-wrap:anywhere;word-break:break-word;' : '';
-            return `<td style="width:${col.widthPct}%;text-align:${col.align};padding:3px 4px;font-size:${fSize}px;line-height:${lineHeight};overflow:hidden;white-space:${whiteSpace};${wrap}vertical-align:top;">${escapeHtml(formatted)}</td>`;
+            return `<td style="width:${col.widthPct}%;text-align:${col.align};padding:${cellPad}px 6px;font-size:${fSize}px;line-height:${lineHeight};font-family:${font};overflow:hidden;white-space:${whiteSpace};${wrap}vertical-align:top;">${escapeHtml(formatted)}</td>`;
           }).join('');
           return `<tr style="background-color:${bg};border-top:1px solid #e2e8f0;">${tdCells}</tr>`;
         }).join('')
       : [0, 1, 2].map((ri) => {
           const bg = el.tableAlternateRows && ri % 2 === 1 ? altBg : '#fff';
           const tdCells = cols.map(col =>
-            `<td style="width:${col.widthPct}%;text-align:${col.align};padding:3px 4px;font-size:${fSize}px;line-height:${lineHeight};color:#94a3b8;white-space:nowrap;overflow:hidden;">` +
+            `<td style="width:${col.widthPct}%;text-align:${col.align};padding:${cellPad}px 6px;font-size:${fSize}px;line-height:${lineHeight};font-family:${font};color:#94a3b8;white-space:nowrap;overflow:hidden;">` +
             `${col.format === 'CURRENCY' ? 'L. 0.00' : col.format === 'NUMBER' ? '0' : '···'}</td>`
           ).join('');
           return `<tr style="background-color:${bg};border-top:1px solid #e2e8f0;">${tdCells}</tr>`;

@@ -102,15 +102,13 @@ export const CONTEXT_GROUPS: CtxGroup[] = [
         ],
     },
     {
-        icon: '🛒', label: 'Ítem / Dispensación (tabla)', color: 'amber',
+        icon: '🛒', label: 'Ítem (tabla)', color: 'amber',
         vars: [
             { key: '{{item.descripcion}}',  label: 'Medicamento',     example: 'Losartan 50mg x30' },
             { key: '{{item.cantidad}}',     label: 'Cantidad',        example: '2' },
             { key: '{{item.precioVenta}}',  label: 'Precio Unitario', example: '165.00' },
             { key: '{{item.isv}}',          label: 'ISV',             example: '0.00' },
             { key: '{{item.total}}',        label: 'Total Ítem',      example: '330.00' },
-            { key: '{{item.dosis}}',        label: 'Dosis',           example: '1 tab c/12h' },
-            { key: '{{item.indicaciones}}', label: 'Indicaciones',    example: 'Tomar con comida' },
         ],
     },
     {
@@ -121,8 +119,23 @@ export const CONTEXT_GROUPS: CtxGroup[] = [
             { key: 'venta.total',          label: 'Total',          example: '330.00' },
             { key: 'venta.isv',            label: 'ISV (15%)',      example: '0.00' },
             { key: 'venta.descuento',      label: 'Descuento',      example: '0.00' },
-            { key: 'venta.metodoPago',     label: 'Método de Pago', example: 'Efectivo' },
+            { key: 'venta.tipoCompra',     label: 'Tipo de Venta',  example: 'Contado' },
             { key: 'venta.nombreVendedor', label: 'Vendedor',       example: 'Ana Rodríguez' },
+        ],
+    },
+    {
+        icon: '💰', label: 'Totales Fiscales', color: 'rose',
+        vars: [
+            { key: 'fiscal.subtotal',          label: 'Subtotal',           example: '287.00' },
+            { key: 'fiscal.descuento',         label: 'Descuento',          example: '0.00' },
+            { key: 'fiscal.subtotalExento',    label: 'Importe Exento',     example: '0.00' },
+            { key: 'fiscal.subtotalGravado15', label: 'Importe Gravado 15%', example: '287.00' },
+            { key: 'fiscal.subtotalGravado18', label: 'Importe Gravado 18%', example: '0.00' },
+            { key: 'fiscal.isv15',             label: 'ISV 15%',            example: '43.00' },
+            { key: 'fiscal.isv18',             label: 'ISV 18%',            example: '0.00' },
+            { key: 'fiscal.total',             label: 'Total a Pagar',      example: '330.00' },
+            { key: 'fiscal.totalLetras',       label: 'Total en Letras',    example: 'TRESCIENTOS TREINTA LEMPIRAS CON 00/100' },
+            { key: 'fiscal.numeroItems',       label: 'Número de Ítems',    example: '3' },
         ],
     },
 ];
