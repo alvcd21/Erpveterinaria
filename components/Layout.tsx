@@ -199,6 +199,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       name: 'Inventario', icon: <Pill size={20} />, permission: 'VER_INVENTARIO',
       subItems: [
         { name: 'Inventario Clínico', path: '/medicamentos', icon: <Pill size={18} />, permission: 'VER_INVENTARIO' },
+        { name: 'Catálogos', path: '/catalogos', icon: <BookOpen size={18} />, permission: 'VER_INVENTARIO' },
         { name: 'Control Vencimientos', path: '/vencimientos', icon: <AlertTriangle size={18} />, permission: 'VER_VENCIMIENTOS', planFeature: 'modulo_vencimientos', minimumPlan: 'profesional' },
         { name: 'Transferencias', path: '/transferencias', icon: <ArrowLeftRight size={18} />, permission: 'VER_TRANSFERENCIAS', planFeature: 'modulo_transferencias', minimumPlan: 'enterprise' },
         { name: 'Entregas Sucursal', path: '/cross-branch/deliveries', icon: <Truck size={18} />, permission: 'VER_ENTREGAS', planFeature: 'modulo_entregas', minimumPlan: 'enterprise' },

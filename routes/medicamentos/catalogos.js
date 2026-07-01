@@ -48,6 +48,30 @@ function registerRoutes(router) {
         } catch (e) { handleDbError(res, e); }
     });
 
+    router.post('/formas-farmaceuticas', authenticateToken, async (req, res) => {
+        try {
+            const { nombre, unidad_base } = req.body;
+            if (!nombre) return res.status(400).json({ error: 'nombre es requerido' });
+            if (!unidad_base) return res.status(400).json({ error: 'unidad_base es requerida' });
+            const r = await pool.query(
+                `INSERT INTO formas_farmaceuticas (nombre, unidad_base, tenant_id) VALUES ($1,$2,$3) RETURNING id_forma`,
+                [nombre, unidad_base, req.tenantId]
+            );
+            res.status(201).json({ message: 'Forma farmacéutica creada', id_forma: r.rows[0].id_forma });
+        } catch (e) { handleDbError(res, e); }
+    });
+
+    router.put('/formas-farmaceuticas/:id', authenticateToken, async (req, res) => {
+        try {
+            const { nombre, unidad_base, activo } = req.body;
+            await pool.query(
+                `UPDATE formas_farmaceuticas SET nombre=$1, unidad_base=$2, activo=$3 WHERE id_forma=$4 AND tenant_id=$5`,
+                [nombre, unidad_base, activo !== false, req.params.id, req.tenantId]
+            );
+            res.json({ message: 'Forma farmacéutica actualizada' });
+        } catch (e) { handleDbError(res, e); }
+    });
+
     router.get('/principios-activos', authenticateToken, async (req, res) => {
         try {
             const { q } = req.query;

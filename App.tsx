@@ -25,6 +25,7 @@ import Accounting from './pages/Accounting';
 
 // Páginas nuevas de veterinaria
 import Medicamentos from './pages/Medicamentos';
+import Catalogos from './pages/Catalogos';
 import Sucursales from './pages/Sucursales';
 import Vencimientos from './pages/Vencimientos';
 import Transferencias from './pages/Transferencias';
@@ -126,6 +127,11 @@ const App: React.FC = () => {
           <Route path="/medicamentos" element={
             <ProtectedRoute requiredPermission="VER_INVENTARIO">
               <Layout><Medicamentos /></Layout>
+            </ProtectedRoute>
+          } />
+          <Route path="/catalogos" element={
+            <ProtectedRoute requiredPermission="VER_INVENTARIO">
+              <Layout><Catalogos /></Layout>
             </ProtectedRoute>
           } />
           <Route path="/vencimientos" element={

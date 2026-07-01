@@ -272,6 +272,10 @@ router.post('/register', registerLimiter, async (req, res) => {
             [tenant.id]
         );
 
+        // 7. Default clinical inventory catalogs (formas farmacéuticas + categorías)
+        const { seedCatalogosForTenant } = require('../services/catalogSeed');
+        await seedCatalogosForTenant(client, tenant.id);
+
         await client.query('COMMIT');
 
         res.status(201).json({

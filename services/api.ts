@@ -780,6 +780,8 @@ export const CatalogoService = {
   createCategoria: (data: Partial<CategoriaTerapeutica>) => request('/categorias-terapeuticas', { method: 'POST', body: JSON.stringify(data) }),
   updateCategoria: (id: number, data: any) => request(`/categorias-terapeuticas/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   getFormas: () => request<FormaFarmaceutica[]>('/formas-farmaceuticas'),
+  createForma: (data: Partial<FormaFarmaceutica>) => request('/formas-farmaceuticas', { method: 'POST', body: JSON.stringify(data) }),
+  updateForma: (id: number, data: any) => request(`/formas-farmaceuticas/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   getPrincipios: (q?: string) => request<any[]>(`/principios-activos${q ? `?q=${encodeURIComponent(q)}` : ''}`),
 };
 

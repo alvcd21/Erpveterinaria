@@ -246,6 +246,10 @@ router.post('/tenants', async (req, res) => {
             afterData: { tenant, admin: adminInfo },
         });
 
+        // Default clinical inventory catalogs (formas farmacéuticas + categorías)
+        const { seedCatalogosForTenant } = require('../services/catalogSeed');
+        await seedCatalogosForTenant(client, tenant.id);
+
         await client.query('COMMIT');
 
         res.status(201).json({
