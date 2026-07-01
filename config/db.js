@@ -403,7 +403,7 @@ async function generateFacturaCorrelativo(tenantId, client = pool) {
         await txClient.query('SELECT pg_advisory_xact_lock($1)', [lockId]);
 
         const result = await txClient.query(
-            `SELECT rangoinicial, factura_correlativo_actual
+            `SELECT rangoinicial, factura_correlativo_actual, fechalimite
              FROM configuracion WHERE tenant_id = $1 FOR UPDATE`,
             [tenantId]
         );
@@ -412,6 +412,12 @@ async function generateFacturaCorrelativo(tenantId, client = pool) {
         if (parts.length < 4) {
             if (usingPool) await txClient.query('COMMIT');
             return null;
+        }
+        if (row.fechalimite && new Date(row.fechalimite) < new Date(new Date().toDateString())) {
+            const err = new Error('El CAI autorizado ha vencido (fecha límite de emisión superada). Solicite y registre nueva información de facturación (CAI) antes de continuar.');
+            err.statusCode = 400;
+            err.code = 'CAI_EXPIRED';
+            throw err;
         }
         const prefix  = parts.slice(0, 3).join('-');
         const numero  = Number(row.factura_correlativo_actual) || 1;
