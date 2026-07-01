@@ -128,8 +128,12 @@ app.use((req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Frame-Options', 'DENY');
     res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    // frame-src 'self' blob: → habilita el iframe blob que usa la descarga de PDF
+    //   (services/TemplateRenderer.ts downloadAsPDF) para renderizar la plantilla.
+    // El hash sha256 autoriza EXCLUSIVAMENTE el script inline de layout fijo de esa
+    //   plantilla (runtimeLayoutScript). Si ese script cambia, regenerar el hash.
     res.setHeader('Content-Security-Policy',
-        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https://*.r2.cloudflarestorage.com https://*.r2.dev; connect-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com; object-src 'none'; base-uri 'self'; frame-ancestors 'none';"
+        "default-src 'self'; script-src 'self' 'sha256-xXWXhEfbQYM4WKbehkJItSqA/pc2QaTRMlr9OwWzOaI='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https://*.r2.cloudflarestorage.com https://*.r2.dev; connect-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com; frame-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none';"
     );
     res.setHeader('Strict-Transport-Security', 'max-age=63072000; includeSubDomains; preload');
     res.setHeader('X-XSS-Protection', '0');
