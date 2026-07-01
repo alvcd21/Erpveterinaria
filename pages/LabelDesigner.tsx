@@ -60,7 +60,7 @@ const LabelDesigner: React.FC = () => {
     loadTemplate, createNew,
     undo, redo,
     addElement, updateElement, updateMultipleElements, deleteSelected, updateTemplate,
-    insertCompanyAsElements,
+    insertCompanyAsElements, insertClienteAsElements,
     saveTemplate, moveLayer, reorderElements,
     alignElements, distributeH,
     interaction, unitLabel,
@@ -245,6 +245,7 @@ const LabelDesigner: React.FC = () => {
           template={template}
           addElement={(t, e) => { addElement(t, e); if (window.innerWidth < 768) setIsMobilePropOpen(true); }}
           insertCompanyAsElements={() => { insertCompanyAsElements(); if (window.innerWidth < 768) setIsMobilePropOpen(true); }}
+          insertClienteAsElements={() => { insertClienteAsElements(); if (window.innerWidth < 768) setIsMobilePropOpen(true); }}
           onImageUpload={handleImageUpload}
           setShowShapeModal={setShowShapeModal}
           onConfigClick={() => { setSelectedId(null); setActivePanel('PROPERTIES'); }}

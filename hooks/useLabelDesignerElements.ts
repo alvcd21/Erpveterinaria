@@ -129,6 +129,7 @@ export function useLabelDesignerElements(
                 { content: 'CAI: {{empresa.cai}}',                                             fontSize: 8, fontWeight: 'normal', label: 'CAI' },
                 { content: 'Rango Autorizado: {{empresa.rangoInicial}} - {{empresa.rangoFinal}}', fontSize: 8, fontWeight: 'normal', label: 'Rango Autorizado' },
                 { content: 'Fecha Límite de Emisión: {{empresa.fechaLimite}}',                 fontSize: 8, fontWeight: 'normal', label: 'Fecha Límite CAI' },
+                { content: '{{empresa.mensajeFinal}}',                                         fontSize: 8, fontWeight: 'normal', label: 'Mensaje Final' },
             ] : []),
         ];
 
@@ -149,6 +150,48 @@ export function useLabelDesignerElements(
         });
 
         const newEls = [logoEl, ...textEls];
+        updateTemplate({ elements: [...template.elements, ...newEls] });
+        setSelectedId(newEls[0].id);
+        setSelectedIds(newEls.map(e => e.id));
+        setTool('SELECT');
+    };
+
+    const insertClienteAsElements = () => {
+        const isDoc = template.type === 'DOCUMENT';
+        const startX = isDoc ? 1 : 5;
+        const startY = isDoc ? 0.5 : 5;
+        const textW  = template.width - (isDoc ? 2 : 10);
+        const lineH  = isDoc ? 0.65 : 5;
+
+        const base: Partial<LabelElement> = {
+            rotation: 0, opacity: 1,
+            barcodeFormat: 'CODE128' as any, displayValue: true,
+            shapeType: 'RECTANGLE' as any, isStretchWithOverflow: false,
+        };
+
+        const textFields = [
+            { content: 'No. Factura: {{venta.codVenta}}',        fontSize: isDoc ? 9 : 8, fontWeight: 'normal', label: 'Número de Factura' },
+            { content: 'Fecha: {{venta.fecha}}',                 fontSize: isDoc ? 9 : 8, fontWeight: 'normal', label: 'Fecha de Facturación' },
+            { content: 'Cliente: {{cliente.nombre}}',           fontSize: isDoc ? 9 : 8, fontWeight: 'normal', label: 'Nombre Cliente' },
+            { content: 'RTN / Identidad: {{cliente.identidad}}', fontSize: isDoc ? 9 : 8, fontWeight: 'normal', label: 'RTN Cliente' },
+        ];
+
+        let textY = startY;
+        const newEls: LabelElement[] = textFields.map(f => {
+            const el: LabelElement = {
+                ...base as any,
+                id: generateId(), type: 'TEXT',
+                x: startX, y: textY, width: textW, height: lineH,
+                content: f.content,
+                fontSize: f.fontSize, fontWeight: f.fontWeight as any,
+                color: '#000000', textAlign: 'left',
+                fontFamily: 'helvetica', isMultiline: false,
+                elementLabel: f.label,
+            };
+            textY += lineH;
+            return el;
+        });
+
         updateTemplate({ elements: [...template.elements, ...newEls] });
         setSelectedId(newEls[0].id);
         setSelectedIds(newEls.map(e => e.id));
@@ -232,7 +275,7 @@ export function useLabelDesignerElements(
 
     return {
         updateTemplate, updateElement, updateMultipleElements,
-        addElement, insertCompanyAsElements, deleteSelected,
+        addElement, insertCompanyAsElements, insertClienteAsElements, deleteSelected,
         moveLayer, reorderElements, alignElements, distributeH,
     };
 }

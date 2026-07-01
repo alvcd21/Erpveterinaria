@@ -14,9 +14,10 @@ function estimateInvoiceTableHeightPx(
 ): number {
   const cols = el.tableColumns || [];
   const fSize = el.tableFontSize || 8;
-  const lineHeight = Math.ceil(fSize * 1.28);
-  const headerPx = lineHeight + 8;
-  const baseRowPx = Math.max(el.tableRowHeight ? el.tableRowHeight * scale : 0, lineHeight + 7);
+  const lineHeight = Math.ceil(fSize * 1.4);
+  const cellPad = Math.max(5, Math.round(fSize * 0.55)) * 2;
+  const headerPx = lineHeight + cellPad;
+  const baseRowPx = Math.max(el.tableRowHeight ? el.tableRowHeight * scale : 0, lineHeight + cellPad);
 
   if (!items || items.length === 0 || cols.length === 0) {
     return headerPx + baseRowPx * 3;
@@ -34,7 +35,7 @@ function estimateInvoiceTableHeightPx(
       const estimatedLines = Math.max(1, Math.ceil((formatted.length * avgCharPx) / colWidthPx));
       return Math.max(max, Math.min(estimatedLines, 4));
     }, 1);
-    return sum + Math.max(baseRowPx, lineHeight * maxLines + 7);
+    return sum + Math.max(baseRowPx, lineHeight * maxLines + cellPad);
   }, 0);
 
   return headerPx + rowsPx;
@@ -49,7 +50,7 @@ export function computeInvoiceTableGrowth(
   const items = Array.isArray(itemsOrCount) ? itemsOrCount : undefined;
   const numRows = typeof itemsOrCount === 'number' ? itemsOrCount : (items?.length || 0);
   const fSize    = el.tableFontSize || 8;
-  const rowHPx   = Math.max(el.tableRowHeight ? el.tableRowHeight * scale : 0, Math.ceil(fSize * 1.5) + 10);
+  const rowHPx   = Math.max(el.tableRowHeight ? el.tableRowHeight * scale : 0, Math.ceil(fSize * 1.4) + Math.max(5, Math.round(fSize * 0.55)) * 2);
   const actualPx = items
     ? estimateInvoiceTableHeightPx(el, items, scale, ctx)
     : rowHPx * (numRows + 1);
@@ -107,9 +108,11 @@ export function computeTextGrowth(
 
 export function computeSummaryBoxGrowth(el: LabelElement, scale: number): GrowthInfo | null {
   const numRows  = (el.summaryRows || []).length;
+  const numSeparators = (el.summaryRows || []).filter(r => r.separator).length;
   const fSize    = el.summaryFontSize || 9;
-  const rowHPx   = Math.ceil(fSize * 1.5) + 8;
-  const actualPx  = rowHPx * numRows;
+  const rowPad   = Math.max(4, Math.round(fSize * 0.45));
+  const rowHPx   = Math.ceil(fSize * 1.3 * (96 / 72)) + rowPad * 2;
+  const actualPx  = rowHPx * numRows + numSeparators * 8;
   const designedPx = el.height * scale;
   const overflowPx = Math.max(0, actualPx - designedPx);
   if (overflowPx === 0) return null;
