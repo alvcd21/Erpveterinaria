@@ -1,9 +1,9 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import {
   User, UserPlus, ChevronDown, Banknote, CreditCard, Blend,
-  RefreshCw, ShoppingCart, Percent, DollarSign, CheckCircle, Search, X, Star,
+  RefreshCw, ShoppingCart, Percent, DollarSign, CheckCircle, Search, X, Star, FileText,
 } from 'lucide-react';
-import { Cliente, LoyaltyPreview } from '../../types';
+import { Cliente, LoyaltyPreview, VentaDocumentoTipo } from '../../types';
 import { CartTotals, PaymentMethod, DiscountType } from './types';
 
 interface Props {
@@ -19,15 +19,20 @@ interface Props {
   thirdAgeMode: boolean;
   totals: CartTotals;
   isCheckingOut: boolean;
+  isCreatingQuote: boolean;
+  documentType: VentaDocumentoTipo;
+  canCharge: boolean;
   onClientChange: (id: string) => void;
   onPaymentTypeChange: (type: 'Contado' | 'Credito') => void;
   onPaymentMethodChange: (m: PaymentMethod) => void;
+  onDocumentTypeChange: (type: VentaDocumentoTipo) => void;
   onDiscountChange: (v: number) => void;
   onDiscountTypeChange: (t: DiscountType) => void;
   onCashReceivedChange: (v: number) => void;
   onMixtoEfectivoChange: (v: number) => void;
   onThirdAgeModeChange: (v: boolean) => void;
   onCheckout: () => void;
+  onCreateQuote: () => void;
   onNewClient: () => void;
   loyaltyPreview?: LoyaltyPreview | null;
   loyaltyRedemptionLps?: number;
@@ -43,11 +48,11 @@ const PAYMENT_METHODS: { id: PaymentMethod; label: string; icon: React.ReactNode
 export default function CheckoutPanel({
   cartLength, clients, selectedClientId, paymentType, paymentMethod,
   discount, discountType, cashReceived, mixtoEfectivo, thirdAgeMode,
-  totals, isCheckingOut,
+  totals, isCheckingOut, isCreatingQuote, documentType, canCharge,
   onClientChange, onPaymentTypeChange, onPaymentMethodChange,
-  onDiscountChange, onDiscountTypeChange, onCashReceivedChange,
+  onDocumentTypeChange, onDiscountChange, onDiscountTypeChange, onCashReceivedChange,
   onMixtoEfectivoChange, onThirdAgeModeChange, onCheckout, onNewClient,
-  loyaltyPreview, loyaltyRedemptionLps = 0, onLoyaltyRedemptionChange,
+  onCreateQuote, loyaltyPreview, loyaltyRedemptionLps = 0, onLoyaltyRedemptionChange,
 }: Props) {
   const [clientSearch, setClientSearch] = useState('');
   const [searchActive, setSearchActive] = useState(false);
@@ -103,7 +108,9 @@ export default function CheckoutPanel({
 
   const change = paymentMethod === 'Efectivo' ? cashReceived - totals.total : null;
   const mixtoTarjeta = totals.total - mixtoEfectivo;
-  const canCheckout = cartLength > 0 && !!selectedClientId && !isCheckingOut;
+  const canCheckout = cartLength > 0 && !!selectedClientId && !isCheckingOut && !isCreatingQuote && canCharge;
+  // La cotización no requiere caja/turno; el cobro sí (canCharge).
+  const canCreateQuote = cartLength > 0 && !!selectedClientId && !isCheckingOut && !isCreatingQuote;
   const manualDiscount = Math.max(0, totals.descuento - loyaltyRedemptionLps);
 
   return (
@@ -236,6 +243,36 @@ export default function CheckoutPanel({
             >
               3a Edad
             </button>
+          </div>
+
+          {/* Documento comercial */}
+          <div className="space-y-2 rounded-2xl border border-slate-100 bg-slate-50 p-3">
+            <div className="flex items-center gap-2">
+              <FileText size={13} className="text-slate-400" />
+              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Documento de venta</span>
+            </div>
+            <div className="grid grid-cols-2 gap-1 rounded-xl bg-white p-1">
+              {([
+                { id: 'factura_fiscal' as const, label: 'Fiscal SAR' },
+                { id: 'factura_no_fiscal' as const, label: 'No fiscal' },
+              ]).map(option => (
+                <button
+                  key={option.id}
+                  type="button"
+                  onClick={() => onDocumentTypeChange(option.id)}
+                  className={`rounded-lg px-2 py-2 text-[11px] font-bold transition-all ${
+                    documentType === option.id
+                      ? 'bg-indigo-600 text-white shadow-sm'
+                      : 'text-slate-500 hover:bg-slate-100'
+                  }`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+            <p className="text-[9px] leading-relaxed text-slate-400">
+              La factura fiscal consume correlativo CAI. La no fiscal registra la venta sin rango SAR.
+            </p>
           </div>
 
           {/* Descuento */}
@@ -497,7 +534,19 @@ export default function CheckoutPanel({
       </div>
 
       {/* Checkout button */}
-      <div className="px-4 pb-4 pt-3 border-t border-slate-100 shrink-0">
+      <div className="space-y-2 px-4 pb-4 pt-3 border-t border-slate-100 shrink-0">
+        <button
+          type="button"
+          onClick={onCreateQuote}
+          disabled={!canCreateQuote}
+          className="w-full py-3 border-2 border-indigo-100 bg-white hover:bg-indigo-50 disabled:bg-slate-50 disabled:border-slate-100 disabled:text-slate-300 disabled:cursor-not-allowed text-indigo-600 rounded-2xl font-bold text-sm transition-all active:scale-[0.98] flex items-center justify-center gap-2"
+        >
+          {isCreatingQuote ? (
+            <><RefreshCw size={15} className="animate-spin" /> Generando cotización...</>
+          ) : (
+            <><FileText size={15} /> Generar cotización</>
+          )}
+        </button>
         <button
           onClick={onCheckout}
           disabled={!canCheckout}
@@ -508,7 +557,11 @@ export default function CheckoutPanel({
           ) : (
             <>
               <ShoppingCart size={16} />
-              {canCheckout ? `Cobrar — L ${totals.total.toFixed(2)}` : 'Selecciona cliente y productos'}
+              {canCheckout
+                ? `Cobrar — L ${totals.total.toFixed(2)}`
+                : (cartLength > 0 && !!selectedClientId && !canCharge)
+                  ? 'Abre caja para cobrar'
+                  : 'Selecciona cliente y productos'}
               {canCheckout && <span className="opacity-40 text-[10px] font-bold ml-1">F8</span>}
             </>
           )}

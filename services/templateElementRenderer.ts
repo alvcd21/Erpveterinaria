@@ -1,5 +1,5 @@
 import { LabelElement, SummaryRow, DetalleVenta } from '../types';
-import { PrintDataContext, resolveContent, escapeHtml, formatValue, safeEvaluateCondition, buildReceiptItemLines } from './templateRendererUtils';
+import { PrintDataContext, resolveContent, adaptDocumentText, escapeHtml, formatValue, safeEvaluateCondition, buildReceiptItemLines } from './templateRendererUtils';
 import { MediaCache } from './templateRendererMedia';
 import { getLogoSync } from './logoLoader';
 
@@ -40,7 +40,7 @@ export function elementToHTML(
     `transform:${rot};opacity:${opa};overflow:hidden;box-sizing:border-box;${shadow}`;
 
   if (el.type === 'TEXT') {
-    const resolved = resolveContent(el.content || '', ctx);
+    const resolved = adaptDocumentText(resolveContent(el.content || '', ctx), ctx);
     const justifyMap: Record<string, string> = { left: 'flex-start', center: 'center', right: 'flex-end' };
     const alignItems = (el.isMultiline || el.canGrow || el.isStretchWithOverflow) ? 'flex-start' : 'center';
     const inner = `font-size:${el.fontSize || 10}pt;font-family:${el.fontFamily || 'Arial,sans-serif'};` +
@@ -105,7 +105,9 @@ export function elementToHTML(
         (el.companyShowRTN !== false && emp.rtn ? `<div style="font-size:${fs}pt;color:rgba(255,255,255,0.88);">RTN: ${escapeHtml(String(emp.rtn))}</div>` : '') +
         (emp.direccion ? `<div style="font-size:${fs}pt;color:rgba(255,255,255,0.88);">${escapeHtml(String(emp.direccion))}</div>` : '') +
         (el.companyShowPhone !== false && emp.telefono ? `<div style="font-size:${fs}pt;color:rgba(255,255,255,0.88);">Tel: ${escapeHtml(String(emp.telefono))}${el.companyShowEmail && emp.correo ? ' | ' + escapeHtml(String(emp.correo)) : ''}</div>` : '');
-      const docTitle = el.companyDocTitle || '';
+      const docTitle = el.companyDocTitle
+        ? adaptDocumentText(resolveContent(el.companyDocTitle, ctx), ctx)
+        : '';
       const titleHtml = docTitle
         ? `<div style="text-align:right;color:#fff;flex-shrink:0;padding-left:10px;line-height:1;">` +
           `<div style="font-size:${fs + 12}pt;font-weight:900;letter-spacing:3px;">${docTitle}</div></div>`

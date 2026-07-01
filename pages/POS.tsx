@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { InventoryService, ClientService, SalesService, MedicamentosService, CashService, LoyaltyService } from '../services/api';
-import { printSaleInvoice, downloadSaleInvoicePDF } from '../services/DocumentService';
-import { ProductoFarmacia, Cliente, VentaPayload, PresentacionVenta, LoyaltyPreview } from '../types';
+import { InventoryService, ClientService, SalesService, MedicamentosService, CashService, LoyaltyService, QuoteService } from '../services/api';
+import { printSaleInvoice, downloadSaleInvoicePDF, printQuote, downloadQuotePDF } from '../services/DocumentService';
+import { ProductoFarmacia, Cliente, VentaPayload, CotizacionPayload, PresentacionVenta, LoyaltyPreview, VentaDocumentoTipo } from '../types';
 import {
   AlertTriangle, Lock, RefreshCw, ShoppingCart, Sparkles,
   LayoutGrid, Clock, TrendingUp, Package,
@@ -44,7 +44,9 @@ const POS: React.FC = () => {
 
   const [isLoading, setIsLoading]         = useState(false);
   const [isCheckingOut, setIsCheckingOut] = useState(false);
+  const [isCreatingQuote, setIsCreatingQuote] = useState(false);
   const checkoutLockRef = useRef(false);
+  const quoteLockRef = useRef(false);
 
   const [searchTerm, setSearchTerm]           = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('Todos');
@@ -57,6 +59,7 @@ const POS: React.FC = () => {
   const [selectedClientId, setSelectedClientId] = useState<string>('');
   const [paymentType, setPaymentType]           = useState<'Contado' | 'Credito'>('Contado');
   const [paymentMethod, setPaymentMethod]       = useState<PaymentMethod>('Efectivo');
+  const [documentType, setDocumentType]          = useState<VentaDocumentoTipo>('factura_fiscal');
   const [discount, setDiscount]                 = useState<number>(0);
   const [discountType, setDiscountType]         = useState<DiscountType>('L');
   const [cashReceived, setCashReceived]         = useState<number>(0);
@@ -91,13 +94,13 @@ const POS: React.FC = () => {
 
       if (e.key === 'F2') { e.preventDefault(); setMobileTab('CATALOG'); }
       if (e.key === 'F4') { e.preventDefault(); setShowQuickClient(true); }
-      if (e.key === 'F8') { e.preventDefault(); if (!isCheckingOut) handleCheckout(); }
+      if (e.key === 'F8') { e.preventDefault(); if (!isCheckingOut && !isCreatingQuote) handleCheckout(); }
       if (e.key === 'Escape' && !inInput) { setSearchTerm(''); }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isCheckingOut]);
+  }, [isCheckingOut, isCreatingQuote]);
 
   // ── Data loading ──────────────────────────────────────────────────────────
   const loadInitialData = useCallback(async (options?: { selectDefaultClient?: boolean }) => {
@@ -364,6 +367,7 @@ const POS: React.FC = () => {
     setDiscountType('L');
     setPaymentType('Contado');
     setPaymentMethod('Efectivo');
+    setDocumentType('factura_fiscal');
     setCashReceived(0);
     setMixtoEfectivo(0);
     setThirdAgeMode(false);
@@ -378,6 +382,18 @@ const POS: React.FC = () => {
     setLoyaltyRedemptionLps(0);
     loadInitialData({ selectDefaultClient: false });
   }, [loadInitialData]);
+
+  const buildCommercialDetails = useCallback(() => cart.map(item => ({
+    id_medicamento: item.id_medicamento,
+    id_presentacion: item.id_presentacion,
+    id_servicio: item.id_servicio,
+    cantidad: item.cantidad,
+    precioVenta: thirdAgeMode && item.precioTerceraEdad ? item.precioTerceraEdad : item.precioVenta,
+    descripcionProducto: item.nombre,
+    tipoProducto: item.tipoProducto || 'MEDICAMENTO' as const,
+    tipoIsv: item.tipoIsv,
+    ...(item.id_sucursal_origen ? { id_sucursal_origen: item.id_sucursal_origen } : {}),
+  } as any)), [cart, thirdAgeMode]);
 
   // ── Checkout ──────────────────────────────────────────────────────────────
   const handleCheckout = async () => {
@@ -423,21 +439,13 @@ const POS: React.FC = () => {
       const payload: VentaPayload = {
         identidadCliente: selectedClientId,
         tipoCompra: paymentType,
+        tipoDocumento: documentType,
+        documentoFiscal: documentType === 'factura_fiscal',
         total: totals.total,
         isv: totals.isv,
         descuento: totals.descuento,
         clientMutationId,
-        detalles: cart.map(item => ({
-          id_medicamento: item.id_medicamento,
-          id_presentacion: item.id_presentacion,
-          id_servicio: item.id_servicio,
-          cantidad: item.cantidad,
-          precioVenta: thirdAgeMode && item.precioTerceraEdad ? item.precioTerceraEdad : item.precioVenta,
-          descripcionProducto: item.nombre,
-          tipoProducto: item.tipoProducto || 'MEDICAMENTO' as const,
-          tipoIsv: item.tipoIsv,
-          ...(item.id_sucursal_origen ? { id_sucursal_origen: item.id_sucursal_origen } : {}),
-        } as any)),
+        detalles: buildCommercialDetails(),
       };
 
       const crossBranchItems = cart.filter(i => i.id_sucursal_origen);
@@ -449,6 +457,8 @@ const POS: React.FC = () => {
 
       const response = await SalesService.createVenta(payload);
       const codVenta = response?.codVenta || '';
+      const numeroDocumento = response?.numeroFactura || codVenta;
+      const documentLabel = documentType === 'factura_fiscal' ? 'Factura fiscal' : 'Factura no fiscal';
       setSessionSales(s => s + 1);
       resetPOS();
 
@@ -473,10 +483,10 @@ const POS: React.FC = () => {
 
       const { value: action } = await Swal.fire({
         title: 'Venta Procesada',
-        html: `<p class="text-slate-600">Factura <strong>#${codVenta}</strong> generada.</p>${crossHtml}`,
+        html: `<p class="text-slate-600">${documentLabel} <strong>#${numeroDocumento}</strong> generada.</p>${crossHtml}`,
         icon: 'success',
         confirmButtonColor: '#4f46e5',
-        confirmButtonText: 'Imprimir factura',
+        confirmButtonText: `Imprimir ${documentType === 'factura_fiscal' ? 'factura' : 'documento'}`,
         showDenyButton: true,
         denyButtonText: 'Descargar PDF',
         denyButtonColor: '#0ea5e9',
@@ -497,6 +507,60 @@ const POS: React.FC = () => {
     } finally {
       setIsCheckingOut(false);
       checkoutLockRef.current = false;
+    }
+  };
+
+  const handleCreateQuote = async () => {
+    if (quoteLockRef.current) return;
+    if (cart.length === 0) return;
+    if (!selectedClientId) {
+      Swal.fire('Cliente requerido', 'Seleccione un cliente para generar la cotización.', 'warning');
+      return;
+    }
+
+    try {
+      quoteLockRef.current = true;
+      setIsCreatingQuote(true);
+      const clientMutationId = `quote-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+      const payload: CotizacionPayload = {
+        identidadCliente: selectedClientId,
+        tipoCompra: paymentType,
+        total: totals.total,
+        isv: totals.isv,
+        descuento: totals.descuento,
+        clientMutationId,
+        detalles: buildCommercialDetails(),
+      };
+
+      const response = await QuoteService.create(payload);
+      const codigo = response?.codigo || response?.codCotizacion || '';
+
+      const { value: action } = await Swal.fire({
+        title: 'Cotización generada',
+        html: `<p class="text-slate-600">Cotización <strong>#${codigo}</strong> generada. No afecta ventas, caja ni inventario.</p>`,
+        icon: 'success',
+        confirmButtonColor: '#4f46e5',
+        confirmButtonText: 'Imprimir cotización',
+        showDenyButton: true,
+        denyButtonText: 'Descargar PDF',
+        denyButtonColor: '#0ea5e9',
+        showCancelButton: true,
+        cancelButtonText: 'Cerrar',
+        cancelButtonColor: '#64748b',
+      });
+
+      if (action === true) {
+        const result = await printQuote(codigo);
+        if (!result.success) Swal.fire('Sin plantilla', result.message, 'warning');
+      } else if (action === false) {
+        const result = await downloadQuotePDF(codigo);
+        if (!result.success) Swal.fire('Sin plantilla', result.message, 'warning');
+      }
+    } catch (e: any) {
+      Swal.fire('Error', e.message || 'No se pudo generar la cotización.', 'error');
+    } finally {
+      setIsCreatingQuote(false);
+      quoteLockRef.current = false;
     }
   };
 
@@ -523,50 +587,6 @@ const POS: React.FC = () => {
   }, []);
 
   // ── Locked states ─────────────────────────────────────────────────────────
-  if (!isLoading && !hasAssignedCashRegister) {
-    return (
-      <div className="flex h-[calc(100vh-100px)] items-center justify-center bg-slate-50 p-6">
-        <div className="w-full max-w-md rounded-3xl border border-amber-100 bg-white p-8 text-center shadow-xl">
-          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-amber-100">
-            <Lock className="text-amber-600" size={30} />
-          </div>
-          <h2 className="text-2xl font-bold text-slate-800">Caja no asignada</h2>
-          <p className="mt-3 text-sm leading-relaxed text-slate-500">
-            No puedes facturar porque tu usuario no tiene una caja activa asignada.
-          </p>
-          <div className="mt-6 rounded-2xl border border-amber-100 bg-amber-50 p-4 text-sm text-amber-800">
-            Un administrador debe ir a Administración &gt; Usuarios y asignarte una caja.
-          </div>
-          <button onClick={() => loadInitialData()} className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-slate-900 py-3 font-bold text-white transition-colors hover:bg-slate-800">
-            <RefreshCw size={16} /> Verificar de nuevo
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  if (!isLoading && hasAssignedCashRegister && !activeArqueo) {
-    return (
-      <div className="flex h-[calc(100vh-100px)] items-center justify-center bg-slate-50 p-6">
-        <div className="w-full max-w-md rounded-3xl border border-indigo-100 bg-white p-8 text-center shadow-xl">
-          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-indigo-100">
-            <AlertTriangle className="text-indigo-600" size={30} />
-          </div>
-          <h2 className="text-2xl font-bold text-slate-800">Turno de caja cerrado</h2>
-          <p className="mt-3 text-sm leading-relaxed text-slate-500">
-            Para procesar ventas debes abrir caja primero. Caja asignada: <strong>{user?.idCaja}</strong>.
-          </p>
-          <button onClick={() => navigate('/cash')} className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 py-3 font-bold text-white transition-colors hover:bg-indigo-700">
-            <Lock size={16} /> Abrir caja ahora
-          </button>
-          <button onClick={() => loadInitialData()} className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-slate-100 py-3 font-bold text-slate-700 transition-colors hover:bg-slate-200">
-            <RefreshCw size={16} /> Ya abri caja, verificar
-          </button>
-        </div>
-      </div>
-    );
-  }
-
   // ── Main POS ───────────────────────────────────────────────────────────────
   return (
     <div className="flex flex-col h-[calc(100vh-80px)] gap-0 overflow-hidden -mx-4 md:-mx-8 -mt-4 md:-mt-8">
@@ -577,7 +597,7 @@ const POS: React.FC = () => {
           <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
           <span className="font-bold text-slate-300">{user?.nombreEmpleado || user?.usuario}</span>
           <span className="text-slate-600">·</span>
-          <span className="text-slate-400">{user?.idCaja}</span>
+          <span className="text-slate-400">{user?.idCaja || 'Sin caja'}</span>
         </div>
         <div className="flex items-center gap-1.5 text-[11px] text-slate-400">
           <Clock size={11} />
@@ -608,6 +628,38 @@ const POS: React.FC = () => {
       </div>
 
       {/* ── Mobile tab bar ── */}
+      {!isLoading && (!hasAssignedCashRegister || !activeArqueo) && (
+        <div className="shrink-0 border-b border-amber-100 bg-amber-50 px-4 py-2 text-sm text-amber-900 md:px-6">
+          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="mt-0.5 shrink-0 text-amber-600" size={16} />
+              <span>
+                Puedes preparar cotizaciones sin abrir caja. Para facturar ventas debes tener caja asignada y turno abierto.
+                {!hasAssignedCashRegister ? ' Solicita a un administrador que asigne una caja a tu usuario.' : ''}
+              </span>
+            </div>
+            <div className="flex shrink-0 gap-2">
+              {hasAssignedCashRegister && (
+                <button
+                  type="button"
+                  onClick={() => navigate('/cash')}
+                  className="inline-flex items-center justify-center gap-1 rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-amber-700"
+                >
+                  <Lock size={13} /> Abrir caja
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => loadInitialData()}
+                className="inline-flex items-center justify-center gap-1 rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-amber-900 ring-1 ring-amber-200 transition-colors hover:bg-amber-100"
+              >
+                <RefreshCw size={13} /> Verificar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="lg:hidden flex bg-white border-b border-slate-200 shrink-0">
         {[
           { id: 'CATALOG'  as const, label: 'Catálogo', badge: null },
@@ -684,15 +736,20 @@ const POS: React.FC = () => {
             thirdAgeMode={thirdAgeMode}
             totals={totals}
             isCheckingOut={isCheckingOut}
+            isCreatingQuote={isCreatingQuote}
+            documentType={documentType}
+            canCharge={hasAssignedCashRegister && !!activeArqueo}
             onClientChange={setSelectedClientId}
             onPaymentTypeChange={setPaymentType}
             onPaymentMethodChange={setPaymentMethod}
+            onDocumentTypeChange={setDocumentType}
             onDiscountChange={setDiscount}
             onDiscountTypeChange={setDiscountType}
             onCashReceivedChange={setCashReceived}
             onMixtoEfectivoChange={setMixtoEfectivo}
             onThirdAgeModeChange={setThirdAgeMode}
             onCheckout={handleCheckout}
+            onCreateQuote={handleCreateQuote}
             onNewClient={() => setShowQuickClient(true)}
             loyaltyPreview={loyaltyPreview}
             loyaltyRedemptionLps={loyaltyRedemptionLps}

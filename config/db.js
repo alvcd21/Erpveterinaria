@@ -342,7 +342,7 @@ const ALLOWED_ID_COMBOS = new Set([
     // Infraestructura
     'proveedores:codproveedor',
     // Ventas
-    'ventas:codventa', 'detalleventa:coddetalleventa',
+    'ventas:codventa', 'detalleventa:coddetalleventa', 'cotizaciones:codigo',
     // Veterinaria
     'medicamentos:codigo',
     'ordenes_compra:codigo', 'recepciones_compra:codigo',

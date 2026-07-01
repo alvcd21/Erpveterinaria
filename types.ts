@@ -139,9 +139,15 @@ export interface Proveedor {
   fechaCreacion?: string;
 }
 
+export type VentaDocumentoTipo = 'factura_fiscal' | 'factura_no_fiscal';
+export type DocumentoComercialTipo = VentaDocumentoTipo | 'cotizacion';
+
 export interface Venta {
   codVenta: string;
   numeroFactura?: string;
+  numeroDocumento?: string;
+  tipoDocumento?: DocumentoComercialTipo;
+  documentoFiscal?: boolean;
   fecha: string;
   codVendedor?: string;
   identidadCliente: string;
@@ -162,6 +168,8 @@ export interface Venta {
 export interface VentaPayload {
   identidadCliente: string;
   tipoCompra: 'Contado' | 'Credito' | 'KrediYa'; 
+  tipoDocumento?: VentaDocumentoTipo;
+  documentoFiscal?: boolean;
   total: number;
   isv?: number;
   descuento?: number;
@@ -170,6 +178,19 @@ export interface VentaPayload {
   detalles: Partial<DetalleVenta>[];
   fecha?: string;
   clientMutationId?: string;
+}
+
+export interface CotizacionPayload extends Omit<VentaPayload, 'tipoDocumento' | 'documentoFiscal'> {
+  validoHasta?: string;
+  observaciones?: string;
+}
+
+export interface Cotizacion extends Omit<Venta, 'codVenta' | 'tipoDocumento'> {
+  codigo: string;
+  codVenta: string;
+  tipoDocumento: 'cotizacion';
+  validoHasta?: string;
+  observaciones?: string;
 }
 
 export interface DetalleVenta {

@@ -13,8 +13,8 @@
  * connected to this service in a future sprint.
  */
 
-import { LabelTemplate } from '../types';
-import { LabelService, SalesService, ConfigService } from './api';
+import { LabelTemplate, DetalleVenta, Venta } from '../types';
+import { LabelService, SalesService, ConfigService, QuoteService } from './api';
 import { printTemplate, downloadAsPDF, PrintDataContext } from './TemplateRenderer';
 
 // ─── Empresa config cache (one fetch per session) ─────────────────────────────
@@ -31,6 +31,56 @@ async function getEmpresa(): Promise<any> {
 /** Clear the empresa cache (call when config changes) */
 export function clearEmpresaCache(): void {
   _empresaCache = null;
+}
+
+type PrintableDocumentType = 'factura_fiscal' | 'factura_no_fiscal' | 'cotizacion';
+
+function documentLabels(tipoDocumento: PrintableDocumentType) {
+  if (tipoDocumento === 'cotizacion') {
+    return { titulo: 'COTIZACION', tituloCorto: 'Cotizacion', esFiscal: false, esCotizacion: true };
+  }
+  if (tipoDocumento === 'factura_no_fiscal') {
+    return { titulo: 'FACTURA NO FISCAL', tituloCorto: 'Factura no fiscal', esFiscal: false, esCotizacion: false };
+  }
+  return { titulo: 'FACTURA', tituloCorto: 'Factura', esFiscal: true, esCotizacion: false };
+}
+
+function buildCommercialDocumentContext(
+  empresa: any,
+  venta: Partial<Venta> & Record<string, any>,
+  detalles: Partial<DetalleVenta>[],
+  tipoDocumento: PrintableDocumentType,
+): PrintDataContext {
+  const labels = documentLabels(tipoDocumento);
+  const numero = venta.numeroFactura || venta.numeroDocumento || venta.codVenta || venta.codigo || '';
+  const empresaImpresion = labels.esFiscal
+    ? empresa
+    : { ...empresa, cai: '', rangoInicial: '', rangoFinal: '', fechaLimite: '' };
+
+  return {
+    empresa: empresaImpresion,
+    documento: {
+      tipoDocumento,
+      titulo: labels.titulo,
+      tituloCorto: labels.tituloCorto,
+      esFiscal: labels.esFiscal,
+      esCotizacion: labels.esCotizacion,
+      numero,
+    },
+    venta: {
+      ...venta,
+      detalles,
+      tipoDocumento,
+      documentoFiscal: labels.esFiscal,
+      numeroFactura: numero,
+      numeroDocumento: numero,
+    },
+    cliente: {
+      nombre:    venta.nombreCliente    || '',
+      identidad: venta.identidadCliente || '',
+      direccion: venta.direccionCliente || '',
+    },
+  };
 }
 
 // ─── Template Resolution ──────────────────────────────────────────────────────
@@ -116,15 +166,12 @@ export async function printSaleInvoice(ventaId: string): Promise<DocResult> {
       SalesService.getDetallesVenta(ventaId),
     ]);
 
-    const ctx: PrintDataContext = {
+    const ctx = buildCommercialDocumentContext(
       empresa,
-      venta: { ...venta, detalles, numeroFactura: (venta as any).numeroFactura || venta.codVenta },
-      cliente: {
-        nombre:    (venta as any).nombreCliente    || '',
-        identidad: (venta as any).identidadCliente || '',
-        direccion: (venta as any).direccionCliente || '',
-      },
-    };
+      venta as any,
+      detalles,
+      ((venta as any).tipoDocumento || 'factura_fiscal') as PrintableDocumentType,
+    );
 
     await printTemplate(template, ctx);
     return { success: true, message: 'Imprimiendo factura...' };
@@ -150,20 +197,56 @@ export async function downloadSaleInvoicePDF(ventaId: string): Promise<DocResult
       SalesService.getDetallesVenta(ventaId),
     ]);
 
-    const ctx: PrintDataContext = {
+    const ctx = buildCommercialDocumentContext(
       empresa,
-      venta: { ...venta, detalles, numeroFactura: (venta as any).numeroFactura || venta.codVenta },
-      cliente: {
-        nombre:    (venta as any).nombreCliente    || '',
-        identidad: (venta as any).identidadCliente || '',
-        direccion: (venta as any).direccionCliente || '',
-      },
-    };
+      venta as any,
+      detalles,
+      ((venta as any).tipoDocumento || 'factura_fiscal') as PrintableDocumentType,
+    );
 
-    await downloadAsPDF(template, ctx, `Factura_${ventaId}`);
+    const prefix = (ctx.documento?.esFiscal === false) ? String(ctx.documento.tituloCorto).replace(/\s+/g, '_') : 'Factura';
+    await downloadAsPDF(template, ctx, `${prefix}_${ventaId}`);
     return { success: true, message: '' };
   } catch (err: any) {
     return { success: false, message: err.message || 'Error al generar la factura.' };
+  }
+}
+
+export async function printQuote(codigo: string): Promise<DocResult> {
+  const { template, message } = await resolveTemplate(['INVOICE'], 'DOCUMENT', 'SALES');
+  if (!template) return { success: false, message };
+
+  try {
+    const [empresa, cotizacion, detalles] = await Promise.all([
+      getEmpresa(),
+      QuoteService.get(codigo),
+      QuoteService.getDetalles(codigo),
+    ]);
+
+    const ctx = buildCommercialDocumentContext(empresa, cotizacion as any, detalles, 'cotizacion');
+    await printTemplate(template, ctx);
+    return { success: true, message: 'Imprimiendo cotizacion...' };
+  } catch (err: any) {
+    return { success: false, message: err.message || 'Error al generar la cotizacion.' };
+  }
+}
+
+export async function downloadQuotePDF(codigo: string): Promise<DocResult> {
+  const { template, message } = await resolveTemplate(['INVOICE'], 'DOCUMENT', 'SALES');
+  if (!template) return { success: false, message };
+
+  try {
+    const [empresa, cotizacion, detalles] = await Promise.all([
+      getEmpresa(),
+      QuoteService.get(codigo),
+      QuoteService.getDetalles(codigo),
+    ]);
+
+    const ctx = buildCommercialDocumentContext(empresa, cotizacion as any, detalles, 'cotizacion');
+    await downloadAsPDF(template, ctx, `Cotizacion_${codigo}`);
+    return { success: true, message: '' };
+  } catch (err: any) {
+    return { success: false, message: err.message || 'Error al generar la cotizacion.' };
   }
 }
 

@@ -74,6 +74,7 @@ const PERMISSION_RULES = [
     { pattern: /^\/api\/servicios-veterinarios\b/,     permission: 'VER_SERVICIOS_VET'     },
     { pattern: /^\/api\/clinica\/flowboard\b/,         permission: 'VER_CITAS'             },
     { pattern: /^\/api\/ventas\b/,                     permission: 'VER_POS'               },
+    { pattern: /^\/api\/cotizaciones\b/,               permission: 'VER_POS'               },
     { pattern: /^\/api\/productos\/unificados\b/,      permission: 'VER_POS'               },
     { pattern: /^\/api\/medicamentos\/[^/]+\/disponibilidad-sucursales\b/, permission: 'VER_POS' },
     { pattern: /^\/api\/arqueo\b/,                     permission: 'VER_CAJA'              },

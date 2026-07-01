@@ -15,6 +15,42 @@ function httpError(statusCode, message, code) {
     return err;
 }
 
+const SALE_DOCUMENT_TYPES = new Set(['factura_fiscal', 'factura_no_fiscal']);
+
+function normalizeSaleDocumentType(body = {}) {
+    if (SALE_DOCUMENT_TYPES.has(body.tipoDocumento)) return body.tipoDocumento;
+    if (body.documentoFiscal === false) return 'factura_no_fiscal';
+    return 'factura_fiscal';
+}
+
+function toSafeNum(v) {
+    const n = parseFloat(v);
+    return isFinite(n) && n >= 0 ? n : null;
+}
+
+function validateCommercialPayload({ total, isv, descuento, montoPrima, montoFinanciado, detalles }) {
+    if (toSafeNum(total) === null) throw httpError(400, 'total debe ser un numero positivo', 'INVALID_TOTAL');
+    if (toSafeNum(isv) === null && isv != null) throw httpError(400, 'isv invalido', 'INVALID_TAX');
+    if (toSafeNum(descuento) === null && descuento != null) throw httpError(400, 'descuento invalido', 'INVALID_DISCOUNT');
+    if (toSafeNum(montoPrima) === null && montoPrima != null) throw httpError(400, 'montoPrima invalido', 'INVALID_DOWN_PAYMENT');
+    if (toSafeNum(montoFinanciado) === null && montoFinanciado != null) throw httpError(400, 'montoFinanciado invalido', 'INVALID_FINANCED_AMOUNT');
+
+    if (!Array.isArray(detalles) || detalles.length === 0) {
+        throw httpError(400, 'detalles debe ser un arreglo con al menos un item', 'INVALID_DETAILS');
+    }
+    for (const item of detalles) {
+        if (toSafeNum(item.cantidad) === null || Number(item.cantidad) <= 0) {
+            throw httpError(400, 'cantidad de item invalida', 'INVALID_ITEM_QUANTITY');
+        }
+        if (toSafeNum(item.precioVenta) === null) {
+            throw httpError(400, 'precioVenta de item invalido', 'INVALID_ITEM_PRICE');
+        }
+        if (item.tipoIsv && !TIPOS_ISV_VALIDOS.has(item.tipoIsv)) {
+            throw httpError(400, `tipoIsv invalido: ${item.tipoIsv}`, 'INVALID_ITEM_TAX');
+        }
+    }
+}
+
 router.get('/clientes', authenticateToken, async (req, res) => {
     try {
         const r = await pool.query('SELECT * FROM clientes WHERE tenant_id = $1 ORDER BY nombre ASC', [req.tenantId]);
@@ -101,7 +137,11 @@ router.get('/ventas/historial', authenticateToken, async (req, res) => {
         const { fecha } = req.query;
         const { codUsuario, idCaja } = req.user;
         const result = await pool.query(`
-            SELECT v.codVenta as "codVenta", v.numero_factura as "numeroFactura", v.fecha, v.total, v.estado,
+            SELECT v.codVenta as "codVenta", v.numero_factura as "numeroFactura",
+                   COALESCE(v.numero_factura, v.codVenta) as "numeroDocumento",
+                   COALESCE(v.tipo_documento, 'factura_fiscal') as "tipoDocumento",
+                   (COALESCE(v.tipo_documento, 'factura_fiscal') = 'factura_fiscal') as "documentoFiscal",
+                   v.fecha, v.total, v.estado,
                    v.identidadCliente as "identidadCliente",
                    v.tipoCompra as "tipoCompra", v.codVendedor as "codVendedor",
                    COALESCE(c.nombre || ' ' || c.apellido, 'Consumidor Final') as "nombreCliente"
@@ -120,7 +160,11 @@ router.get('/ventas/:id', authenticateToken, async (req, res) => {
     try {
         const r = await pool.query(`
             SELECT
-                v.codVenta as "codVenta", v.numero_factura as "numeroFactura", v.fecha, v.codVendedor as "codVendedor",
+                v.codVenta as "codVenta", v.numero_factura as "numeroFactura",
+                COALESCE(v.numero_factura, v.codVenta) as "numeroDocumento",
+                COALESCE(v.tipo_documento, 'factura_fiscal') as "tipoDocumento",
+                (COALESCE(v.tipo_documento, 'factura_fiscal') = 'factura_fiscal') as "documentoFiscal",
+                v.fecha, v.codVendedor as "codVendedor",
                 v.identidadCliente as "identidadCliente", v.total, v.estado,
                 v.tipoCompra as "tipoCompra", v.isv, v.descuento,
                 v.monto_prima as "montoPrima", v.monto_financiamiento as "montoFinanciado",
@@ -162,6 +206,137 @@ router.get('/ventas/:id/detalles', authenticateToken, async (req, res) => {
     } catch(e) { handleDbError(res, e); }
 });
 
+// --- COTIZACIONES ---
+router.get('/cotizaciones/:id', authenticateToken, async (req, res) => {
+    try {
+        const r = await pool.query(`
+            SELECT
+                q.codigo as "codigo",
+                q.codigo as "codVenta",
+                q.codigo as "numeroFactura",
+                q.codigo as "numeroDocumento",
+                'cotizacion' as "tipoDocumento",
+                FALSE as "documentoFiscal",
+                q.fecha,
+                q.cod_vendedor as "codVendedor",
+                q.identidad_cliente as "identidadCliente",
+                q.total,
+                q.estado,
+                q.tipo_compra as "tipoCompra",
+                q.isv,
+                q.descuento,
+                q.valido_hasta as "validoHasta",
+                q.observaciones,
+                c.nombre as "nombreCliente",
+                c.apellido as "apellidoCliente",
+                c.direccion as "direccionCliente",
+                COALESCE(e.nombre || ' ' || e.apellido, u.usuario) as "nombreVendedor"
+            FROM cotizaciones q
+            LEFT JOIN clientes c ON q.identidad_cliente = c.identidad AND c.tenant_id = $2
+            LEFT JOIN usuarios u ON q.cod_vendedor::text = u.codUsuario::text AND u.tenant_id = $2
+            LEFT JOIN empleado e ON u.identidad = e.identidad AND e.tenant_id = $2
+            WHERE q.codigo = $1 AND q.tenant_id = $2
+        `, [req.params.id, req.tenantId]);
+        if (!r.rows[0]) return res.status(404).json({ error: 'Cotizacion no encontrada' });
+        res.json(r.rows[0]);
+    } catch(e) { handleDbError(res, e); }
+});
+
+router.get('/cotizaciones/:id/detalles', authenticateToken, async (req, res) => {
+    try {
+        const r = await pool.query(`
+            SELECT
+                dc.id_detalle::text AS "codDetalleVenta",
+                dc.codigo_cotizacion AS "idVenta",
+                dc.cantidad AS "cantidad",
+                dc.precio_unitario AS "precioVenta",
+                dc.tipo_producto AS "tipoProducto",
+                dc.id_presentacion AS "id_presentacion",
+                dc.id_servicio AS "id_servicio",
+                dc.id_medicamento AS "id_medicamento",
+                dc.tipo_isv AS "tipoIsv",
+                dc.subtotal_exento AS "subtotalExento",
+                dc.subtotal_gravado AS "subtotalGravado",
+                dc.isv_linea AS "isvLinea",
+                dc.producto AS "descripcionProducto"
+            FROM detalle_cotizacion dc
+            WHERE dc.codigo_cotizacion = $1 AND dc.tenant_id = $2
+            ORDER BY dc.id_detalle ASC
+        `, [req.params.id, req.tenantId]);
+        res.json(r.rows);
+    } catch(e) { handleDbError(res, e); }
+});
+
+router.post('/cotizaciones', authenticateToken, async (req, res) => {
+    const client = await pool.connect();
+    try {
+        const { identidadCliente, tipoCompra, total, detalles, isv, descuento, clientMutationId, validoHasta, observaciones } = req.body;
+        validateCommercialPayload({ total, isv, descuento, detalles });
+
+        await client.query('BEGIN');
+
+        if (clientMutationId) {
+            const existing = await client.query(
+                'SELECT codigo FROM cotizaciones WHERE tenant_id = $1 AND client_mutation_id = $2',
+                [req.tenantId, clientMutationId]
+            );
+            if (existing.rows.length) {
+                await client.query('COMMIT');
+                return res.status(200).json({ codigo: existing.rows[0].codigo, codCotizacion: existing.rows[0].codigo, duplicate: true });
+            }
+        }
+
+        const codigo = await generateNextId('cotizaciones', 'codigo', 'COT', client);
+        const hndTime = getLocalTimestamp();
+
+        await client.query(
+            `INSERT INTO cotizaciones
+             (codigo, fecha, cod_vendedor, identidad_cliente, total, estado, tipo_compra,
+              isv, descuento, valido_hasta, observaciones, client_mutation_id, tenant_id)
+             VALUES ($1,$2,$3,$4,$5,'Emitida',$6,$7,$8,$9,$10,$11,$12)`,
+            [
+                codigo, hndTime, req.user.codUsuario, identidadCliente || null, total,
+                tipoCompra || 'Contado', isv || 0, descuento || 0,
+                validoHasta || null, observaciones || null, clientMutationId || null, req.tenantId,
+            ]
+        );
+
+        for (const item of detalles) {
+            const tipoIsv = item.tipoIsv || 'exento';
+            const { subExento, subGravado, isvLinea } = calcularIsvLinea(item.precioVenta, item.cantidad, tipoIsv);
+            await client.query(
+                `INSERT INTO detalle_cotizacion
+                 (codigo_cotizacion, producto, cantidad, precio_unitario, tipo_producto,
+                  id_medicamento, id_presentacion, id_servicio, tipo_isv,
+                  subtotal_exento, subtotal_gravado, isv_linea, tenant_id)
+                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+                [
+                    codigo,
+                    item.descripcionProducto || item.id_medicamento || item.id_servicio || 'Producto',
+                    item.cantidad,
+                    item.precioVenta,
+                    item.tipoProducto || 'MEDICAMENTO',
+                    item.id_medicamento || null,
+                    item.id_presentacion || null,
+                    item.id_servicio || null,
+                    tipoIsv,
+                    subExento,
+                    subGravado,
+                    isvLinea,
+                    req.tenantId,
+                ]
+            );
+        }
+
+        await client.query('COMMIT');
+        res.status(201).json({ codigo, codCotizacion: codigo });
+    } catch (err) {
+        try { await client.query('ROLLBACK'); } catch {}
+        if (err.statusCode) return res.status(err.statusCode).json({ error: err.message, code: err.code });
+        handleDbError(res, err);
+    } finally { client.release(); }
+});
+
 router.post('/ventas', authenticateToken, async (req, res) => {
     const client = await pool.connect();
     try {
@@ -184,6 +359,8 @@ router.post('/ventas', authenticateToken, async (req, res) => {
             if (toSafeNum(item.precioVenta) === null) return res.status(400).json({ error: 'precioVenta de ítem inválido' });
             if (item.tipoIsv && !TIPOS_ISV_VALIDOS.has(item.tipoIsv)) return res.status(400).json({ error: `tipoIsv inválido: ${item.tipoIsv}` });
         }
+
+        const tipoDocumentoVenta = normalizeSaleDocumentType(req.body);
 
         await client.query('BEGIN');
 
@@ -250,15 +427,17 @@ router.post('/ventas', authenticateToken, async (req, res) => {
 
         const hndTime = getLocalTimestamp();
         const codVenta = await generateNextId('ventas', 'codVenta', 'FACT', client);
-        const numeroFactura = await generateFacturaCorrelativo(req.tenantId, client);
+        const numeroFactura = tipoDocumentoVenta === 'factura_fiscal'
+            ? await generateFacturaCorrelativo(req.tenantId, client)
+            : null;
 
         // Insert parent ventas row first so detalleventa FK constraint is satisfied
         await client.query(
             `INSERT INTO ventas
-             (codVenta, fecha, codVendedor, identidadCliente, total, estado, tipoCompra, isv, descuento, monto_prima, monto_financiamiento, idCaja, tenant_id, client_mutation_id, numero_factura)
-             VALUES ($1,$2,$3,$4,$5,'Completada',$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+             (codVenta, fecha, codVendedor, identidadCliente, total, estado, tipoCompra, isv, descuento, monto_prima, monto_financiamiento, idCaja, tenant_id, client_mutation_id, numero_factura, tipo_documento)
+             VALUES ($1,$2,$3,$4,$5,'Completada',$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
             [codVenta, hndTime, codUsuario, identidadCliente, total,
-             tipoCompra, isv || 0, descuento || 0, montoPrima || 0, montoFinanciado || 0, idCajaActual, req.tenantId, clientMutationId || null, numeroFactura]
+             tipoCompra, isv || 0, descuento || 0, montoPrima || 0, montoFinanciado || 0, idCajaActual, req.tenantId, clientMutationId || null, numeroFactura, tipoDocumentoVenta]
         );
 
         for (const item of detalles) {
@@ -404,7 +583,7 @@ router.post('/ventas', authenticateToken, async (req, res) => {
             }
         }
 
-        res.status(201).json({ codVenta });
+        res.status(201).json({ codVenta, numeroFactura, tipoDocumento: tipoDocumentoVenta });
     } catch (err) {
         await client.query('ROLLBACK');
         if (err.code === '23505' && req.body?.clientMutationId) {

@@ -4,6 +4,8 @@ import {
   Cliente,
   Venta,
   VentaPayload,
+  Cotizacion,
+  CotizacionPayload,
   DetalleVenta,
   Arqueo,
   LabelTemplate,
@@ -57,7 +59,8 @@ export class OfflineQueuedError extends Error {
 
 // Mapa de colecciones: prefijo de endpoint → campo ID + clave de cache
 const ENTITY_MAP: { prefix: string; idField: string; cacheKey?: string }[] = [
-{ prefix: '/ventas',                       idField: 'codVenta', cacheKey: '/ventas/historial' },
+  { prefix: '/ventas',                       idField: 'codVenta', cacheKey: '/ventas/historial' },
+  { prefix: '/cotizaciones',                 idField: 'codigo' },
   { prefix: '/clientes',                     idField: 'identidad' },
   { prefix: '/proveedores',                  idField: 'id' },
   { prefix: '/empleados',                    idField: 'id' },
@@ -356,10 +359,17 @@ export const ServiciosVeterinariosService = {
 export const SalesService = {
   getVentasDiDaily: (fecha?: string) => request<Venta[]>(`/ventas/historial${fecha ? `?fecha=${fecha}` : ''}`),
   getVenta: (id: string) => request<Venta>(`/ventas/${id}`),
-  createVenta: (data: VentaPayload) => request<{codVenta: string}>('/ventas', { method: 'POST', body: JSON.stringify(data) }),
+  createVenta: (data: VentaPayload) => request<{codVenta: string; numeroFactura?: string | null; tipoDocumento?: string}>('/ventas', { method: 'POST', body: JSON.stringify(data) }),
   updateVenta: (id: string, data: VentaPayload) => request<{codVenta: string}>(`/ventas/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   getDetallesVenta: (id: string) => request<DetalleVenta[]>(`/ventas/${id}/detalles`),
   anularVenta: (id: string) => request(`/ventas/${id}/anular`, { method: 'PUT' }),
+};
+
+export const QuoteService = {
+  create: (data: CotizacionPayload) =>
+    request<{ codigo: string; codCotizacion?: string }>('/cotizaciones', { method: 'POST', body: JSON.stringify(data) }),
+  get: (id: string) => request<Cotizacion>(`/cotizaciones/${id}`),
+  getDetalles: (id: string) => request<DetalleVenta[]>(`/cotizaciones/${id}/detalles`),
 };
 
 

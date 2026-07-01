@@ -2,8 +2,16 @@ import { EmpresaConfig, Venta, DetalleVenta, Cliente, LabelElement } from '../ty
 
 export interface PrintDataContext {
   empresa?: Partial<EmpresaConfig>;
-  venta?: Partial<Venta> & { detalles?: Partial<DetalleVenta>[] };
+  venta?: Partial<Omit<Venta, 'detalles'>> & { detalles?: Partial<DetalleVenta>[] };
   cliente?: Partial<Cliente>;
+  documento?: {
+    tipoDocumento?: 'factura_fiscal' | 'factura_no_fiscal' | 'cotizacion';
+    titulo?: string;
+    tituloCorto?: string;
+    esFiscal?: boolean;
+    esCotizacion?: boolean;
+    numero?: string;
+  };
   medicamento?: Record<string, any>;
   producto?: Record<string, any>;
   [key: string]: any;
@@ -82,6 +90,37 @@ export function resolveContent(content: string, ctx: PrintDataContext): string {
     if (DATE_FIELD_RE.test(trimmed)) return formatSpanishDate(val) || val;
     return val;
   });
+}
+
+export function adaptDocumentText(text: string, ctx: PrintDataContext): string {
+  const doc = ctx.documento;
+  if (!doc?.tipoDocumento) return text;
+
+  let output = String(text || '');
+  const alreadySpecific = /\b(COTIZACION|COTIZACI[OÓ]N|FACTURA NO FISCAL)\b/i.test(output);
+
+  if (!alreadySpecific && doc.tipoDocumento === 'cotizacion') {
+    output = output
+      .replace(/\bFACTURA\b/g, 'COTIZACION')
+      .replace(/\bFactura\b/g, 'Cotizacion')
+      .replace(/\bfactura\b/g, 'cotizacion');
+  } else if (!alreadySpecific && doc.tipoDocumento === 'factura_no_fiscal') {
+    output = output
+      .replace(/\bFACTURA\b/g, 'FACTURA NO FISCAL')
+      .replace(/\bFactura\b/g, 'Factura no fiscal')
+      .replace(/\bfactura\b/g, 'factura no fiscal');
+  }
+
+  if (doc.esFiscal === false) {
+    const fiscalLine = /(CAI|clave de autorizaci[oó]n|rango autorizado|rango inicial|rango final|fecha l[ií]mite|SAR|ex[ií]jala|www\.sar|original:\s*cliente|copia:\s*obligado|factura es beneficio)/i;
+    output = output
+      .split(/\r?\n/)
+      .filter(line => !fiscalLine.test(line))
+      .join('\n')
+      .trim();
+  }
+
+  return output;
 }
 
 export function formatValue(val: string, format: 'TEXT' | 'CURRENCY' | 'NUMBER'): string {
