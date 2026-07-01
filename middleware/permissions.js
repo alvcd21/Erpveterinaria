@@ -4,6 +4,7 @@ const PERMISSION_RULES = [
     { pattern: /^\/api\/accounting\b/,                 permission: 'VER_CONTABILIDAD'     },
     { pattern: /^\/api\/admin\/boxes\b/,               permission: 'GESTIONAR_PANEL_CAJAS' },
     { pattern: /^\/api\/admin\/arqueo\b/,              permission: 'GESTIONAR_PANEL_CAJAS' },
+    { pattern: /^\/api\/admin\/security\/permission-audit\b/, permission: 'GESTIONAR_ROLES' },
     { pattern: /^\/api\/users\b/,                      permission: 'GESTIONAR_USUARIOS'    },
     { pattern: /^\/api\/empleados\b/,                  permission: 'GESTIONAR_USUARIOS'    },
     { pattern: /^\/api\/roles\b/,                      permission: 'GESTIONAR_ROLES'       },
@@ -52,6 +53,75 @@ const PERMISSION_RULES = [
     { pattern: /^\/api\/loyalty\b/,                    permission: 'VER_LEALTAD'           },
 ];
 
+const AUDIT_LIMIT = Math.max(10, parseInt(process.env.PERMISSIONS_AUDIT_LIMIT || '200', 10) || 200);
+const permissionAudit = {
+    unmatchedRequests: 0,
+    firstSeenAt: null,
+    lastSeenAt: null,
+    routes: new Map(),
+};
+
+function isAdminRole(role) {
+    return ['administrador', 'admin', 'superadmin'].includes(String(role || '').toLowerCase());
+}
+
+function isPermissionStrictMode() {
+    return String(process.env.PERMISSIONS_STRICT_MODE || '').toLowerCase() === 'true';
+}
+
+function normalizeAuditPath(path) {
+    return String(path || '')
+        .replace(/\/[0-9a-f]{8}-[0-9a-f-]{27,36}(?=\/|$)/gi, '/:id')
+        .replace(/\/[^/]*\d[^/]*(?=\/|$)/g, '/:id');
+}
+
+function recordUnmatchedPermissionRoute(method, path, user) {
+    const now = new Date().toISOString();
+    const normalizedPath = normalizeAuditPath(path);
+    const key = `${method} ${normalizedPath}`;
+    permissionAudit.unmatchedRequests += 1;
+    permissionAudit.firstSeenAt = permissionAudit.firstSeenAt || now;
+    permissionAudit.lastSeenAt = now;
+
+    const current = permissionAudit.routes.get(key) || {
+        method,
+        path: normalizedPath,
+        count: 0,
+        firstSeenAt: now,
+        lastSeenAt: now,
+        lastRole: null,
+    };
+    current.count += 1;
+    current.lastSeenAt = now;
+    current.lastRole = user?.rol || null;
+    permissionAudit.routes.set(key, current);
+
+    if (current.count === 1 && permissionAudit.routes.size <= AUDIT_LIMIT) {
+        console.warn(`[permissions] Endpoint protegido sin regla: ${key}. Defina una regla antes de activar PERMISSIONS_STRICT_MODE.`);
+    }
+}
+
+function getPermissionGuardStats() {
+    const routes = Array.from(permissionAudit.routes.values())
+        .sort((a, b) => b.count - a.count)
+        .slice(0, AUDIT_LIMIT);
+    return {
+        strictMode: isPermissionStrictMode(),
+        unmatchedRequests: permissionAudit.unmatchedRequests,
+        unmatchedRouteCount: permissionAudit.routes.size,
+        firstSeenAt: permissionAudit.firstSeenAt,
+        lastSeenAt: permissionAudit.lastSeenAt,
+        routes,
+    };
+}
+
+function __resetPermissionGuardStatsForTests() {
+    permissionAudit.unmatchedRequests = 0;
+    permissionAudit.firstSeenAt = null;
+    permissionAudit.lastSeenAt = null;
+    permissionAudit.routes.clear();
+}
+
 function endpointPermissionGuard(req, res, next) {
     const method = String(req.method || '').toUpperCase();
     const path = req.originalUrl.split('?')[0];
@@ -60,10 +130,18 @@ function endpointPermissionGuard(req, res, next) {
         if (!Array.isArray(r.methods)) return true;
         return r.methods.includes(method);
     });
-    if (!rule) return next();
 
-    const role = String(req.user?.rol || '').toLowerCase();
-    if (role === 'administrador' || role === 'admin' || role === 'superadmin') return next();
+    if (!rule) {
+        recordUnmatchedPermissionRoute(method, path, req.user);
+        if (!isPermissionStrictMode() || isAdminRole(req.user?.rol)) return next();
+        return res.status(403).json({
+            error: 'Acceso denegado: este endpoint no tiene una regla de permiso configurada',
+            code: 'PERMISSION_RULE_MISSING',
+            requiredPermission: 'PERMISSION_RULE_REQUIRED',
+        });
+    }
+
+    if (isAdminRole(req.user?.rol)) return next();
 
     const permisos = Array.isArray(req.user?.permisos) ? req.user.permisos : [];
     const acceptedPermissions = rule.permissions || [rule.permission];
@@ -75,4 +153,4 @@ function endpointPermissionGuard(req, res, next) {
     });
 }
 
-module.exports = { PERMISSION_RULES, endpointPermissionGuard };
+module.exports = { PERMISSION_RULES, endpointPermissionGuard, getPermissionGuardStats, isPermissionStrictMode, __resetPermissionGuardStatsForTests };

@@ -25,7 +25,7 @@ const cors = require('cors');
 const rateLimit = require('express-rate-limit');
 
 // Config & Middleware
-const { pool, withRequestTenant, withRequestBypass } = require('./config/db');
+const { pool, getPoolStats, withRequestTenant, withRequestBypass } = require('./config/db');
 const { runMigrations } = require('./config/migrations');
 const { authenticateToken, requireTenant } = require('./middleware/auth');
 const { requireTenantFromJWT, requireSuperAdmin } = require('./middleware/tenant');
@@ -142,9 +142,12 @@ app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || '15mb' }));
 app.get('/healthz', async (req, res) => {
     try {
         await pool.query('SELECT 1');
+        const dbPool = getPoolStats();
+        const degraded = dbPool.waiting > 0 || dbPool.utilization >= 0.9;
         res.status(200).json({
-            status: 'ok',
+            status: degraded ? 'degraded' : 'ok',
             db: 'ok',
+            dbPool,
             uptime: Math.round(process.uptime()),
         });
     } catch (err) {

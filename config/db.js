@@ -10,11 +10,13 @@ const _STATEMENT_TIMEOUT_MS = Math.max(
     parseInt(process.env.DB_STATEMENT_TIMEOUT_MS || String(_QUERY_TIMEOUT_MS), 10) || _QUERY_TIMEOUT_MS
 );
 
+const _POOL_MAX = parseInt(process.env.DB_POOL_MAX || '10', 10);
+
 const pool = new Pool({
   connectionString: process.env.DB_INTERNAL_URL || process.env.DATABASE_URL,
   ssl: process.env.DB_INTERNAL_URL ? false : { rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED !== 'false' },
   // Keep pool small for remote DBs (Render free tier: 97 connection limit)
-  max: parseInt(process.env.DB_POOL_MAX || '10', 10),
+  max: _POOL_MAX,
   // Close idle connections after 20 s so Render doesn't reset them first
   idleTimeoutMillis: 20000,
   // Fail fast if the pool is full — don't queue forever
@@ -49,6 +51,16 @@ const getLocalTimestamp = () => {
 pool.on('error', (err) => {
     console.error('Unexpected error on idle DB client', err);
 });
+
+function getPoolStats() {
+    const max = Number(pool.options?.max || _POOL_MAX);
+    const total = Number(pool.totalCount || 0);
+    const idle = Number(pool.idleCount || 0);
+    const waiting = Number(pool.waitingCount || 0);
+    const active = Math.max(total - idle, 0);
+    const utilization = max > 0 ? Number((active / max).toFixed(2)) : null;
+    return { max, total, idle, active, waiting, utilization };
+}
 
 // Per-request tenant context propagation via AsyncLocalStorage.
 // withRequestTenant(...) is called by the withTenant Express middleware.
@@ -471,4 +483,4 @@ async function tenantQuery(tenantId, text, values = []) {
     return withTenantContext(tenantId, (client) => client.query(text, values));
 }
 
-module.exports = { pool, generateNextId, handleDbError, updateArqueoBalance, getLocalTimestamp, anularVenta, withTenantContext, tenantQuery, setRequestTenant, withRequestTenant, setRequestBypass, withRequestBypass };
+module.exports = { pool, getPoolStats, generateNextId, handleDbError, updateArqueoBalance, getLocalTimestamp, anularVenta, withTenantContext, tenantQuery, setRequestTenant, withRequestTenant, setRequestBypass, withRequestBypass };

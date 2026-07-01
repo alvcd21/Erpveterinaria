@@ -6,6 +6,7 @@ const crypto = require('crypto');
 const BCRYPT_ROUNDS = 12;
 const { pool, generateNextId, handleDbError, updateArqueoBalance, withTenantContext, tenantQuery } = require('../config/db');
 const { authenticateToken, requireAdmin, validatePasswordStrength } = require('../middleware/auth');
+const { getPermissionGuardStats } = require('../middleware/permissions');
 const { getSystemConfig, invalidateSystemConfigCache } = require('../config/systemConfig');
 const automationService = require('../services/automationService');
 
@@ -151,6 +152,10 @@ router.get('/schema', authenticateToken, requireSchemaDesignerAccess, async (req
 });
 
 // --- CONFIGURACIÓN DE EMPRESA (TABLA CONFIGURACION) ---
+router.get('/admin/security/permission-audit', authenticateToken, requireAdmin, async (req, res) => {
+    res.json(getPermissionGuardStats());
+});
+
 const mapConfigRow = (row) => ({
     nombreEmpresa:    row.nombreempresa    || '',
     rtn:              row.rtn              || '',
