@@ -15,7 +15,7 @@ const {
     clearRefreshCookie,
     readCookie,
 } = require('../middleware/cookieAuth');
-const { getFeaturesForPlan } = require('../services/planFeaturesCache');
+const { getEffectiveFeaturesForTenant } = require('../services/planFeaturesCache');
 
 const router = express.Router();
 
@@ -165,7 +165,7 @@ router.post('/login', authLimiter, resolveTenantBySlug, async (req, res) => {
         // Cargar plan del tenant + features disponibles para el plan
         const tenantPlanRow = await pool.query('SELECT plan FROM tenants WHERE id=$1', [resolvedTenantId]);
         const tenantPlan = tenantPlanRow.rows[0]?.plan || 'basico';
-        const planFeatures = await getFeaturesForPlan(tenantPlan);
+        const planFeatures = await getEffectiveFeaturesForTenant(resolvedTenantId, tenantPlan);
 
         const userData = {
             codUsuario: userRaw.codUsuario,
@@ -249,7 +249,7 @@ router.post('/refresh', authLimiter, async (req, res) => {
         // Cargar plan del tenant + features
         const tenantPlanRow2 = await pool.query('SELECT plan FROM tenants WHERE id=$1', [tenantId]);
         const tenantPlan2 = tenantPlanRow2.rows[0]?.plan || 'basico';
-        const planFeatures2 = await getFeaturesForPlan(tenantPlan2);
+        const planFeatures2 = await getEffectiveFeaturesForTenant(tenantId, tenantPlan2);
 
         const userData = {
             codUsuario: userRaw.codUsuario,

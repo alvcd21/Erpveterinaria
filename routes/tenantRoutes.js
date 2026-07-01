@@ -6,6 +6,13 @@ const router = express.Router();
 const bcrypt = require('bcryptjs');
 const { pool, handleDbError } = require('../config/db');
 const { invalidateTenantCache } = require('../middleware/tenant');
+const planFeaturesCache = require('../services/planFeaturesCache');
+const { logSaasAudit } = require('../services/saasAuditService');
+
+function intValue(value, fallback) {
+    const parsed = Number.parseInt(value, 10);
+    return Number.isFinite(parsed) ? parsed : fallback;
+}
 
 // All routes in this file are mounted under /api/saas and pre-guarded
 // by authenticateToken + requireSuperAdmin in server.js.
@@ -15,19 +22,48 @@ const { invalidateTenantCache } = require('../middleware/tenant');
  * List all tenants with basic usage stats.
  */
 router.get('/tenants', async (req, res) => {
+    const page = Math.max(intValue(req.query.page, 1), 1);
+    const limit = Math.min(Math.max(intValue(req.query.limit, 25), 1), 100);
+    const offset = (page - 1) * limit;
+    const params = [];
+    const filters = ['1=1'];
+    if (req.query.search) {
+        params.push(`%${String(req.query.search).trim()}%`);
+        filters.push(`(t.slug ILIKE $${params.length} OR t.nombre_empresa ILIKE $${params.length})`);
+    }
+    if (req.query.estado) {
+        params.push(String(req.query.estado));
+        filters.push(`t.estado = $${params.length}`);
+    }
+    if (req.query.plan) {
+        params.push(String(req.query.plan));
+        filters.push(`t.plan = $${params.length}`);
+    }
+
     try {
+        const where = filters.join(' AND ');
         const { rows } = await pool.query(`
             SELECT
                 t.id, t.slug, t.nombre_empresa, t.plan, t.estado,
                 t.max_sucursales, t.max_usuarios, t.max_medicamentos,
                 t.fecha_vencimiento, t.created_at,
+                s.status AS subscription_status,
+                s.current_period_end AS subscription_period_end,
                 (SELECT COUNT(*) FROM usuarios u WHERE u.tenant_id = t.id) AS usuarios_count,
                 (SELECT COUNT(*) FROM ventas   v WHERE v.tenant_id = t.id) AS ventas_count,
                 (SELECT COUNT(*) FROM medicamentos m WHERE m.tenant_id = t.id) AS medicamentos_count
             FROM tenants t
+            LEFT JOIN tenant_subscriptions s ON s.tenant_id = t.id AND s.is_current = TRUE
+            WHERE ${where}
             ORDER BY t.created_at DESC
-        `);
-        res.json({ data: rows, message: 'Tenants obtenidos correctamente' });
+            LIMIT $${params.length + 1} OFFSET $${params.length + 2}
+        `, [...params, limit, offset]);
+        const total = await pool.query(`SELECT COUNT(*)::int AS total FROM tenants t WHERE ${where}`, params);
+        res.json({
+            data: rows,
+            pagination: { page, limit, total: total.rows[0].total },
+            message: 'Tenants obtenidos correctamente'
+        });
     } catch (err) {
         handleDbError(res, err);
     }
@@ -111,7 +147,7 @@ router.put('/ai/process-settings/:processKey', async (req, res) => {
 router.post('/tenants', async (req, res) => {
     const {
         slug, nombre_empresa, plan = 'basico', estado = 'prueba',
-        max_sucursales = 1, max_usuarios = 5, max_medicamentos = 500,
+        max_sucursales, max_usuarios, max_medicamentos,
         fecha_vencimiento = null,
         admin_email, admin_password
     } = req.body;
@@ -127,12 +163,22 @@ router.post('/tenants', async (req, res) => {
     try {
         await client.query('BEGIN');
 
+        const planResult = await client.query('SELECT * FROM saas_plans WHERE slug = $1', [plan]);
+        if (!planResult.rows.length) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ error: `El plan '${plan}' no existe en el catalogo SaaS` });
+        }
+        const planConfig = planResult.rows[0];
+        const finalMaxSucursales = max_sucursales ?? planConfig.max_sucursales ?? 1;
+        const finalMaxUsuarios = max_usuarios ?? planConfig.max_usuarios ?? 5;
+        const finalMaxMedicamentos = max_medicamentos ?? planConfig.max_medicamentos ?? 500;
+
         // 1. Create tenant row
         const tenantResult = await client.query(
             `INSERT INTO tenants (slug, nombre_empresa, plan, estado, max_sucursales, max_usuarios, max_medicamentos, fecha_vencimiento)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
              RETURNING *`,
-            [slug, nombre_empresa, plan, estado, max_sucursales, max_usuarios, max_medicamentos, fecha_vencimiento]
+            [slug, nombre_empresa, plan, estado, finalMaxSucursales, finalMaxUsuarios, finalMaxMedicamentos, fecha_vencimiento]
         );
         const tenant = tenantResult.rows[0];
 
@@ -175,6 +221,30 @@ router.post('/tenants', async (req, res) => {
             );
             adminInfo = userResult.rows[0];
         }
+
+        await client.query(`
+            INSERT INTO tenant_subscriptions
+                (tenant_id, plan_slug, status, billing_cycle, current_period_start, current_period_end, is_current, limits_snapshot)
+            VALUES ($1, $2, $3, $4, NOW(), $5, TRUE, $6::jsonb)
+        `, [
+            tenant.id,
+            plan,
+            estado === 'prueba' ? 'trialing' : 'active',
+            estado === 'prueba' ? 'trial' : 'monthly',
+            fecha_vencimiento,
+            JSON.stringify({
+                max_sucursales: finalMaxSucursales,
+                max_usuarios: finalMaxUsuarios,
+                max_medicamentos: finalMaxMedicamentos,
+            }),
+        ]);
+        await logSaasAudit(client, req, {
+            action: 'saas.tenant.create',
+            entityType: 'tenant',
+            entityId: tenant.id,
+            tenantId: tenant.id,
+            afterData: { tenant, admin: adminInfo },
+        });
 
         await client.query('COMMIT');
 
@@ -226,6 +296,7 @@ router.put('/tenants/:id', async (req, res) => {
     } = req.body;
 
     try {
+        const before = await pool.query('SELECT * FROM tenants WHERE id = $1', [req.params.id]);
         const { rows } = await pool.query(
             `UPDATE tenants
              SET nombre_empresa    = COALESCE($1, nombre_empresa),
@@ -243,6 +314,15 @@ router.put('/tenants/:id', async (req, res) => {
         if (!rows.length) return res.status(404).json({ error: 'Tenant no encontrado' });
 
         invalidateTenantCache(rows[0].slug);
+        planFeaturesCache.invalidateTenant(rows[0].id);
+        await logSaasAudit(pool, req, {
+            action: 'saas.tenant.update',
+            entityType: 'tenant',
+            entityId: rows[0].id,
+            tenantId: rows[0].id,
+            beforeData: before.rows[0] || null,
+            afterData: rows[0],
+        });
         res.json({ data: rows[0], message: 'Tenant actualizado correctamente' });
     } catch (err) {
         handleDbError(res, err);
@@ -262,6 +342,14 @@ router.delete('/tenants/:id', async (req, res) => {
         );
         if (!rows.length) return res.status(404).json({ error: 'Tenant no encontrado' });
         invalidateTenantCache(rows[0].slug);
+        planFeaturesCache.invalidateTenant(rows[0].id);
+        await logSaasAudit(pool, req, {
+            action: 'saas.tenant.cancel',
+            entityType: 'tenant',
+            entityId: rows[0].id,
+            tenantId: rows[0].id,
+            afterData: rows[0],
+        });
         res.json({ data: rows[0], message: 'Tenant cancelado correctamente' });
     } catch (err) {
         handleDbError(res, err);
@@ -281,6 +369,19 @@ router.post('/tenants/:id/suspend', async (req, res) => {
         );
         if (!rows.length) return res.status(404).json({ error: 'Tenant no encontrado' });
         invalidateTenantCache(rows[0].slug);
+        planFeaturesCache.invalidateTenant(rows[0].id);
+        await pool.query(`
+            UPDATE tenant_subscriptions
+            SET status = 'suspended', updated_at = NOW()
+            WHERE tenant_id = $1 AND is_current = TRUE
+        `, [rows[0].id]);
+        await logSaasAudit(pool, req, {
+            action: 'saas.tenant.suspend',
+            entityType: 'tenant',
+            entityId: rows[0].id,
+            tenantId: rows[0].id,
+            afterData: rows[0],
+        });
         res.json({ data: rows[0], message: 'Tenant suspendido correctamente' });
     } catch (err) {
         handleDbError(res, err);
@@ -300,6 +401,19 @@ router.post('/tenants/:id/activate', async (req, res) => {
         );
         if (!rows.length) return res.status(404).json({ error: 'Tenant no encontrado' });
         invalidateTenantCache(rows[0].slug);
+        planFeaturesCache.invalidateTenant(rows[0].id);
+        await pool.query(`
+            UPDATE tenant_subscriptions
+            SET status = 'active', updated_at = NOW()
+            WHERE tenant_id = $1 AND is_current = TRUE
+        `, [rows[0].id]);
+        await logSaasAudit(pool, req, {
+            action: 'saas.tenant.activate',
+            entityType: 'tenant',
+            entityId: rows[0].id,
+            tenantId: rows[0].id,
+            afterData: rows[0],
+        });
         res.json({ data: rows[0], message: 'Tenant activado correctamente' });
     } catch (err) {
         handleDbError(res, err);

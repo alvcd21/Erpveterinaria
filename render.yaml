@@ -23,3 +23,11 @@ services:
         generateValue: true
       - key: ALLOWED_ORIGINS
         sync: false
+  - type: static
+    name: erpveterinaria-admin
+    rootDir: apps/Erpveterinaria-admin
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    envVars:
+      - key: VITE_API_URL
+        sync: false

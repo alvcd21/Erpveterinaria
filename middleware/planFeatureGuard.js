@@ -1,26 +1,26 @@
-const { planHasFeature } = require('../services/planFeaturesCache');
+const { planHasFeature, tenantHasFeature } = require('../services/planFeaturesCache');
 
-// Mapa de rutas → feature key requerida
 const ROUTE_PLAN_FEATURES = [
-    { pattern: /^\/api\/loyalty\b/,              feature: 'modulo_lealtad' },
-    { pattern: /^\/api\/transferencias\b/,       feature: 'modulo_transferencias' },
-    { pattern: /^\/api\/entregas\b/,             feature: 'modulo_entregas' },
-    { pattern: /^\/api\/sucursales\b/,           feature: 'modulo_sucursales' },
-    { pattern: /^\/api\/ordenes-compra\b/,       feature: 'modulo_ordenes_compra' },
-    { pattern: /^\/api\/accounting\b/,           feature: 'modulo_contabilidad' },
-    { pattern: /^\/api\/labels\b/,               feature: 'modulo_etiquetas' },
-    { pattern: /^\/api\/schema\b/,               feature: 'modulo_etiquetas' },
-    { pattern: /^\/api\/proveedores\b/,          feature: 'modulo_proveedores' },
-    { pattern: /^\/api\/admin\/boxes\b/,         feature: 'modulo_panel_cajas' },
-    { pattern: /^\/api\/admin\/arqueo\b/,        feature: 'modulo_panel_cajas' },
-    { pattern: /^\/api\/tutores\b/,              feature: 'modulo_pacientes' },
-    { pattern: /^\/api\/pacientes\b/,            feature: 'modulo_pacientes' },
-    { pattern: /^\/api\/citas\b/,                feature: 'modulo_citas' },
-    { pattern: /^\/api\/tipos-cita\b/,           feature: 'modulo_citas' },
-    { pattern: /^\/api\/consultas\b/,            feature: 'modulo_expediente' },
-    { pattern: /^\/api\/vacunas\b/,              feature: 'modulo_vacunas' },
-    { pattern: /^\/api\/recordatorios\b/,        feature: 'modulo_recordatorios' },
-    { pattern: /^\/api\/clinica\/flowboard\b/,   feature: 'modulo_hospitalizacion' },
+    { pattern: /^\/api\/loyalty\b/, feature: 'modulo_lealtad' },
+    { pattern: /^\/api\/transferencias\b/, feature: 'modulo_transferencias' },
+    { pattern: /^\/api\/entregas\b/, feature: 'modulo_entregas' },
+    { pattern: /^\/api\/sucursales\b/, feature: 'modulo_sucursales' },
+    { pattern: /^\/api\/ordenes-compra\b/, feature: 'modulo_ordenes_compra' },
+    { pattern: /^\/api\/accounting\b/, feature: 'modulo_contabilidad' },
+    { pattern: /^\/api\/labels\b/, feature: 'modulo_etiquetas' },
+    { pattern: /^\/api\/schema\b/, feature: 'modulo_etiquetas' },
+    { pattern: /^\/api\/proveedores\b/, feature: 'modulo_proveedores' },
+    { pattern: /^\/api\/admin\/boxes\b/, feature: 'modulo_panel_cajas' },
+    { pattern: /^\/api\/admin\/arqueo\b/, feature: 'modulo_panel_cajas' },
+    { pattern: /^\/api\/tutores\b/, feature: 'modulo_pacientes' },
+    { pattern: /^\/api\/pacientes\b/, feature: 'modulo_pacientes' },
+    { pattern: /^\/api\/citas\b/, feature: 'modulo_citas' },
+    { pattern: /^\/api\/tipos-cita\b/, feature: 'modulo_citas' },
+    { pattern: /^\/api\/consultas\b/, feature: 'modulo_expediente' },
+    { pattern: /^\/api\/vacunas\b/, feature: 'modulo_vacunas' },
+    { pattern: /^\/api\/recordatorios\b/, feature: 'modulo_recordatorios' },
+    { pattern: /^\/api\/clinica\/flowboard\b/, feature: 'modulo_hospitalizacion' },
+    { pattern: /^\/api\/consultorio\b/, feature: 'modulo_consultorio' },
 ];
 
 const PLAN_ORDER = ['basico', 'profesional', 'enterprise'];
@@ -28,28 +28,24 @@ const PLAN_ORDER = ['basico', 'profesional', 'enterprise'];
 async function planFeatureGuard(req, res, next) {
     const url = req.originalUrl.split('?')[0];
     const rule = ROUTE_PLAN_FEATURES.find(r => r.pattern.test(url));
-    if (!rule) return next(); // ruta no gateada → pasar
-
-    // SuperAdmin bypasa todo
+    if (!rule) return next();
     if (req.user?.isSuperAdmin) return next();
 
-    const tenantPlan = req.user?.tenantPlan;
-    if (!tenantPlan) {
-        // Si no hay plan en el token, es un token antiguo → dejar pasar con degradación
-        // (no bloquear usuarios existentes hasta que renueven sesión)
-        return next();
-    }
+    const tenantPlan = req.user?.tenantPlan || null;
+    const tenantId = req.tenantId || req.user?.tenantId || null;
 
-    if (await planHasFeature(tenantPlan, rule.feature)) return next();
+    if (await tenantHasFeature(tenantId, tenantPlan, rule.feature)) return next();
 
-    // Encontrar el plan mínimo que incluye la feature
     let minimumPlan = null;
-    for (const p of PLAN_ORDER) {
-        if (await planHasFeature(p, rule.feature)) { minimumPlan = p; break; }
+    for (const plan of PLAN_ORDER) {
+        if (await planHasFeature(plan, rule.feature)) {
+            minimumPlan = plan;
+            break;
+        }
     }
 
     return res.status(403).json({
-        error: `Módulo no disponible en el plan "${tenantPlan}"`,
+        error: `Modulo no disponible en el plan "${tenantPlan || 'actual'}"`,
         code: 'PLAN_FEATURE_REQUIRED',
         requiredFeature: rule.feature,
         currentPlan: tenantPlan,

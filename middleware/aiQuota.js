@@ -56,7 +56,25 @@ async function getTenantLimits(tenantId) {
         JOIN ai_quota_plans p ON p.plan = t.plan
         WHERE t.id = $1
     `, [tenantId]);
-    return rows[0] || null;
+    const limits = rows[0] || null;
+    if (!limits) return null;
+
+    const tokensLimite = toFiniteNumber(limits.tokens_limite);
+    const requestsLimite = toFiniteNumber(limits.requests_limite);
+    const reqDiarioLimite = toFiniteNumber(limits.req_diario_limite);
+    const procesosHabilitados = normalizeProcessList(limits.procesos_habilitados);
+    const planAllowsAI = procesosHabilitados.length > 0 && (
+        tokensLimite > 0 || requestsLimite > 0 || reqDiarioLimite > 0
+    );
+
+    return {
+        ...limits,
+        tokens_limite: tokensLimite,
+        requests_limite: requestsLimite,
+        req_diario_limite: reqDiarioLimite,
+        procesos_habilitados: procesosHabilitados,
+        ai_habilitado: Boolean(limits.ai_habilitado && planAllowsAI),
+    };
 }
 
 // ── Obtener uso actual del periodo ───────────────────────────────────────────

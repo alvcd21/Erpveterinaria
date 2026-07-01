@@ -54,6 +54,8 @@ const veterinaryRoutes   = require('./routes/veterinaryRoutes');
 // SaaS Routes
 const { router: saasAuthRoutes } = require('./routes/saasAuthRoutes');
 const tenantRoutes    = require('./routes/tenantRoutes');
+const saasCatalogRoutes = require('./routes/saasCatalogRoutes');
+const saasSubscriptionRoutes = require('./routes/saasSubscriptionRoutes');
 const publicRoutes    = require('./routes/publicRoutes');
 const internalAuthRoutes = require('./routes/internalAuthRoutes');
 
@@ -166,8 +168,11 @@ function mountRoutes() {
     // SaaS admin login (no auth needed on the login endpoint itself)
     app.use('/api/saas', withRequestBypass, saasAuthRoutes);
 
-    // SaaS tenant management - requireSuperAdmin verifies SAAS_SUPER_SECRET independently
-    app.use('/api/saas', requireSuperAdmin, withRequestBypass, tenantRoutes);
+    // SaaS tenant management - withRequestBypass must wrap requireSuperAdmin
+    // because SaaS sessions are cross-tenant and validated against admin tables.
+    app.use('/api/saas', withRequestBypass, requireSuperAdmin, tenantRoutes);
+    app.use('/api/saas', withRequestBypass, requireSuperAdmin, saasCatalogRoutes);
+    app.use('/api/saas', withRequestBypass, requireSuperAdmin, saasSubscriptionRoutes);
 
     app.use('/api/auth', withRequestBypass, internalAuthRoutes);
 

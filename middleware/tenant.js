@@ -136,7 +136,7 @@ const resolveTenantBySlug = async (req, res, next) => {
  * the aud:'saas-admin' claim. Must be used instead of — not after — authenticateToken
  * on super-admin routes, because super-admin tokens are signed with a different secret.
  */
-const requireSuperAdmin = (req, res, next) => {
+const requireSuperAdmin = async (req, res, next) => {
     if (!SAAS_SUPER_SECRET) {
         console.error('[FATAL] SAAS_SUPER_SECRET no está configurado');
         return res.status(500).json({ error: 'Configuración de servidor incompleta' });
@@ -145,12 +145,53 @@ const requireSuperAdmin = (req, res, next) => {
     const token = authHeader && authHeader.split(' ')[1];
     if (!token) return res.status(401).json({ error: 'Token de super-administrador requerido' });
 
-    jwt.verify(token, SAAS_SUPER_SECRET, { algorithms: ['HS256'], audience: 'saas-admin' }, (err, decoded) => {
-        if (err) return res.status(403).json({ error: 'Token de super-administrador inválido' });
-        if (!decoded.isSuperAdmin) return res.status(403).json({ error: 'Acceso restringido a super-administradores' });
-        req.user = decoded;
+    try {
+        const decoded = jwt.verify(token, SAAS_SUPER_SECRET, { algorithms: ['HS256'], audience: 'saas-admin' });
+        if (!decoded.isSuperAdmin) {
+            return res.status(403).json({ error: 'Acceso restringido a super-administradores' });
+        }
+
+        if (decoded.adminType !== 'saas_user') {
+            req.user = {
+                ...decoded,
+                role: decoded.role || 'owner',
+                saasPermissions: decoded.saasPermissions || ['*'],
+            };
+            return next();
+        }
+
+        const { rows } = await pool.query(`
+            SELECT
+                u.id, u.email, u.nombre, u.estado,
+                r.role_key, r.nombre AS role_name, r.permisos,
+                s.revoked_at, s.expires_at
+            FROM saas_admin_sessions s
+            JOIN saas_admin_users u ON u.id = s.user_id
+            LEFT JOIN saas_admin_roles r ON r.id = u.role_id
+            WHERE s.token_id = $1
+            LIMIT 1
+        `, [decoded.sid]);
+        const row = rows[0];
+        if (!row || row.revoked_at || new Date(row.expires_at) <= new Date()) {
+            return res.status(401).json({ error: 'Sesion SaaS expirada o revocada' });
+        }
+        if (row.estado !== 'activo') {
+            return res.status(403).json({ error: 'Usuario SaaS inactivo' });
+        }
+
+        req.user = {
+            ...decoded,
+            adminUserId: row.id,
+            email: row.email,
+            nombre: row.nombre,
+            role: row.role_key || 'soporte',
+            roleName: row.role_name || 'Soporte',
+            saasPermissions: Array.isArray(row.permisos) ? row.permisos : (row.permisos || []),
+        };
         next();
-    });
+    } catch (err) {
+        return res.status(403).json({ error: 'Token de super-administrador invalido' });
+    }
 };
 
 /**

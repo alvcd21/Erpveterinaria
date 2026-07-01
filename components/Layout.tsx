@@ -3,7 +3,6 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import * as ReactRouterDOM from 'react-router-dom';
 const { Link, useLocation, useNavigate } = ReactRouterDOM as any;
 import { useAuth } from '../context/AuthContext';
-import PlanLockedItem from './PlanLockedItem';
 import { useTheme } from '../context/ThemeContext';
 import { AuthService, AIService, AIQuotaStatus, NotificationService, AppNotification, ConfigService } from '../services/api';
 import {
@@ -76,6 +75,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
 
   const { user, logout, hasPermission, hasPlanFeature, clearPasswordChangeFlag } = useAuth();
   const isAdmin = ['administrador', 'admin', 'superadmin'].includes(String(user?.rol || '').toLowerCase());
+  const hasAIPlan = hasPlanFeature('ia_basica') || hasPlanFeature('ia_avanzada');
 
   const loadNotifications = useCallback(async (silent = false) => {
     if (!silent) setNotifLoading(true);
@@ -111,7 +111,8 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
 
   // Load quota (admin only) + notifications + company logo + polling
   useEffect(() => {
-    if (isAdmin) AIService.getQuotaStatus().then(setAiQuota).catch(() => {});
+    if (isAdmin && hasAIPlan) AIService.getQuotaStatus().then(setAiQuota).catch(() => {});
+    else setAiQuota(null);
     loadNotifications();
     ConfigService.get().then(cfg => {
       if (cfg?.logoBase64) setCompanyLogo(cfg.logoBase64);
@@ -119,7 +120,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
     }).catch(() => {});
     const interval = setInterval(() => loadNotifications(true), 60000);
     return () => clearInterval(interval);
-  }, [isAdmin, loadNotifications]);
+  }, [isAdmin, hasAIPlan, loadNotifications]);
 
   // Close panel on click-outside
   useEffect(() => {
@@ -225,7 +226,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
         { name: 'Cajas', path: '/admin/boxes', icon: <Box size={18} />, permission: 'GESTIONAR_CAJAS' },
         { name: 'Reportes', path: '/reports', icon: <FileText size={18} />, permission: 'VER_REPORTES' },
         { name: 'Configuración', path: '/admin/config', icon: <Settings size={18} />, permission: 'CONFIGURAR_EMPRESA' },
-        { name: 'IA y Cuotas', path: '/admin/ai', icon: <Sparkles size={18} />, permission: 'VER_IA_CUOTAS' },
+        { name: 'IA y Cuotas', path: '/admin/ai', icon: <Sparkles size={18} />, permission: 'VER_IA_CUOTAS', planFeature: 'ia_basica' },
       ]
     }
   ];
@@ -277,15 +278,14 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   const renderNavItems = (items: NavItem[], isMobile = false) => {
     return items.map((item) => {
       if (item.subItems) {
-        // Plan-locked items are shown as locked; permission-filtered items are hidden
         const subItemsToRender = item.subItems.filter(sub => {
-          if (sub.planFeature && !hasPlanFeature(sub.planFeature)) return true;
-          return hasPermission(sub.permission);
+          if (!hasPermission(sub.permission)) return false;
+          return !sub.planFeature || hasPlanFeature(sub.planFeature);
         });
         if (subItemsToRender.length === 0) return null;
 
         const isExpanded = expandedMenus.includes(item.name);
-        const hasActiveChild = subItemsToRender.some(sub => isActivePath(sub.path) && (!sub.planFeature || hasPlanFeature(sub.planFeature)));
+        const hasActiveChild = subItemsToRender.some(sub => isActivePath(sub.path));
 
         return (
           <div key={item.name} className="mb-2">
@@ -304,13 +304,6 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
             <div className={`overflow-hidden transition-all duration-300 ease-in-out ${isExpanded ? 'max-h-96 opacity-100 mt-1' : 'max-h-0 opacity-0'}`}>
               <ul className="pl-4 space-y-1 border-l-2 border-slate-800 ml-6 my-1">
                 {subItemsToRender.map(subItem => {
-                  if (subItem.planFeature && !hasPlanFeature(subItem.planFeature)) {
-                    return (
-                      <li key={subItem.name}>
-                        <PlanLockedItem name={subItem.name} icon={subItem.icon} minimumPlan={subItem.minimumPlan} />
-                      </li>
-                    );
-                  }
                   const isActive = isActivePath(subItem.path);
                   return (
                     <li key={subItem.path}>
