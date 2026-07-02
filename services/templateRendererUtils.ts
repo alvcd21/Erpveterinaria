@@ -104,12 +104,9 @@ export function adaptDocumentText(text: string, ctx: PrintDataContext): string {
       .replace(/\bFACTURA\b/g, 'COTIZACION')
       .replace(/\bFactura\b/g, 'Cotizacion')
       .replace(/\bfactura\b/g, 'cotizacion');
-  } else if (!alreadySpecific && doc.tipoDocumento === 'factura_no_fiscal') {
-    output = output
-      .replace(/\bFACTURA\b/g, 'FACTURA NO FISCAL')
-      .replace(/\bFactura\b/g, 'Factura no fiscal')
-      .replace(/\bfactura\b/g, 'factura no fiscal');
   }
+  // La factura NO fiscal conserva el título "FACTURA"; NO se renombra a
+  // "FACTURA NO FISCAL". Solo se le ocultan los datos SAR (más abajo).
 
   if (doc.esFiscal === false) {
     const fiscalLine = /(CAI|clave de autorizaci[oó]n|rango autorizado|rango inicial|rango final|fecha l[ií]mite|SAR|ex[ií]jala|www\.sar|original:\s*cliente|copia:\s*obligado|factura es beneficio)/i;

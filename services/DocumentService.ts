@@ -40,7 +40,9 @@ function documentLabels(tipoDocumento: PrintableDocumentType) {
     return { titulo: 'COTIZACION', tituloCorto: 'Cotizacion', esFiscal: false, esCotizacion: true };
   }
   if (tipoDocumento === 'factura_no_fiscal') {
-    return { titulo: 'FACTURA NO FISCAL', tituloCorto: 'Factura no fiscal', esFiscal: false, esCotizacion: false };
+    // Conserva el título "FACTURA" (sin la leyenda "no fiscal"); esFiscal:false
+    // solo sirve para ocultar los datos SAR en la impresión.
+    return { titulo: 'FACTURA', tituloCorto: 'Factura', esFiscal: false, esCotizacion: false };
   }
   return { titulo: 'FACTURA', tituloCorto: 'Factura', esFiscal: true, esCotizacion: false };
 }
