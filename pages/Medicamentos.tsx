@@ -54,6 +54,8 @@ export default function Medicamentos() {
 
   const [showLoteModal, setShowLoteModal] = useState(false);
   const [loteForm, setLoteForm]           = useState<LoteFormData>(blankLote());
+  const [editingLote, setEditingLote]     = useState<any | null>(null);
+  const [loteModalMedName, setLoteModalMedName] = useState<string | undefined>(undefined);
 
   /* ── Data loading ────────────────────────────────────────── */
   const loadCatalogo = useCallback(async () => {
@@ -316,21 +318,129 @@ export default function Medicamentos() {
     if (selectedMed) loadDetail(selectedMed, 'PRESENTACIONES');
   };
 
+  const parseLoteExpiry = (lote: any) => {
+    const display = String(lote.fecha_vencimiento_display || '');
+    const displayMatch = display.match(/^(\d{1,2})\/(\d{4})$/);
+    if (displayMatch) {
+      return {
+        mes_vencimiento: Number(displayMatch[1]),
+        anio_vencimiento: Number(displayMatch[2]),
+      };
+    }
+
+    const raw = String(lote.fecha_vencimiento || '').slice(0, 10);
+    const dateMatch = raw.match(/^(\d{4})-(\d{1,2})-/);
+    if (dateMatch) {
+      return {
+        mes_vencimiento: Number(dateMatch[2]),
+        anio_vencimiento: Number(dateMatch[1]),
+      };
+    }
+
+    const fallback = blankLote();
+    return {
+      mes_vencimiento: fallback.mes_vencimiento,
+      anio_vencimiento: fallback.anio_vencimiento,
+    };
+  };
+
+  const refreshLoteViews = async (medId?: string) => {
+    const tasks: Promise<any>[] = [];
+    if (selectedMed && (!medId || medId === selectedMed.codigo)) {
+      tasks.push(loadDetail(selectedMed, 'LOTES'));
+      tasks.push(refreshSelectedFromList(selectedMed.codigo));
+    }
+    if (mainTab === 'LOTES') tasks.push(loadLotesAll());
+    await Promise.all(tasks);
+  };
+
+  const openNewLote = () => {
+    if (!selectedMed) return;
+    setEditingLote(null);
+    setLoteModalMedName(selectedMed.nombre_generico);
+    setLoteForm(blankLote());
+    setShowLoteModal(true);
+  };
+
+  const openEditLote = (lote: any) => {
+    const expiry = parseLoteExpiry(lote);
+    setEditingLote(lote);
+    setLoteModalMedName(lote.medNombre || selectedMed?.nombre_generico);
+    setLoteForm({
+      ...blankLote(),
+      numero_lote: lote.numero_lote || '',
+      mes_vencimiento: expiry.mes_vencimiento,
+      anio_vencimiento: expiry.anio_vencimiento,
+      cantidad: Number(lote.cantidad_actual ?? 0),
+      id_presentacion: 0,
+      precio_compra_presentacion: Number(lote.precio_compra_unitario ?? 0),
+      id_proveedor: lote.id_proveedor || '',
+      id_sucursal: Number(lote.id_sucursal || 0),
+      notas: lote.notas || '',
+    });
+    setShowLoteModal(true);
+  };
+
+  const closeLoteModal = () => {
+    setShowLoteModal(false);
+    setEditingLote(null);
+    setLoteModalMedName(undefined);
+    setLoteForm(blankLote());
+  };
+
   const saveLote = async () => {
-    if (!selectedMed || !loteForm.numero_lote) return;
+    if (!loteForm.numero_lote?.trim()) return Swal.fire('Error', 'El numero de lote es requerido', 'error');
     try {
+      if (editingLote) {
+        await MedicamentosService.updateLote(editingLote.id_lote, {
+          numero_lote: loteForm.numero_lote.trim(),
+          mes_vencimiento: loteForm.mes_vencimiento,
+          anio_vencimiento: loteForm.anio_vencimiento,
+          cantidad_actual: loteForm.cantidad,
+          precio_compra_unitario: loteForm.precio_compra_presentacion,
+          id_proveedor: loteForm.id_proveedor || null,
+          id_sucursal: loteForm.id_sucursal || null,
+          notas: loteForm.notas || null,
+        });
+        closeLoteModal();
+        await refreshLoteViews(editingLote.id_medicamento);
+        Swal.fire({ icon: 'success', title: 'Lote actualizado', timer: 1400, showConfirmButton: false });
+        return;
+      }
+
+      if (!selectedMed) return;
       await MedicamentosService.createLote(selectedMed.codigo, {
-        numero_lote: loteForm.numero_lote, mes_vencimiento: loteForm.mes_vencimiento,
-        anio_vencimiento: loteForm.anio_vencimiento, cantidad: loteForm.cantidad,
+        numero_lote: loteForm.numero_lote.trim(),
+        mes_vencimiento: loteForm.mes_vencimiento,
+        anio_vencimiento: loteForm.anio_vencimiento,
+        cantidad: loteForm.cantidad,
         id_presentacion: loteForm.id_presentacion || undefined,
         precio_compra_presentacion: loteForm.precio_compra_presentacion || undefined,
         id_proveedor: loteForm.id_proveedor || undefined,
         id_sucursal: loteForm.id_sucursal || undefined,
         notas: loteForm.notas || undefined,
       });
-      setShowLoteModal(false); setLoteForm(blankLote()); loadDetail(selectedMed, 'LOTES');
-      await refreshSelectedFromList(selectedMed.codigo);
+      closeLoteModal();
+      await refreshLoteViews(selectedMed.codigo);
       Swal.fire({ icon: 'success', title: 'Lote ingresado', timer: 1400, showConfirmButton: false });
+    } catch (e: any) { Swal.fire('Error', e.message, 'error'); }
+  };
+
+  const deleteLote = async (lote: any) => {
+    const r = await Swal.fire({
+      title: 'Dar de baja lote?',
+      text: `El lote ${lote.numero_lote} quedara con stock en cero y dejara de venderse.`,
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonText: 'Dar de baja',
+      cancelButtonText: 'Cancelar',
+      confirmButtonColor: '#dc2626',
+    });
+    if (!r.isConfirmed) return;
+    try {
+      await MedicamentosService.deleteLote(lote.id_lote, 'Baja manual desde inventario');
+      await refreshLoteViews(lote.id_medicamento);
+      Swal.fire({ icon: 'success', title: 'Lote dado de baja', timer: 1400, showConfirmButton: false });
     } catch (e: any) { Swal.fire('Error', e.message, 'error'); }
   };
 
@@ -439,7 +549,7 @@ export default function Medicamentos() {
                 detailTab={detailTab} onTabChange={setDetailTab} onClose={() => setSelectedMed(null)}
                 onEditBasic={() => openEditMed(selectedMed)} onUpdateMed={updateSelectedMed}
                 detailLoading={detailLoading} imagenes={imagenes} presentaciones={presentaciones} lotesDetalle={lotesDetalle}
-                onAddLote={() => { setLoteForm(blankLote()); setShowLoteModal(true); }}
+                onAddLote={openNewLote} onEditLote={openEditLote} onDeleteLote={deleteLote}
                 onAddPres={openNewPres} onEditPres={openEditPres} onDeletePres={deletePres}
                 onDeleteImagen={deleteImagen} onSetPrincipalImagen={setPrincipalImagen}
                 onUploadImage={() => fileInputRef.current?.click()} uploadingImg={uploadingImg}
@@ -447,7 +557,7 @@ export default function Medicamentos() {
                 onAnalyzeImages={analyzeExistingImages} analyzingImages={analyzingImages}
               />
             )}
-            {mainTab === 'LOTES' && <LotesTable loading={loading} allLotes={allLotes} />}
+            {mainTab === 'LOTES' && <LotesTable loading={loading} allLotes={allLotes} onEditLote={openEditLote} onDeleteLote={deleteLote} />}
             {mainTab === 'ALERTAS' && <AlertasSection loading={loading} alertasVenc={alertasVenc} stockCritico={stockCritico} />}
           </div>
         </div>
@@ -461,9 +571,9 @@ export default function Medicamentos() {
         costoBaseUnitario={costoBaseUnitario} medMargenGanancia={selectedMed?.margen_ganancia}
         onChange={setPresForm} onSave={savePres} onClose={() => setShowPresModal(false)} />
 
-      <LoteModal show={showLoteModal} medNombre={selectedMed?.nombre_generico} medMargenDefault={selectedMed?.margen_ganancia} form={loteForm}
+      <LoteModal show={showLoteModal} mode={editingLote ? 'edit' : 'create'} medNombre={loteModalMedName || selectedMed?.nombre_generico} medMargenDefault={selectedMed?.margen_ganancia} form={loteForm}
         presentaciones={presentaciones} proveedores={proveedores}
-        onChange={setLoteForm} onSave={saveLote} onClose={() => setShowLoteModal(false)}
+        onChange={setLoteForm} onSave={saveLote} onClose={closeLoteModal}
         onApplySuggestedPrice={applySuggestedPrice} />
     </div>
   );

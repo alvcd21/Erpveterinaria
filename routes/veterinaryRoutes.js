@@ -1518,6 +1518,19 @@ router.put('/consultorio/eventos/:id', authenticateToken, async (req, res) => {
     } catch (e) { handleDbError(res, e); }
 });
 
+router.delete('/consultorio/eventos/:id', authenticateToken, async (req, res) => {
+    try {
+        const id = asInt(req.params.id);
+        if (!id) return res.status(400).json({ error: 'id_evento inválido' });
+        const { rowCount } = await pool.query(
+            'DELETE FROM paciente_eventos_clinicos WHERE id_evento = $1 AND tenant_id = $2',
+            [id, req.tenantId]
+        );
+        if (!rowCount) return res.status(404).json({ error: 'Registro clínico no encontrado' });
+        res.json({ message: 'Registro eliminado', id_evento: id });
+    } catch (e) { handleDbError(res, e); }
+});
+
 // Flowboard
 router.get('/clinica/flowboard', authenticateToken, async (req, res) => {
     try {

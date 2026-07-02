@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ArrowLeft, X, Plus, Edit2, Image, List, Layers, FlaskConical, Thermometer, Pill, BarChart2, Tag, RefreshCw, ClipboardList, FileText, Sparkles } from 'lucide-react';
+import { ArrowLeft, X, Plus, Edit2, Image, List, Layers, FlaskConical, Thermometer, Pill, BarChart2, Tag, RefreshCw, ClipboardList, FileText, Sparkles, Trash2 } from 'lucide-react';
 import { CategoriaTerapeutica, FormaFarmaceutica, Medicamento, PresentacionVenta, LoteMedicamento, ImagenMedicamento } from '../../types';
 import { Badge, Spinner, alertBadge, btnPrimary, btnSecondary, btnIcon, catalogStatusBadge, isvBadge, DetailTab, inp, FieldLabel, VIAS, ALMACENAMIENTO } from './shared';
 
@@ -17,6 +17,8 @@ interface Props {
   presentaciones: PresentacionVenta[];
   lotesDetalle: LoteMedicamento[];
   onAddLote: () => void;
+  onEditLote: (l: LoteMedicamento) => void;
+  onDeleteLote: (l: LoteMedicamento) => void;
   onAddPres: () => void;
   onEditPres: (p: PresentacionVenta) => void;
   onDeletePres: (id: number) => void;
@@ -42,7 +44,7 @@ function Stat({ label, value }: { label: string; value: React.ReactNode }) {
 export default function DetailPanel({
   selectedMed, categorias, formas, detailTab, onTabChange, onClose, onEditBasic, onUpdateMed, detailLoading,
   imagenes, presentaciones, lotesDetalle,
-  onAddLote, onAddPres, onEditPres, onDeletePres,
+  onAddLote, onEditLote, onDeleteLote, onAddPres, onEditPres, onDeletePres,
   onDeleteImagen, onSetPrincipalImagen, onUploadImage, uploadingImg, fileInputRef, onFileSelected,
   onAnalyzeImages, analyzingImages,
 }: Props) {
@@ -171,11 +173,33 @@ export default function DetailPanel({
                   <Plus className="w-3.5 h-3.5" />Ingresar lote
                 </button>
                 <div className="space-y-2">
-                  {[...lotesDetalle].sort((a, b) => new Date(a.fecha_vencimiento).getTime() - new Date(b.fecha_vencimiento).getTime()).map(l => (
-                    <div key={l.id_lote} className="bg-slate-50 border border-slate-100 rounded-xl p-3">
+                  {[...lotesDetalle].sort((a, b) => new Date(a.fecha_vencimiento).getTime() - new Date(b.fecha_vencimiento).getTime()).map(l => {
+                    const inactive = l.estado && l.estado !== 'Activo';
+                    return (
+                    <div key={l.id_lote} className={`${inactive ? 'bg-slate-100/70 border-slate-200 opacity-80' : 'bg-slate-50 border-slate-100'} border rounded-xl p-3`}>
                       <div className="flex items-center justify-between">
                         <span className="font-mono text-xs text-slate-600 font-semibold">{l.numero_lote}</span>
-                        {l.alerta_vencimiento && <Badge cls={alertBadge[l.alerta_vencimiento] || 'bg-slate-100 text-slate-600'}>{l.alerta_vencimiento}</Badge>}
+                        <div className="flex items-center gap-1.5">
+                          {inactive && <Badge cls="bg-slate-200 text-slate-600">{l.estado}</Badge>}
+                          {l.alerta_vencimiento && <Badge cls={alertBadge[l.alerta_vencimiento] || 'bg-slate-100 text-slate-600'}>{l.alerta_vencimiento}</Badge>}
+                          <button
+                            type="button"
+                            onClick={() => onEditLote(l)}
+                            className={`${btnIcon} text-slate-400 hover:text-indigo-600 hover:bg-indigo-50`}
+                            title="Editar lote"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => onDeleteLote(l)}
+                            disabled={inactive}
+                            className={`${btnIcon} ${inactive ? 'cursor-not-allowed text-slate-300' : 'text-slate-400 hover:text-red-600 hover:bg-red-50'}`}
+                            title="Dar de baja lote"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </div>
                       <div className="flex gap-4 mt-2 text-xs text-slate-500">
                         <span>Vence: <strong className="text-slate-700">{l.fecha_vencimiento_display}</strong></span>
@@ -183,7 +207,7 @@ export default function DetailPanel({
                       </div>
                       {l.precio_compra_unitario && <p className="text-xs text-slate-400 mt-1">Costo: L {Number(l.precio_compra_unitario).toFixed(4)}/u</p>}
                     </div>
-                  ))}
+                  );})}
                   {lotesDetalle.length === 0 && (
                     <div className="py-10 text-center">
                       <Layers className="w-8 h-8 text-slate-200 mx-auto mb-2" />

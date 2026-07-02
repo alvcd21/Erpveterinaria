@@ -345,6 +345,8 @@ export const ConsultorioService = {
     request<ConsultorioEvento>(`/consultorio/pacientes/${id}/eventos`, { method: 'POST', body: JSON.stringify(data) }),
   updateEvento: (id: number, data: Partial<ConsultorioEvento>) =>
     request<ConsultorioEvento>(`/consultorio/eventos/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteEvento: (id: number) =>
+    request<{ message: string; id_evento: number }>(`/consultorio/eventos/${id}`, { method: 'DELETE' }),
   uploadAdjunto: (id: number, data: { filename: string; mime: string; size: number; base64: string; tipo?: string; categoria?: string }) =>
     request<any>(`/consultorio/pacientes/${id}/adjuntos`, { method: 'POST', body: JSON.stringify(data) }),
 };
@@ -1103,6 +1105,8 @@ export const MedicamentosService = {
     return request<LoteMedicamento[]>(`/medicamentos/${id}/lotes${qs}`);
   },
   createLote: (id: string, data: any) => request<{ id_lote: number }>(`/medicamentos/${id}/lotes`, { method: 'POST', body: JSON.stringify(data) }),
+  updateLote: (id: number, data: any) => request(`/lotes/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteLote: (id: number, motivo?: string) => request(`/lotes/${id}`, { method: 'DELETE', body: JSON.stringify({ motivo }) }),
 
   getImagenes: (id: string) => request<ImagenMedicamento[]>(`/medicamentos/${id}/imagenes`),
   createImagen: (id: string, data: Partial<ImagenMedicamento>) => request<{ id_imagen: number }>(`/medicamentos/${id}/imagenes`, { method: 'POST', body: JSON.stringify(data) }),

@@ -14,10 +14,11 @@ function registerRoutes(router) {
 
             const params = [req.tenantId];
             let where = `WHERE m.activo = TRUE AND m.tenant_id = $1`;
+            let stockSucursalFilter = '';
 
             if (sucursalId && include_zero_stock !== '1') {
                 params.push(sucursalId);
-                where += ` AND (l.id_sucursal = $${params.length} OR l.id_sucursal IS NULL)`;
+                stockSucursalFilter = `AND (l.id_sucursal = $${params.length} OR l.id_sucursal IS NULL)`;
             }
             if (q) {
                 const esc = String(q).substring(0, 100).replace(/[\\%_]/g, '\\$&');
@@ -27,6 +28,34 @@ function registerRoutes(router) {
             }
 
             const result = await pool.query(`
+                WITH stock_resumen AS (
+                    SELECT
+                        l.id_medicamento,
+                        COALESCE(SUM(l.cantidad_actual), 0) AS stock
+                    FROM lotes_medicamento l
+                    WHERE l.tenant_id = $1
+                      AND l.estado = 'Activo'
+                      AND l.cantidad_actual > 0
+                      ${stockSucursalFilter}
+                    GROUP BY l.id_medicamento
+                ),
+                presentaciones_resumen AS (
+                    SELECT
+                        pv.id_medicamento,
+                        json_agg(jsonb_build_object(
+                            'id_presentacion',     pv.id_presentacion,
+                            'nombre',              pv.nombre,
+                            'factor',              pv.factor_conversion,
+                            'precio_venta',        pv.precio_venta,
+                            'precio_tercera_edad', COALESCE(pv.precio_tercera_edad, ROUND(pv.precio_venta * 0.75, 2)),
+                            'codigo_barras',       pv.codigo_barras_presentacion
+                        ) ORDER BY pv.nombre) AS presentaciones
+                    FROM presentaciones_venta pv
+                    WHERE pv.tenant_id = $1
+                      AND pv.es_unidad_venta = TRUE
+                      AND pv.activo = TRUE
+                    GROUP BY pv.id_medicamento
+                )
                 SELECT
                     m.codigo,
                     m.nombre_generico    AS "nombreGenerico",
@@ -38,30 +67,27 @@ function registerRoutes(router) {
                     m.advertencias,
                     ct.nombre            AS categoria,
                     ff.nombre            AS "formaFarmaceutica",
-                    COALESCE(SUM(l.cantidad_actual), 0) AS stock,
-                    MAX(mi.url_imagen)    AS "urlImagen",
-                    MAX(mi.imagen_base64) AS "imagenBase64",
-                    MAX(mi.r2_key)        AS "r2Key",
-                    json_agg(DISTINCT jsonb_build_object(
-                        'id_presentacion',     pv.id_presentacion,
-                        'nombre',              pv.nombre,
-                        'factor',              pv.factor_conversion,
-                        'precio_venta',        pv.precio_venta,
-                        'precio_tercera_edad', COALESCE(pv.precio_tercera_edad, ROUND(pv.precio_venta * 0.75, 2)),
-                        'codigo_barras',       pv.codigo_barras_presentacion
-                    )) FILTER (WHERE pv.id_presentacion IS NOT NULL AND pv.es_unidad_venta = TRUE AND pv.activo = TRUE)
-                        AS presentaciones
+                    COALESCE(sr.stock, 0) AS stock,
+                    mi.url_imagen    AS "urlImagen",
+                    mi.imagen_base64 AS "imagenBase64",
+                    mi.r2_key        AS "r2Key",
+                    COALESCE(pr.presentaciones, '[]'::json) AS presentaciones
                 FROM medicamentos m
                 LEFT JOIN categorias_terapeuticas ct ON m.id_categoria = ct.id_categoria AND ct.tenant_id = $1
                 LEFT JOIN formas_farmaceuticas ff    ON m.id_forma     = ff.id_forma AND ff.tenant_id = $1
-                LEFT JOIN lotes_medicamento l
-                    ON m.codigo = l.id_medicamento AND l.estado = 'Activo' AND l.cantidad_actual > 0 AND l.tenant_id = $1
-                LEFT JOIN presentaciones_venta pv    ON m.codigo = pv.id_medicamento AND pv.tenant_id = $1
-                LEFT JOIN medicamento_imagenes mi    ON m.codigo = mi.id_medicamento AND mi.es_principal = TRUE AND mi.tenant_id = $1
+                LEFT JOIN stock_resumen sr ON sr.id_medicamento = m.codigo
+                LEFT JOIN presentaciones_resumen pr ON pr.id_medicamento = m.codigo
+                LEFT JOIN LATERAL (
+                    SELECT url_imagen, imagen_base64, r2_key
+                    FROM medicamento_imagenes mi
+                    WHERE mi.id_medicamento = m.codigo
+                      AND mi.es_principal = TRUE
+                      AND mi.tenant_id = $1
+                    ORDER BY id_imagen DESC
+                    LIMIT 1
+                ) mi ON TRUE
                 ${where}
-                GROUP BY m.codigo, m.nombre_generico, m.nombre_comercial, m.concentracion,
-                         m.tipo_isv, m.requiere_receta, m.es_controlado, m.advertencias, ct.nombre, ff.nombre
-                ${include_zero_stock === '1' ? '' : 'HAVING COALESCE(SUM(l.cantidad_actual), 0) > 0'}
+                ${include_zero_stock === '1' ? '' : 'AND COALESCE(sr.stock, 0) > 0'}
                 ORDER BY m.nombre_generico
                 LIMIT 200
             `, params);
@@ -136,7 +162,9 @@ function registerRoutes(router) {
                 JOIN medicamentos m ON m.codigo = l.id_medicamento AND m.tenant_id = l.tenant_id
                 LEFT JOIN proveedores p ON l.id_proveedor = p.codProveedor AND p.tenant_id = l.tenant_id
                 WHERE l.tenant_id = $1 ${sucursalFilter}
-                ORDER BY l.fecha_vencimiento ASC, l.fecha_ingreso DESC
+                ORDER BY CASE WHEN l.estado = 'Activo' THEN 0 ELSE 1 END,
+                         l.fecha_vencimiento ASC,
+                         l.fecha_ingreso DESC
             `, params);
 
             res.json(r.rows);

@@ -6,7 +6,7 @@ import { ConsultorioBusquedaItem, ConsultorioEvento, ConsultorioPacienteDetalle,
 import {
   ChevronLeft, ChevronRight, PawPrint,
   FileDown, Plus, Printer, RefreshCw, Search, Send,
-  Users, X,
+  Users, X, Pencil, Trash2,
 } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { ClinicalHistoryExportModal, printClinicalEvent } from '../components/consultorio/ClinicalHistoryExportModal';
@@ -30,6 +30,15 @@ type EventForm = {
   adjuntos: ClinicalAttachment[];
 };
 
+// Convierte una fecha del backend al formato de <input type="datetime-local"> (hora local).
+function toLocalInput(v?: string): string {
+  if (!v) return nowLocal();
+  const d = new Date(v);
+  if (isNaN(d.getTime())) return nowLocal();
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
 export default function Expediente() {
   const { idPaciente } = useParams();
   const navigate = useNavigate();
@@ -43,6 +52,7 @@ export default function Expediente() {
   const [loadingSearch, setLoadingSearch] = useState(false);
   const [loadingRecord, setLoadingRecord] = useState(false);
   const [modal, setModal] = useState<EventForm | null>(null);
+  const [editingId, setEditingId] = useState<number | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
 
   const patient = detail?.paciente;
@@ -92,6 +102,7 @@ export default function Expediente() {
   const openCreate = (tipo: ConsultorioTipo = active === 'historia' ? 'consulta' : active) => {
     if (!patient) return;
     const mod = moduleFor(tipo);
+    setEditingId(null);
     setModal({
       tipo,
       fecha_evento: nowLocal(),
@@ -104,26 +115,63 @@ export default function Expediente() {
     });
   };
 
+  const openEdit = (item: ConsultorioEvento) => {
+    if (!patient || !item?.id_evento) return;
+    setEditingId(item.id_evento);
+    setModal({
+      tipo: item.tipo,
+      fecha_evento: toLocalInput(item.fecha_evento),
+      titulo: item.titulo || moduleFor(item.tipo).label,
+      resumen: item.resumen || '',
+      detalle: (item as any).detalle || '',
+      enviar_correo: false,
+      payload: (item.payload && typeof item.payload === 'object') ? item.payload : {},
+      adjuntos: Array.isArray(item.adjuntos) ? item.adjuntos as ClinicalAttachment[] : [],
+    });
+  };
+
+  const deleteEvent = async (item: ConsultorioEvento) => {
+    if (!patient || !item?.id_evento) return;
+    const r = await Swal.fire({
+      title: '¿Eliminar este registro?',
+      text: 'Esta acción no se puede deshacer.',
+      icon: 'warning', showCancelButton: true,
+      confirmButtonText: 'Eliminar', confirmButtonColor: '#dc2626', cancelButtonText: 'Cancelar',
+    });
+    if (!r.isConfirmed) return;
+    try {
+      await ConsultorioService.deleteEvento(item.id_evento);
+      await loadPatient(patient.id_paciente, active, page, q);
+      Swal.fire({ icon: 'success', title: 'Registro eliminado', timer: 1200, showConfirmButton: false });
+    } catch (err: any) {
+      Swal.fire('Error', err.message || 'No se pudo eliminar el registro', 'error');
+    }
+  };
+
   const saveEvent = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!modal || !patient) return;
     const payload = modal.payload || {};
     const resumen = modal.resumen || payloadSummary(modal.tipo, payload);
     const detalle = modal.detalle || payload.contenido || payload.descripcion || payload.plan || payload.notas || payload.observaciones || '';
+    const data = {
+      tipo: modal.tipo,
+      titulo: modal.titulo,
+      fecha_evento: modal.fecha_evento,
+      resumen,
+      detalle,
+      payload,
+      adjuntos: modal.adjuntos || [],
+      enviar_correo: modal.enviar_correo,
+    };
+    const editing = editingId;
     try {
-      await ConsultorioService.createEvento(patient.id_paciente, {
-        tipo: modal.tipo,
-        titulo: modal.titulo,
-        fecha_evento: modal.fecha_evento,
-        resumen,
-        detalle,
-        payload,
-        adjuntos: modal.adjuntos || [],
-        enviar_correo: modal.enviar_correo,
-      });
+      if (editing) await ConsultorioService.updateEvento(editing, data);
+      else await ConsultorioService.createEvento(patient.id_paciente, data);
       setModal(null);
-      await loadPatient(patient.id_paciente, active, 0, q);
-      Swal.fire({ icon: 'success', title: 'Registro guardado', timer: 1300, showConfirmButton: false });
+      setEditingId(null);
+      await loadPatient(patient.id_paciente, active, editing ? page : 0, q);
+      Swal.fire({ icon: 'success', title: editing ? 'Registro actualizado' : 'Registro guardado', timer: 1300, showConfirmButton: false });
     } catch (err: any) {
       Swal.fire('Error', err.message || 'No se pudo guardar el registro clínico', 'error');
     }
@@ -178,7 +226,7 @@ export default function Expediente() {
                 <EmptyState label={activeModule.label} onCreate={activeModule.creatable ? () => openCreate() : undefined} />
               ) : (
                 <div className="space-y-3">
-                  {items.map(item => <TimelineCard key={`${item.source || 'event'}-${item.id_evento || item.id}`} item={item} patient={patient} />)}
+                  {items.map(item => <TimelineCard key={`${item.source || 'event'}-${item.id_evento || item.id}`} item={item} patient={patient} onEdit={openEdit} onDelete={deleteEvent} />)}
                 </div>
               )}
             </div>
@@ -195,7 +243,7 @@ export default function Expediente() {
       )}
 
       {modal && patient && (
-        <EventModal form={modal} patient={patient} setForm={setModal} onClose={() => setModal(null)} onSubmit={saveEvent} />
+        <EventModal form={modal} patient={patient} editing={!!editingId} setForm={setModal} onClose={() => { setModal(null); setEditingId(null); }} onSubmit={saveEvent} />
       )}
       {exportOpen && patient && (
         <ClinicalHistoryExportModal patient={patient} onClose={() => setExportOpen(false)} />
@@ -306,7 +354,10 @@ function PatientSidebar({ patient, conteos, active, onChange }: { patient: any; 
   );
 }
 
-function TimelineCard({ item, patient }: { item: ConsultorioEvento; patient?: Paciente }) {
+function TimelineCard({ item, patient, onEdit, onDelete }: {
+  item: ConsultorioEvento; patient?: Paciente;
+  onEdit?: (item: ConsultorioEvento) => void; onDelete?: (item: ConsultorioEvento) => void;
+}) {
   const mod = moduleFor(item.tipo);
   const Icon = mod.icon;
   const payload = item.payload || {};
@@ -341,6 +392,16 @@ function TimelineCard({ item, patient }: { item: ConsultorioEvento; patient?: Pa
               <Printer size={13} /> Imprimir
             </button>
           )}
+          {item.id_evento && onEdit && (
+            <button type="button" onClick={() => onEdit(item)} className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50" title="Editar">
+              <Pencil size={13} /> Editar
+            </button>
+          )}
+          {item.id_evento && onDelete && (
+            <button type="button" onClick={() => onDelete(item)} className="inline-flex items-center gap-1.5 rounded-full border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50" title="Eliminar">
+              <Trash2 size={13} /> Eliminar
+            </button>
+          )}
         </div>
       </div>
       {(item.resumen || item.detalle) && <p className="mt-3 text-sm text-slate-600 whitespace-pre-wrap">{item.resumen || item.detalle}</p>}
@@ -356,8 +417,8 @@ function TimelineCard({ item, patient }: { item: ConsultorioEvento; patient?: Pa
   );
 }
 
-function EventModal({ form, patient, setForm, onClose, onSubmit }: {
-  form: EventForm; patient: Paciente; setForm: (f: EventForm) => void; onClose: () => void; onSubmit: (e: React.FormEvent) => void;
+function EventModal({ form, patient, editing, setForm, onClose, onSubmit }: {
+  form: EventForm; patient: Paciente; editing?: boolean; setForm: (f: EventForm) => void; onClose: () => void; onSubmit: (e: React.FormEvent) => void;
 }) {
   const mod = moduleFor(form.tipo);
   const Icon = mod.icon;
@@ -370,7 +431,7 @@ function EventModal({ form, patient, setForm, onClose, onSubmit }: {
     <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
       <form onSubmit={onSubmit} className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[92vh] overflow-auto">
         <div className="sticky top-0 z-10 bg-white border-b border-slate-100 px-6 py-5 flex items-center justify-between">
-          <h3 className="font-bold text-xl text-slate-800 flex items-center gap-2"><Icon className={mod.accent} size={22} /> Registro de {mod.label} - {patient.nombre}</h3>
+          <h3 className="font-bold text-xl text-slate-800 flex items-center gap-2"><Icon className={mod.accent} size={22} /> {editing ? 'Editar' : 'Registro de'} {mod.label} - {patient.nombre}</h3>
           <button type="button" onClick={onClose} className="p-2 rounded-xl hover:bg-slate-100 text-slate-400"><X size={20} /></button>
         </div>
         <div className="p-6 space-y-5">
