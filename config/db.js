@@ -35,12 +35,15 @@ const getLocalTimestamp = () => {
             timeZone: 'America/Tegucigalpa',
             year: 'numeric', month: '2-digit', day: '2-digit',
             hour: '2-digit', minute: '2-digit', second: '2-digit',
-            hour12: false
+            hour12: false, hourCycle: 'h23'
         };
         const formatter = new Intl.DateTimeFormat('en-US', options);
         const parts = formatter.formatToParts(now);
         const getPart = (type) => parts.find(p => p.type === type).value;
-        return `${getPart('year')}-${getPart('month')}-${getPart('day')} ${getPart('hour')}:${getPart('minute')}:${getPart('second')}`;
+        // Algunos motores ICU devuelven "24" en vez de "00" para la medianoche con
+        // hour12:false, lo cual Postgres rechaza (date/time field value out of range).
+        const hour = getPart('hour') === '24' ? '00' : getPart('hour');
+        return `${getPart('year')}-${getPart('month')}-${getPart('day')} ${hour}:${getPart('minute')}:${getPart('second')}`;
     } catch (err) {
         const d = new Date();
         d.setHours(d.getHours() - 6);
