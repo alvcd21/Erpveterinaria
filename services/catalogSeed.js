@@ -46,6 +46,21 @@ const DEFAULT_CATEGORIAS = [
     'Otros',
 ];
 
+const DEFAULT_VIAS = [
+    'Oral',
+    'Intravenosa (IV)',
+    'Intramuscular (IM)',
+    'Subcutánea (SC)',
+    'Tópica',
+    'Oftálmica',
+    'Ótica',
+    'Nasal',
+    'Rectal',
+    'Inhalatoria',
+    'Intraperitoneal',
+    'Intramamaria',
+];
+
 /**
  * Siembra las formas farmacéuticas y categorías terapéuticas por defecto para un
  * tenant. Idempotente (ON CONFLICT sobre el índice único (tenant_id, nombre)).
@@ -69,6 +84,14 @@ async function seedCatalogosForTenant(client, tenantId) {
             [nombre, tenantId]
         );
     }
+    for (const nombre of DEFAULT_VIAS) {
+        await client.query(
+            `INSERT INTO vias_administracion (nombre, tenant_id)
+             VALUES ($1, $2)
+             ON CONFLICT (tenant_id, nombre) DO NOTHING`,
+            [nombre, tenantId]
+        );
+    }
 }
 
-module.exports = { DEFAULT_FORMAS, DEFAULT_CATEGORIAS, seedCatalogosForTenant };
+module.exports = { DEFAULT_FORMAS, DEFAULT_CATEGORIAS, DEFAULT_VIAS, seedCatalogosForTenant };

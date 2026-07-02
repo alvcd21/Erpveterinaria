@@ -72,6 +72,39 @@ function registerRoutes(router) {
         } catch (e) { handleDbError(res, e); }
     });
 
+    router.get('/vias-administracion', authenticateToken, async (req, res) => {
+        try {
+            const r = await pool.query(
+                `SELECT * FROM vias_administracion WHERE activo = TRUE AND tenant_id = $1 ORDER BY nombre`,
+                [req.tenantId]
+            );
+            res.json(r.rows);
+        } catch (e) { handleDbError(res, e); }
+    });
+
+    router.post('/vias-administracion', authenticateToken, async (req, res) => {
+        try {
+            const { nombre } = req.body;
+            if (!nombre) return res.status(400).json({ error: 'nombre es requerido' });
+            const r = await pool.query(
+                `INSERT INTO vias_administracion (nombre, tenant_id) VALUES ($1,$2) RETURNING id_via`,
+                [nombre, req.tenantId]
+            );
+            res.status(201).json({ message: 'Vía creada', id_via: r.rows[0].id_via });
+        } catch (e) { handleDbError(res, e); }
+    });
+
+    router.put('/vias-administracion/:id', authenticateToken, async (req, res) => {
+        try {
+            const { nombre, activo } = req.body;
+            await pool.query(
+                `UPDATE vias_administracion SET nombre=$1, activo=$2 WHERE id_via=$3 AND tenant_id=$4`,
+                [nombre, activo !== false, req.params.id, req.tenantId]
+            );
+            res.json({ message: 'Vía actualizada' });
+        } catch (e) { handleDbError(res, e); }
+    });
+
     router.get('/principios-activos', authenticateToken, async (req, res) => {
         try {
             const { q } = req.query;

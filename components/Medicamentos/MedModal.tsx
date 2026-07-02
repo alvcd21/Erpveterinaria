@@ -4,7 +4,7 @@ import {
   Camera, FlaskConical, ShieldCheck, Sparkles,
 } from 'lucide-react';
 import {
-  Medicamento, FormaFarmaceutica, CategoriaTerapeutica,
+  Medicamento, FormaFarmaceutica, CategoriaTerapeutica, ViaAdministracion,
   AIMedicationAnalysisResult, AIMedicationImagePayload, AIFieldSuggestion,
 } from '../../types';
 import { AIService } from '../../services/api';
@@ -25,6 +25,7 @@ interface Props {
   form: Partial<Medicamento>;
   formas: FormaFarmaceutica[];
   categorias: CategoriaTerapeutica[];
+  vias?: ViaAdministracion[];
   onChange: (form: Partial<Medicamento>) => void;
   onSave: () => void;
   onClose: () => void;
@@ -236,7 +237,7 @@ function ImageDropZone({ images, loading, onAdd, onRemove }: {
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export default function MedModal({ show, editingId, form, formas, categorias, onChange, onSave, onClose, onAIImagesReady }: Props) {
+export default function MedModal({ show, editingId, form, formas, categorias, vias = [], onChange, onSave, onClose, onAIImagesReady }: Props) {
   const [step, setStep]       = useState<StepNum>(1);
   const [images, setImages]   = useState<StepImage[]>([]);
   const [aiLoading, setAiLoading] = useState(false);
@@ -322,7 +323,9 @@ export default function MedModal({ show, editingId, form, formas, categorias, on
 
   const formaOptions = formas.map(f => ({ value: f.id_forma, label: f.nombre }));
   const catOptions   = categorias.map(c => ({ value: c.id_categoria, label: c.nombre }));
-  const viaOptions   = VIAS.map(v => ({ value: v, label: v }));
+  const viaOptions   = (vias && vias.length > 0)
+    ? vias.map(v => ({ value: v.nombre, label: v.nombre }))
+    : VIAS.map(v => ({ value: v, label: v }));
   const almOptions   = ALMACENAMIENTO.map(a => ({ value: a, label: a }));
 
   const STEPS = [

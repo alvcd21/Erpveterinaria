@@ -413,6 +413,12 @@ export interface FormaFarmaceutica {
   activo: boolean;
 }
 
+export interface ViaAdministracion {
+  id_via: number;
+  nombre: string;
+  activo: boolean;
+}
+
 export interface PresentacionVenta {
   id_presentacion: number;
   id_medicamento: string;

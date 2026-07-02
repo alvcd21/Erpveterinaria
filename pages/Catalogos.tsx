@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { CatalogoService } from '../services/api';
-import { FormaFarmaceutica, CategoriaTerapeutica } from '../types';
-import { FlaskConical, Tags, Plus, Edit2, Trash2, RefreshCw } from 'lucide-react';
+import { FormaFarmaceutica, CategoriaTerapeutica, ViaAdministracion } from '../types';
+import { FlaskConical, Tags, Syringe, Plus, Edit2, Trash2, RefreshCw } from 'lucide-react';
 import Swal from 'sweetalert2';
 
 const Catalogos: React.FC = () => {
@@ -9,15 +9,17 @@ const Catalogos: React.FC = () => {
   const [categorias, setCategorias] = useState<CategoriaTerapeutica[]>([]);
   const [loading, setLoading] = useState(false);
 
+  const [vias, setVias] = useState<ViaAdministracion[]>([]);
   const [nuevaForma, setNuevaForma] = useState({ nombre: '', unidad_base: '' });
   const [nuevaCategoria, setNuevaCategoria] = useState('');
+  const [nuevaVia, setNuevaVia] = useState('');
   const [saving, setSaving] = useState(false);
 
   const cargar = useCallback(async () => {
     setLoading(true);
     try {
-      const [f, c] = await Promise.all([CatalogoService.getFormas(), CatalogoService.getCategorias()]);
-      setFormas(f); setCategorias(c);
+      const [f, c, v] = await Promise.all([CatalogoService.getFormas(), CatalogoService.getCategorias(), CatalogoService.getVias()]);
+      setFormas(f); setCategorias(c); setVias(v);
     } catch (e: any) {
       Swal.fire('Error', e?.message || 'No se pudieron cargar los catálogos', 'error');
     } finally { setLoading(false); }
@@ -76,6 +78,32 @@ const Catalogos: React.FC = () => {
     } catch (e: any) { Swal.fire('Error', e?.message || 'No se pudo actualizar', 'error'); }
   };
 
+  const crearVia = async () => {
+    if (!nuevaVia.trim()) { Swal.fire('Faltan datos', 'La vía necesita un nombre.', 'warning'); return; }
+    setSaving(true);
+    try {
+      await CatalogoService.createVia({ nombre: nuevaVia.trim() });
+      setNuevaVia('');
+      await cargar();
+    } catch (e: any) {
+      Swal.fire('Error', e?.message || 'No se pudo crear la vía', 'error');
+    } finally { setSaving(false); }
+  };
+
+  const editarVia = async (v: ViaAdministracion) => {
+    const { value } = await Swal.fire({
+      title: 'Editar vía de administración',
+      input: 'text', inputValue: v.nombre,
+      showCancelButton: true, confirmButtonText: 'Guardar', cancelButtonText: 'Cancelar',
+      inputValidator: (val) => (!val.trim() ? 'El nombre es requerido' : undefined),
+    });
+    if (!value) return;
+    try {
+      await CatalogoService.updateVia(v.id_via, { nombre: value.trim(), activo: true });
+      await cargar();
+    } catch (e: any) { Swal.fire('Error', e?.message || 'No se pudo actualizar', 'error'); }
+  };
+
   const editarCategoria = async (c: CategoriaTerapeutica) => {
     const { value } = await Swal.fire({
       title: 'Editar categoría terapéutica',
@@ -90,7 +118,7 @@ const Catalogos: React.FC = () => {
     } catch (e: any) { Swal.fire('Error', e?.message || 'No se pudo actualizar', 'error'); }
   };
 
-  const desactivar = async (tipo: 'forma' | 'categoria', item: any) => {
+  const desactivar = async (tipo: 'forma' | 'categoria' | 'via', item: any) => {
     const nombre = item.nombre;
     const r = await Swal.fire({
       title: `¿Desactivar "${nombre}"?`,
@@ -101,7 +129,8 @@ const Catalogos: React.FC = () => {
     if (!r.isConfirmed) return;
     try {
       if (tipo === 'forma') await CatalogoService.updateForma(item.id_forma, { nombre: item.nombre, unidad_base: item.unidad_base, activo: false });
-      else await CatalogoService.updateCategoria(item.id_categoria, { nombre: item.nombre, activo: false });
+      else if (tipo === 'categoria') await CatalogoService.updateCategoria(item.id_categoria, { nombre: item.nombre, activo: false });
+      else await CatalogoService.updateVia(item.id_via, { nombre: item.nombre, activo: false });
       await cargar();
     } catch (e: any) { Swal.fire('Error', e?.message || 'No se pudo desactivar', 'error'); }
   };
@@ -113,14 +142,14 @@ const Catalogos: React.FC = () => {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-slate-800">Catálogos de Inventario</h1>
-          <p className="text-sm text-slate-500">Formas farmacéuticas y categorías terapéuticas usadas al registrar medicamentos.</p>
+          <p className="text-sm text-slate-500">Formas farmacéuticas, categorías terapéuticas y vías de administración usadas al registrar medicamentos.</p>
         </div>
         <button onClick={cargar} className="flex items-center gap-2 px-3 py-2 text-sm text-slate-600 hover:text-indigo-600">
           <RefreshCw size={16} className={loading ? 'animate-spin' : ''} /> Actualizar
         </button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {/* Formas farmacéuticas */}
         <section className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
           <div className="flex items-center gap-2 px-4 py-3 border-b border-slate-100 bg-slate-50">
@@ -178,6 +207,34 @@ const Catalogos: React.FC = () => {
               </li>
             ))}
             {categorias.length === 0 && !loading && <li className="px-4 py-6 text-center text-sm text-slate-400">No hay categorías registradas.</li>}
+          </ul>
+        </section>
+
+        {/* Vías de administración */}
+        <section className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="flex items-center gap-2 px-4 py-3 border-b border-slate-100 bg-slate-50">
+            <Syringe size={18} className="text-indigo-600" />
+            <h2 className="font-semibold text-slate-700">Vías de administración</h2>
+            <span className="ml-auto text-xs text-slate-400">{vias.length}</span>
+          </div>
+          <div className="p-4 flex gap-2 border-b border-slate-100">
+            <input className={inp} placeholder="Nombre (ej. Oral, IV)" value={nuevaVia}
+              onChange={e => setNuevaVia(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && crearVia()} />
+            <button onClick={crearVia} disabled={saving}
+              className="flex items-center justify-center gap-1 px-3 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 disabled:opacity-50 shrink-0">
+              <Plus size={16} /> Agregar
+            </button>
+          </div>
+          <ul className="divide-y divide-slate-100 max-h-[420px] overflow-auto">
+            {vias.map(v => (
+              <li key={v.id_via} className="flex items-center gap-2 px-4 py-2.5 hover:bg-slate-50">
+                <span className="flex-1 text-sm text-slate-700">{v.nombre}</span>
+                <button onClick={() => editarVia(v)} className="p-1.5 text-slate-400 hover:text-indigo-600" title="Editar"><Edit2 size={15} /></button>
+                <button onClick={() => desactivar('via', v)} className="p-1.5 text-slate-400 hover:text-red-600" title="Desactivar"><Trash2 size={15} /></button>
+              </li>
+            ))}
+            {vias.length === 0 && !loading && <li className="px-4 py-6 text-center text-sm text-slate-400">No hay vías registradas.</li>}
           </ul>
         </section>
       </div>

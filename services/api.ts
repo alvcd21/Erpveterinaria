@@ -1073,7 +1073,7 @@ export const AIService = {
 import type {
   Medicamento, PresentacionVenta, LoteMedicamento, ImagenMedicamento,
   AlertaVencimiento, StockCritico, Sucursal,
-  CategoriaTerapeutica, FormaFarmaceutica
+  CategoriaTerapeutica, FormaFarmaceutica, ViaAdministracion
 } from '../types';
 
 export const MedicamentosService = {
@@ -1129,6 +1129,9 @@ export const CatalogoService = {
   getFormas: () => request<FormaFarmaceutica[]>('/formas-farmaceuticas'),
   createForma: (data: Partial<FormaFarmaceutica>) => request('/formas-farmaceuticas', { method: 'POST', body: JSON.stringify(data) }),
   updateForma: (id: number, data: any) => request(`/formas-farmaceuticas/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  getVias: () => request<ViaAdministracion[]>('/vias-administracion'),
+  createVia: (data: Partial<ViaAdministracion>) => request('/vias-administracion', { method: 'POST', body: JSON.stringify(data) }),
+  updateVia: (id: number, data: any) => request(`/vias-administracion/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   getPrincipios: (q?: string) => request<any[]>(`/principios-activos${q ? `?q=${encodeURIComponent(q)}` : ''}`),
 };
 

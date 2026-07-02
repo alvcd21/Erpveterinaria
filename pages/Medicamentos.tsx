@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { MedicamentosService, CatalogoService, InventoryService, AIService } from '../services/api';
-import { Medicamento, PresentacionVenta, LoteMedicamento, ImagenMedicamento, CategoriaTerapeutica, FormaFarmaceutica, AIMedicationImagePayload } from '../types';
+import { Medicamento, PresentacionVenta, LoteMedicamento, ImagenMedicamento, CategoriaTerapeutica, FormaFarmaceutica, ViaAdministracion, AIMedicationImagePayload } from '../types';
 import { Search, Plus, Pill, AlertTriangle, RefreshCw, Filter, Boxes } from 'lucide-react';
 import Swal from 'sweetalert2';
 
@@ -20,6 +20,7 @@ export default function Medicamentos() {
   const [medicamentos, setMedicamentos] = useState<Medicamento[]>([]);
   const [categorias, setCategorias]     = useState<CategoriaTerapeutica[]>([]);
   const [formas, setFormas]             = useState<FormaFarmaceutica[]>([]);
+  const [vias, setVias]                 = useState<ViaAdministracion[]>([]);
   const [proveedores, setProveedores]   = useState<any[]>([]);
   const [allLotes, setAllLotes]         = useState<any[]>([]);
   const [alertasVenc, setAlertasVenc]   = useState<any[]>([]);
@@ -56,10 +57,10 @@ export default function Medicamentos() {
 
   /* ── Data loading ────────────────────────────────────────── */
   const loadCatalogo = useCallback(async () => {
-    const [cats, frms, provs] = await Promise.all([
-      CatalogoService.getCategorias(), CatalogoService.getFormas(), InventoryService.getProveedores(),
+    const [cats, frms, vs, provs] = await Promise.all([
+      CatalogoService.getCategorias(), CatalogoService.getFormas(), CatalogoService.getVias(), InventoryService.getProveedores(),
     ]);
-    setCategorias(cats); setFormas(frms); setProveedores(provs);
+    setCategorias(cats); setFormas(frms); setVias(vs); setProveedores(provs);
   }, []);
 
   const loadMedicamentos = useCallback(async () => {
@@ -452,7 +453,7 @@ export default function Medicamentos() {
         </div>
       </div>
 
-      <MedModal show={showMedModal} editingId={editingMed} form={medForm} formas={formas} categorias={categorias}
+      <MedModal show={showMedModal} editingId={editingMed} form={medForm} formas={formas} categorias={categorias} vias={vias}
         onChange={setMedForm} onSave={saveMed} onClose={() => setShowMedModal(false)}
         onAIImagesReady={setPendingAIImages} />
 

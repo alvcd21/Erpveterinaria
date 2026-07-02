@@ -99,6 +99,7 @@ const PERMISSION_RULES = [
     { pattern: /^\/api\/presentaciones\b/,             permission: 'VER_INVENTARIO'        },
     { pattern: /^\/api\/categorias-terapeuticas\b/,    permission: 'VER_INVENTARIO'        },
     { pattern: /^\/api\/formas-farmaceuticas\b/,       permission: 'VER_INVENTARIO'        },
+    { pattern: /^\/api\/vias-administracion\b/,        permission: 'VER_INVENTARIO'        },
     { pattern: /^\/api\/principios-activos\b/,         permission: 'VER_INVENTARIO'        },
     { pattern: /^\/api\/inventory\b/,                  permission: 'VER_INVENTARIO'        },
     { pattern: /^\/api\/transferencias\b/,             permission: 'VER_INVENTARIO'        },
