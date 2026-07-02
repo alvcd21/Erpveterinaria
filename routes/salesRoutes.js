@@ -156,6 +156,37 @@ router.get('/ventas/historial', authenticateToken, async (req, res) => {
     } catch(e) { handleDbError(res, e); }
 });
 
+// Historial de ventas por rango de fecha (para reimpresión de documentos).
+router.get('/ventas/buscar', authenticateToken, async (req, res) => {
+    try {
+        const { desde, hasta, q } = req.query;
+        const hoy = getLocalTimestamp().substring(0, 10);
+        const params = [req.tenantId, desde || hoy, hasta || hoy];
+        let filtro = '';
+        if (q) {
+            params.push(`%${q}%`);
+            filtro = ` AND (v.codVenta ILIKE $4 OR v.numero_factura ILIKE $4 OR v.identidadCliente ILIKE $4 OR (c.nombre || ' ' || COALESCE(c.apellido,'')) ILIKE $4)`;
+        }
+        const result = await pool.query(`
+            SELECT v.codVenta as "codVenta", v.numero_factura as "numeroFactura",
+                   COALESCE(v.numero_factura, v.codVenta) as "numeroDocumento",
+                   COALESCE(v.tipo_documento, 'factura_fiscal') as "tipoDocumento",
+                   (COALESCE(v.tipo_documento, 'factura_fiscal') = 'factura_fiscal') as "documentoFiscal",
+                   v.fecha, v.total, v.estado, v.tipoCompra as "tipoCompra",
+                   v.identidadCliente as "identidadCliente",
+                   COALESCE(c.nombre || ' ' || COALESCE(c.apellido,''), 'Consumidor Final') as "nombreCliente"
+            FROM ventas v
+            LEFT JOIN clientes c ON v.identidadCliente = c.identidad AND c.tenant_id = $1
+            WHERE v.tenant_id = $1
+              AND TO_CHAR(v.fecha, 'YYYY-MM-DD') BETWEEN $2 AND $3
+              ${filtro}
+            ORDER BY v.fecha DESC
+            LIMIT 500
+        `, params);
+        res.json(result.rows);
+    } catch(e) { handleDbError(res, e); }
+});
+
 router.get('/ventas/:id', authenticateToken, async (req, res) => {
     try {
         const r = await pool.query(`
@@ -207,6 +238,36 @@ router.get('/ventas/:id/detalles', authenticateToken, async (req, res) => {
 });
 
 // --- COTIZACIONES ---
+// Listado de cotizaciones por rango de fecha / estado (historial).
+router.get('/cotizaciones', authenticateToken, async (req, res) => {
+    try {
+        const { desde, hasta, estado, q } = req.query;
+        const hoy = getLocalTimestamp().substring(0, 10);
+        const params = [req.tenantId, desde || hoy, hasta || hoy];
+        let filtro = '';
+        if (estado) { params.push(estado); filtro += ` AND q.estado = $${params.length}`; }
+        if (q) {
+            params.push(`%${q}%`);
+            filtro += ` AND (q.codigo ILIKE $${params.length} OR q.identidad_cliente ILIKE $${params.length} OR (c.nombre || ' ' || COALESCE(c.apellido,'')) ILIKE $${params.length})`;
+        }
+        const result = await pool.query(`
+            SELECT q.codigo as "codigo", q.fecha, q.total, q.estado,
+                   q.tipo_compra as "tipoCompra", q.valido_hasta as "validoHasta",
+                   q.venta_codigo as "ventaCodigo",
+                   q.identidad_cliente as "identidadCliente",
+                   COALESCE(c.nombre || ' ' || COALESCE(c.apellido,''), 'Consumidor Final') as "nombreCliente"
+            FROM cotizaciones q
+            LEFT JOIN clientes c ON q.identidad_cliente = c.identidad AND c.tenant_id = $1
+            WHERE q.tenant_id = $1
+              AND TO_CHAR(q.fecha, 'YYYY-MM-DD') BETWEEN $2 AND $3
+              ${filtro}
+            ORDER BY q.fecha DESC
+            LIMIT 500
+        `, params);
+        res.json(result.rows);
+    } catch(e) { handleDbError(res, e); }
+});
+
 router.get('/cotizaciones/:id', authenticateToken, async (req, res) => {
     try {
         const r = await pool.query(`
@@ -337,10 +398,30 @@ router.post('/cotizaciones', authenticateToken, async (req, res) => {
     } finally { client.release(); }
 });
 
+const COTIZACION_ESTADOS = new Set(['Emitida', 'Aceptada', 'Vencida', 'Convertida']);
+router.patch('/cotizaciones/:id/estado', authenticateToken, async (req, res) => {
+    try {
+        const { estado } = req.body;
+        if (!COTIZACION_ESTADOS.has(estado)) {
+            return res.status(400).json({ error: `estado inválido: ${estado}` });
+        }
+        const r = await pool.query(
+            `UPDATE cotizaciones SET estado = $1, fecha_actualizacion = NOW()
+             WHERE codigo = $2 AND tenant_id = $3 AND estado <> 'Convertida'
+             RETURNING codigo`,
+            [estado, req.params.id, req.tenantId]
+        );
+        if (!r.rows.length) {
+            return res.status(409).json({ error: 'Cotización no encontrada o ya convertida' });
+        }
+        res.json({ message: 'Estado actualizado', codigo: r.rows[0].codigo, estado });
+    } catch(e) { handleDbError(res, e); }
+});
+
 router.post('/ventas', authenticateToken, async (req, res) => {
     const client = await pool.connect();
     try {
-        const { identidadCliente, tipoCompra, total, detalles, isv, descuento, montoPrima, montoFinanciado, clientMutationId } = req.body;
+        const { identidadCliente, tipoCompra, total, detalles, isv, descuento, montoPrima, montoFinanciado, clientMutationId, codCotizacion } = req.body;
         const { codUsuario } = req.user;
 
         const toSafeNum = (v) => { const n = parseFloat(v); return isFinite(n) && n >= 0 ? n : null; };
@@ -505,6 +586,16 @@ router.post('/ventas', authenticateToken, async (req, res) => {
         }
 
         await updateArqueoBalance(idCajaActual, client, req.tenantId);
+
+        // Si la venta proviene de una cotización, la marca como Convertida (misma transacción).
+        if (codCotizacion) {
+            await client.query(
+                `UPDATE cotizaciones SET estado = 'Convertida', venta_codigo = $1, fecha_actualizacion = NOW()
+                 WHERE codigo = $2 AND tenant_id = $3 AND estado <> 'Convertida'`,
+                [codVenta, codCotizacion, req.tenantId]
+            );
+        }
+
         await client.query('COMMIT');
 
         // Post-commit: create delivery records for cross-branch items (non-transactional)
