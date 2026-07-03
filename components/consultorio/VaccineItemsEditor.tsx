@@ -226,6 +226,9 @@ export function VaccineItemsEditor({ value = [], onChange }: VaccineItemsEditorP
           {items.map((item, idx) => {
             const pres = (item.id_medicamento ? presCache[item.id_medicamento] : []) || [];
             const subtotal = Number(item.precio_unitario || 0) * Number(item.cantidad || 0);
+            // Precio e ISV solo aplican a vacunas del inventario; en las manuales
+            // no se piden (el ISV se define al registrar el producto en inventario).
+            const isInventory = !!item.id_medicamento;
             return (
               <article key={item.id} className="rounded-2xl border border-slate-100 bg-white p-4 shadow-sm">
                 <div className="mb-3 flex items-start justify-between gap-2">
@@ -246,7 +249,7 @@ export function VaccineItemsEditor({ value = [], onChange }: VaccineItemsEditorP
                   </button>
                 </div>
 
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-[1.4fr_88px_120px_120px]">
+                <div className={`grid grid-cols-1 gap-3 ${isInventory ? 'md:grid-cols-[1.4fr_88px_120px_120px]' : 'md:grid-cols-[1fr_120px]'}`}>
                   <label className="block text-xs font-medium text-slate-500">
                     Presentacion
                     {pres.length > 0 ? (
@@ -268,19 +271,23 @@ export function VaccineItemsEditor({ value = [], onChange }: VaccineItemsEditorP
                     <input type="number" min="1" value={item.cantidad || 1} onChange={event => patchItem(item.id, { cantidad: Number(event.target.value || 1) })} className={`${inputCls} mt-1`} />
                   </label>
 
-                  <label className="block text-xs font-medium text-slate-500">
-                    Precio
-                    <input type="number" min="0" step="0.01" value={item.precio_unitario ?? ''} onChange={event => patchItem(item.id, { precio_unitario: event.target.value ? Number(event.target.value) : undefined })} className={`${inputCls} mt-1`} />
-                  </label>
+                  {isInventory && (
+                    <label className="block text-xs font-medium text-slate-500">
+                      Precio
+                      <input type="number" min="0" step="0.01" value={item.precio_unitario ?? ''} onChange={event => patchItem(item.id, { precio_unitario: event.target.value ? Number(event.target.value) : undefined })} className={`${inputCls} mt-1`} />
+                    </label>
+                  )}
 
-                  <label className="block text-xs font-medium text-slate-500">
-                    ISV
-                    <select value={item.tipo_isv || 'exento'} onChange={event => patchItem(item.id, { tipo_isv: event.target.value as VaccineCartItem['tipo_isv'] })} className={`${inputCls} mt-1`}>
-                      <option value="exento">Exento</option>
-                      <option value="15">15%</option>
-                      <option value="18">18%</option>
-                    </select>
-                  </label>
+                  {isInventory && (
+                    <label className="block text-xs font-medium text-slate-500">
+                      ISV
+                      <select value={item.tipo_isv || 'exento'} onChange={event => patchItem(item.id, { tipo_isv: event.target.value as VaccineCartItem['tipo_isv'] })} className={`${inputCls} mt-1`}>
+                        <option value="exento">Exento</option>
+                        <option value="15">15%</option>
+                        <option value="18">18%</option>
+                      </select>
+                    </label>
+                  )}
                 </div>
 
                 <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-[220px_1fr_auto]">
@@ -292,7 +299,7 @@ export function VaccineItemsEditor({ value = [], onChange }: VaccineItemsEditorP
                     Notas
                     <input value={item.notas || ''} onChange={event => patchItem(item.id, { notas: event.target.value })} placeholder="Observacion de esta vacuna" className={`${inputCls} mt-1`} />
                   </label>
-                  <div className="flex items-end justify-end pb-2 text-sm font-semibold text-slate-700">{money(subtotal)}</div>
+                  <div className="flex items-end justify-end pb-2 text-sm font-semibold text-slate-700">{isInventory ? money(subtotal) : ''}</div>
                 </div>
               </article>
             );
