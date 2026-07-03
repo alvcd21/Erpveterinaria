@@ -19,11 +19,11 @@ export default defineConfig({
         'favicon-16.png'
       ],
       manifest: {
-        name: 'SmartCloud ERP',
-        short_name: 'SmartCloud',
-        description: 'Sistema ERP multi-tenant para gestion de clinicas veterinarias',
-        theme_color: '#4f46e5',
-        background_color: '#4f46e5',
+        name: 'VetiCloud',
+        short_name: 'VetiCloud',
+        description: 'VetiCloud - Gestion veterinaria en la nube',
+        theme_color: '#4a90c2',
+        background_color: '#ffffff',
         display: 'standalone',
         scope: '/',
         start_url: '/',
@@ -58,7 +58,15 @@ export default defineConfig({
       workbox: {
         // Pre-cachear todos los assets estaticos
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2,json}'],
+        // El logo fuente no se referencia en runtime; sigue disponible en
+        // /veticloud.png pero no se precachea para no inflar la instalacion.
+        globIgnores: ['**/veticloud.png'],
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
+        // El nuevo service worker toma control de inmediato y borra las cachés
+        // viejas, para que un deploy nuevo no siga sirviendo modulos anteriores.
+        skipWaiting: true,
+        clientsClaim: true,
+        cleanupOutdatedCaches: true,
         // /api/* is intentionally excluded from service-worker caching — the app
         // manages its own tenant-scoped offline cache via IndexedDB (offlineDB).
         // Caching authenticated API responses in the SW would leak tenant data
