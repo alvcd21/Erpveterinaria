@@ -309,8 +309,8 @@ const Clients: React.FC = () => {
       {/* MODAL */}
       {showModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl w-full max-w-5xl shadow-2xl animate-fade-in overflow-hidden">
-            <div className="flex justify-between items-center px-6 py-5 border-b border-slate-100">
+          <div className="bg-white rounded-2xl w-full max-w-5xl shadow-2xl animate-fade-in max-h-[92vh] overflow-y-auto">
+            <div className="sticky top-0 z-10 bg-white flex justify-between items-center px-6 py-5 border-b border-slate-100">
               <div className="flex items-center gap-3">
                 <h3 className="text-xl font-bold text-slate-800">
                   {isEditing ? 'Editar Tutor' : step === 1 ? 'Registro de Tutor' : `Registro de Mascota ${step - 1} de ${pets.length}`}
@@ -413,7 +413,7 @@ const Clients: React.FC = () => {
               </div>
 
 
-              <div className="pt-4 flex gap-3">
+              <div className="sticky bottom-0 bg-white pt-4 pb-1 flex gap-3">
                 <button type="button" onClick={() => { setShowModal(false); setStep(1); }} className="flex-1 px-4 py-3 bg-slate-100 text-slate-600 font-bold rounded-xl hover:bg-slate-200">Cancelar</button>
                 <button type="submit" className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 shadow-lg shadow-indigo-600/20">
                   {isEditing ? 'Actualizar' : createdTutor ? <>Guardar y continuar <ArrowRight size={18} /></> : <>Siguiente: mascotas <ArrowRight size={18} /></>}
@@ -431,7 +431,7 @@ const Clients: React.FC = () => {
 
                 <PatientFields value={pets[petIndex] || {}} onChange={updatePet} />
 
-                <div className="flex flex-wrap items-center gap-3 border-t border-slate-100 pt-5">
+                <div className="sticky bottom-0 bg-white flex flex-wrap items-center gap-3 border-t border-slate-100 pt-4 pb-1">
                   <button type="button" onClick={() => setStep(step - 1)} className="inline-flex items-center gap-2 px-4 py-3 rounded-xl bg-slate-100 font-semibold text-slate-600 hover:bg-slate-200">
                     <ArrowLeft size={18} /> {step === 2 ? 'Editar tutor' : 'Mascota anterior'}
                   </button>

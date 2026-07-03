@@ -3,7 +3,7 @@ import { ImagePlus } from 'lucide-react';
 import { Paciente } from '../types';
 import Swal from 'sweetalert2';
 
-const inputClass = 'w-full p-3 rounded-xl border border-slate-200 bg-white font-normal outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-300';
+const inputClass = 'w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm font-normal outline-none focus:ring-2 focus:ring-teal-200 focus:border-teal-300';
 
 function initials(name?: string) {
   return (name || '?').split(' ').map(p => p[0]).join('').slice(0, 2).toUpperCase();
@@ -31,17 +31,17 @@ export function PatientFields({ value, onChange }: { value: Partial<Paciente>; o
   };
 
   return (
-    <div className="space-y-5">
-      <div className="flex gap-4 items-center">
+    <div className="space-y-3">
+      <div className="flex gap-3 items-center">
         {value.foto_base64
-          ? <img src={value.foto_base64} alt="Paciente" className="h-24 w-24 rounded-2xl object-cover border" />
-          : <div className="h-24 w-24 rounded-2xl bg-slate-100 grid place-items-center font-semibold text-slate-400">{initials(value.nombre)}</div>}
-        <label className="cursor-pointer inline-flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
-          <ImagePlus size={18} /> Agregar foto
+          ? <img src={value.foto_base64} alt="Paciente" className="h-16 w-16 rounded-xl object-cover border" />
+          : <div className="h-16 w-16 rounded-xl bg-slate-100 grid place-items-center font-semibold text-slate-400">{initials(value.nombre)}</div>}
+        <label className="cursor-pointer inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+          <ImagePlus size={16} /> Agregar foto
           <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={e => setPhoto(e.target.files?.[0])} />
         </label>
       </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
         <Field label="Nombre"><input value={value.nombre || ''} onChange={e => onChange({ nombre: e.target.value })} className={inputClass} placeholder="Nombre de la mascota" /></Field>
         <Field label="Especie"><input value={value.especie || ''} onChange={e => onChange({ especie: e.target.value })} className={inputClass} placeholder="Canino, Felino..." /></Field>
         <Field label="Raza"><input value={value.raza || ''} onChange={e => onChange({ raza: e.target.value })} className={inputClass} /></Field>
@@ -56,16 +56,18 @@ export function PatientFields({ value, onChange }: { value: Partial<Paciente>; o
         <Field label="Codigo paciente"><input value={value.microchip || ''} onChange={e => onChange({ microchip: e.target.value })} className={inputClass} /></Field>
         <Field label="Estado reproductivo"><input value={value.estado_reproductivo || ''} onChange={e => onChange({ estado_reproductivo: e.target.value })} className={inputClass} /></Field>
       </div>
-      <TextArea label="Alergias" value={value.alergias || ''} onChange={v => onChange({ alergias: v })} />
-      <TextArea label="Condiciones cronicas" value={value.condiciones_cronicas || ''} onChange={v => onChange({ condiciones_cronicas: v })} />
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <TextArea label="Alergias" value={value.alergias || ''} onChange={v => onChange({ alergias: v })} />
+        <TextArea label="Condiciones cronicas" value={value.condiciones_cronicas || ''} onChange={v => onChange({ condiciones_cronicas: v })} />
+      </div>
     </div>
   );
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return <label className="text-sm font-semibold text-indigo-900/70">{label}<div className="mt-2">{children}</div></label>;
+  return <label className="text-xs font-semibold text-indigo-900/70">{label}<div className="mt-1">{children}</div></label>;
 }
 
 function TextArea({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
-  return <label className="block text-sm font-semibold text-indigo-900/70">{label}<textarea value={value} onChange={e => onChange(e.target.value)} className="mt-2 w-full p-3 rounded-xl border border-slate-200 bg-white min-h-[82px] outline-none focus:ring-2 focus:ring-teal-200" /></label>;
+  return <label className="block text-xs font-semibold text-indigo-900/70">{label}<textarea value={value} onChange={e => onChange(e.target.value)} className="mt-1 w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm min-h-[56px] outline-none focus:ring-2 focus:ring-teal-200" /></label>;
 }
