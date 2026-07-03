@@ -624,21 +624,9 @@ function EventModal({ form, patient, editing, legacyConsulta, setForm, onClose, 
               <MedicationItemsEditor
                 value={Array.isArray(form.payload.medicamentos) ? form.payload.medicamentos : []}
                 onChange={value => updatePayload('medicamentos', value)}
+                cobroPendiente={!!form.payload.generar_cotizacion}
+                onCobroPendienteChange={v => updatePayload('generar_cotizacion', v)}
               />
-            )}
-            {form.tipo === 'formula' && (
-              <label className="md:col-span-2 flex items-start gap-3 rounded-2xl border border-indigo-100 bg-indigo-50/60 p-4 text-sm font-normal text-slate-700">
-                <input
-                  type="checkbox"
-                  checked={!!form.payload.generar_cotizacion}
-                  onChange={e => updatePayload('generar_cotizacion', e.target.checked)}
-                  className="mt-1 h-4 w-4"
-                />
-                <span>
-                  <span className="block font-medium text-slate-800">Preparar cobro pendiente en recepcion</span>
-                  <span className="text-xs text-slate-500">Los medicamentos seleccionados del inventario quedaran en una cotizacion para que caja los cobre al tutor.</span>
-                </span>
-              </label>
             )}
             {form.tipo !== 'consulta' && visibleFields.map(field => (
               <Field
@@ -665,7 +653,7 @@ function EventModal({ form, patient, editing, legacyConsulta, setForm, onClose, 
               showProximoControl={!legacyConsulta}
             />
           )}
-          {!hasFileField && (
+          {!hasFileField && form.tipo !== 'formula' && (
             <AttachmentUploader
               label="Adjuntos del expediente"
               helper="Agregue imagenes, resultados, PDF o documentos relacionados con este registro."
