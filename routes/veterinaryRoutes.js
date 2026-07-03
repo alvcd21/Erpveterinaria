@@ -434,7 +434,7 @@ router.post('/pacientes', authenticateToken, async (req, res) => {
             }
             return result.rows[0].id_paciente;
         });
-        res.status(201).json({ id_paciente: id });
+        res.status(201).json({ id_paciente: result });
     } catch (e) {
         if (e.statusCode) return res.status(e.statusCode).json({ error: e.message });
         handleDbError(res, e);
