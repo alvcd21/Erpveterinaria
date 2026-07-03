@@ -116,6 +116,12 @@ export function MedicationItemsEditor({ value = [], onChange, cobroPendiente, on
     setOpen(false);
   };
 
+  // Agrega una línea vacía y editable para un medicamento que no está en inventario.
+  const addEmptyManual = () => {
+    onChange([...itemsRef.current, { id: newId(), medicamento: '', cantidad: 1, tipoIsv: 'exento' }]);
+    setOpen(false);
+  };
+
   const selectPresentacion = (item: MedicationItem, idValue: string) => {
     const pres = (item.id_medicamento ? presCache[item.id_medicamento] : []) || [];
     const selected = pres.find(p => String(p.id_presentacion) === idValue);
@@ -205,6 +211,10 @@ export function MedicationItemsEditor({ value = [], onChange, cobroPendiente, on
           </div>
         )}
       </div>
+
+      <button type="button" onClick={addEmptyManual} className="mt-2 inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-600 hover:text-indigo-700">
+        <PencilLine size={13} /> Agregar medicamento manual (fuera de inventario)
+      </button>
 
       {/* Lista / carrito */}
       {items.length === 0 ? (

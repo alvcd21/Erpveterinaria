@@ -6,13 +6,14 @@ import { ConsultorioBusquedaItem, ConsultorioEvento, ConsultorioPacienteDetalle,
 import {
   ChevronLeft, ChevronRight, PawPrint,
   FileDown, Plus, Printer, RefreshCw, Search, Send,
-  Users, X, Pencil, Trash2,
+  Users, X, Pencil, Trash2, Receipt,
 } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { ClinicalHistoryExportModal, printClinicalEvent } from '../components/consultorio/ClinicalHistoryExportModal';
 import { AttachmentList, AttachmentUploader, type ClinicalAttachment } from '../components/consultorio/ClinicalAttachments';
 import { LaboratoryTestsEditor } from '../components/consultorio/LaboratoryTestsEditor';
 import { MedicationItemsEditor, type MedicationItem } from '../components/consultorio/MedicationItemsEditor';
+import { ServiceItemsEditor, type ServiceItem } from '../components/consultorio/ServiceItemsEditor';
 import { ProfessionalSelect, type ProfessionalValue } from '../components/consultorio/ProfessionalSelect';
 import { FieldDef, MODULES, fieldsFor, fmtDate, initials, moduleFor, nowLocal, patientSubtitle } from '../components/consultorio/consultorioConfig';
 
@@ -106,6 +107,34 @@ async function createMedicationQuoteFromPayload(patient: Paciente, payload: Reco
     detalles,
     observaciones: `Medicamentos indicados para ${patient.nombre}${eventId ? ` en registro clinico ${eventId}` : ''}. Pendiente de cobro en recepcion.`,
     clientMutationId: `rx-${patient.id_paciente}-${eventId || Date.now()}`,
+  } as any);
+  return result.codigo || result.codCotizacion || null;
+}
+
+async function createServiceQuoteFromPayload(patient: Paciente, payload: Record<string, any>, eventId?: number) {
+  const rows = (Array.isArray(payload.servicios) ? payload.servicios : []) as ServiceItem[];
+  const billable = rows.filter(row => row.id_servicio && Number(row.precio || 0) > 0);
+  if (!billable.length) return null;
+
+  const detalles: any[] = billable.map(row => ({
+    tipoProducto: 'SERVICIO',
+    id_servicio: row.id_servicio,
+    descripcionProducto: row.nombre,
+    cantidad: Number(row.cantidad || 1),
+    precioVenta: Number(row.precio || 0),
+    tipoIsv: row.tipoIsv || 'exento',
+  }));
+  const subtotal = detalles.reduce((sum, item) => sum + Number(item.precioVenta || 0) * Number(item.cantidad || 1), 0);
+  const isv = billable.reduce((sum, row) => sum + Number(row.precio || 0) * Number(row.cantidad || 1) * (TAX_RATES[row.tipoIsv || 'exento'] || 0), 0);
+  const result = await QuoteService.create({
+    identidadCliente: patient.id_tutor || (patient as any).tutorId,
+    tipoCompra: 'Contado',
+    total: subtotal + isv,
+    isv,
+    descuento: 0,
+    detalles,
+    observaciones: `Servicios de consulta para ${patient.nombre}${eventId ? ` en registro clinico ${eventId}` : ''}. Pendiente de cobro en recepcion.`,
+    clientMutationId: `svc-${patient.id_paciente}-${eventId || Date.now()}`,
   } as any);
   return result.codigo || result.codCotizacion || null;
 }
@@ -282,6 +311,8 @@ export default function Expediente() {
         const created = await ConsultorioService.createEvento(patient.id_paciente, data);
         if (modal.tipo === 'formula' && payload.generar_cotizacion) {
           quoteCode = await createMedicationQuoteFromPayload(patient, payload, created.id_evento);
+        } else if (modal.tipo === 'consulta' && payload.generar_cotizacion) {
+          quoteCode = await createServiceQuoteFromPayload(patient, payload, created.id_evento);
         }
       }
       let citaCreada = false;
@@ -322,9 +353,46 @@ export default function Expediente() {
     }
   };
 
+  const goToBilling = async () => {
+    if (!patient) return;
+    const clienteId = patient.id_tutor || (patient as any).tutorId;
+    if (!clienteId) { Swal.fire('Sin tutor', 'Este paciente no tiene un tutor asociado para facturar.', 'info'); return; }
+    try {
+      const hoy = new Date();
+      const hasta = hoy.toISOString().slice(0, 10);
+      const desdeD = new Date(hoy); desdeD.setDate(desdeD.getDate() - 180);
+      const desde = desdeD.toISOString().slice(0, 10);
+      const list = await QuoteService.list(desde, hasta, 'Pendiente');
+      const propias = (list || [])
+        .filter(c => String(c.identidadCliente || '') === String(clienteId))
+        .sort((a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime());
+      if (!propias.length) {
+        const r = await Swal.fire({
+          icon: 'info',
+          title: 'Sin cobros pendientes',
+          text: 'No hay cotizaciones pendientes para este cliente. Marca "Preparar cobro pendiente en recepción" al registrar la consulta o la receta.',
+          showCancelButton: true, confirmButtonText: 'Ir a POS', cancelButtonText: 'Cerrar',
+        });
+        if (r.isConfirmed) navigate('/pos');
+        return;
+      }
+      if (propias.length === 1) { navigate(`/pos?cotizacion=${propias[0].codigo}`); return; }
+      const { value } = await Swal.fire({
+        title: 'Cotizaciones pendientes',
+        input: 'select',
+        inputOptions: propias.reduce((acc, c) => { acc[c.codigo] = `${c.codigo} — ${money(c.total)}`; return acc; }, {} as Record<string, string>),
+        inputPlaceholder: 'Seleccione la cotización a cobrar',
+        showCancelButton: true, confirmButtonText: 'Cobrar en POS',
+      });
+      if (value) navigate(`/pos?cotizacion=${value}`);
+    } catch (e: any) {
+      Swal.fire('Error', e.message || 'No se pudieron cargar las cotizaciones', 'error');
+    }
+  };
+
   return (
     <div className="space-y-5">
-      <Header patient={patient} onBack={() => { setDetail(null); setItems([]); navigate('/consultorio', { replace: true }); searchConsultorio(''); }} />
+      <Header patient={patient} onBack={() => { setDetail(null); setItems([]); navigate('/consultorio', { replace: true }); searchConsultorio(''); }} onBill={goToBilling} />
 
       {!patient ? (
         <SearchPanel
@@ -397,10 +465,13 @@ export default function Expediente() {
   );
 }
 
-function Header({ patient, onBack }: { patient?: Paciente; onBack: () => void }) {
+function Header({ patient, onBack, onBill }: { patient?: Paciente; onBack: () => void; onBill: () => void }) {
   if (!patient) return null;
   return (
-    <div className="flex justify-end">
+    <div className="flex flex-wrap justify-end gap-2">
+      <button onClick={onBill} className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700 shadow-sm">
+        <Receipt size={16} /> Facturar / Cobrar
+      </button>
       <button onClick={onBack} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-600 bg-white">Volver al buscador</button>
     </div>
   );
@@ -860,6 +931,12 @@ function ConsultaFields({ fieldByKey, payload, onChange, patientId, tipo, attach
         {renderField('frecuencia_respiratoria')}
         {renderField('condicion_corporal')}
       </div>
+      <ServiceItemsEditor
+        value={Array.isArray(payload.servicios) ? payload.servicios : []}
+        onChange={v => onChange('servicios', v)}
+        cobroPendiente={!!payload.generar_cotizacion}
+        onCobroPendienteChange={v => onChange('generar_cotizacion', v)}
+      />
       <div className="grid grid-cols-1 gap-5">
         {renderField('subjetivo')}
         {renderField('objetivo')}
