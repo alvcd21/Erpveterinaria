@@ -58,6 +58,7 @@ function registerRoutes(router) {
                 )
                 SELECT
                     m.codigo,
+                    m.codigo_ean13       AS "codigoBarras",
                     m.nombre_generico    AS "nombreGenerico",
                     m.nombre_comercial   AS "nombreComercial",
                     m.concentracion,
@@ -263,6 +264,7 @@ function registerRoutes(router) {
                     m.activo,
                     m.fecha_alta,
                     m.tenant_id,
+                    m.tipo_producto,
                     ct.nombre                           AS "categoriaNombre",
                     ff.nombre                           AS "formaNombre",
                     ff.unidad_base                      AS "unidadBase",
