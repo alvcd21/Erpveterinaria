@@ -23,7 +23,7 @@ SET cai               = m.cai,
     cai_rango_inicial = m.rangoinicial,
     cai_rango_final   = m.rangofinal,
     cai_fecha_limite  = m.fechalimite
-FROM LATERAL (
+FROM (
     SELECT cf.cai, cf.rangoinicial, cf.rangofinal, cf.fechalimite
     FROM cai_facturacion cf
     WHERE cf.tenant_id = v.tenant_id
